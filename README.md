@@ -154,29 +154,6 @@ tar -xzf .local-runtime/cloudflared.tgz -C .local-runtime
 
 运行日志位于 `.local-runtime/service.log`，临时地址位于 `.local-runtime/public-url.txt`。整个 `.local-runtime/` 目录均不提交到 Git，也不进入 Docker 构建上下文。脚本不配置开机自启或防休眠；电脑需保持开机联网且不休眠。当前脚本面向 macOS/Linux，不支持 Windows 原生运行。
 
-### 固定域名隧道
-
-支持 Cloudflare 控制台管理的固定隧道。先完成域名接入和 Tunnel 路由配置，将隧道令牌保存到 `.local-runtime/tunnel-token.txt`（仅保存令牌本身，权限设为 `600`），然后在 `.local-runtime/.env.local` 中增加：
-
-```env
-CLOUDFLARE_TUNNEL_MODE=named
-APP_PUBLIC_URL=https://linlunji.cn/misty/
-APP_BASE_PATH=/misty/
-```
-
-隧道路由的源服务填写 `http://127.0.0.1:5200`，保留 `/misty` 请求路径；应用会处理此前缀并将 Cookie 限定在 `/misty/`。同一域名下的其他网站路径需要单独保留原有路由，不能直接覆盖整个域名的现有服务。
-
-部署路径变化后需构建一次，再停止并启动本地服务：
-
-```bash
-APP_BASE_PATH=/misty/ pnpm build
-./start-local.sh stop
-# 等待本地服务停止后启动
-./start-local.sh start
-```
-
-普通重启不会重新生成域名或隧道。固定隧道同样受 Cloudflare 视频分发政策约束。恢复临时隧道时将 `CLOUDFLARE_TUNNEL_MODE` 改为 `quick`，并移除 `APP_PUBLIC_URL`；可以保留当前子路径，若改回根路径则需同步重新构建。
-
 ### 开发模式
 
 需要 Node.js 22 和 pnpm 10：
