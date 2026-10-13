@@ -110,6 +110,7 @@ async function match(queryText = '') {
     if (result.selected) await setSource(result.selected);
     else {
       recovery.value = 'choose';
+      recoveryHint.value = result.candidates.length ? '' : '暂未找到这部作品的弹幕';
       message.value = result.candidates.length ? '选一下正在看的作品，我们会记住' : '没有找到，试试更短的片名';
     }
   } catch (error) {

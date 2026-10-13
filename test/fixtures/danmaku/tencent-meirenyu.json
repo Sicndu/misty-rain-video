@@ -1,0 +1,263 @@
+{
+  "search": {
+    "ret": 0,
+    "data": {
+      "normalList": {
+        "itemList": [
+          {
+            "doc": {
+              "id": "mzc00200xqdobf5",
+              "dataType": 2
+            },
+            "videoInfo": {
+              "title": "美人余",
+              "year": 2026,
+              "typeName": "电视剧",
+              "episodeSites": [
+                {
+                  "enName": "qq",
+                  "episodeInfoList": [
+                    {
+                      "id": "f4102i5jti1"
+                    },
+                    {
+                      "id": "s4102mvt2q0"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "areaBoxList": []
+    }
+  },
+  "episodes": {
+    "ret": 0,
+    "data": {
+      "module_list_datas": [
+        {
+          "module_datas": [
+            {
+              "module_params": {
+                "tabs": ""
+              },
+              "item_data_lists": {
+                "item_datas": [
+                  {
+                    "item_params": {
+                      "title": "1",
+                      "play_title": "美人余 第01集",
+                      "vid": "f4102i5jti1",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "2",
+                      "play_title": "美人余 第02集",
+                      "vid": "s4102mvt2q0",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "3",
+                      "play_title": "美人余 第03集",
+                      "vid": "k4102osmeu8",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "4",
+                      "play_title": "美人余 第04集",
+                      "vid": "x4102l5swtm",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "5",
+                      "play_title": "美人余 05集预告",
+                      "vid": "q4102etwohj",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "1"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "6",
+                      "play_title": "美人余 06集预告",
+                      "vid": "a41026wrexi",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "1"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "7",
+                      "play_title": "美人余 07集预告",
+                      "vid": "y4102q6wzx4",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "1"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "8",
+                      "play_title": "美人余 08集预告",
+                      "vid": "n41029ooc37",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "1"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "9",
+                      "play_title": "美人余 09集预告",
+                      "vid": "f4102ottpka",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "1"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "5",
+                      "play_title": "美人余 第05集",
+                      "vid": "f410242s6em",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "6",
+                      "play_title": "美人余 第06集",
+                      "vid": "q41027ov02x",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "7",
+                      "play_title": "美人余 第07集",
+                      "vid": "t41025t4z0c",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "8",
+                      "play_title": "美人余 第08集",
+                      "vid": "b4102lkcqtk",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "9",
+                      "play_title": "美人余 第09集",
+                      "vid": "a410253kbt7",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "10",
+                      "play_title": "美人余 第10集",
+                      "vid": "h41022rf96u",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "10",
+                      "play_title": "美人余 10集预告",
+                      "vid": "c4102h2q0yi",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "1"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "11",
+                      "play_title": "美人余 11集预告",
+                      "vid": "y4102g7f40o",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "1"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "12",
+                      "play_title": "美人余 12集预告",
+                      "vid": "h41029xz0an",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "1"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "采访1",
+                      "play_title": "采访1",
+                      "vid": "n4102a1cdjp",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "彩蛋1",
+                      "play_title": "彩蛋1",
+                      "vid": "x3343w8frlh",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "彩蛋2",
+                      "play_title": "彩蛋2",
+                      "vid": "c3344j443fu",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "彩蛋3",
+                      "play_title": "彩蛋3",
+                      "vid": "h3344oersfd",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  },
+                  {
+                    "item_params": {
+                      "title": "彩蛋4",
+                      "play_title": "彩蛋4",
+                      "vid": "r3344sh9zwt",
+                      "cid": "mzc00200xqdobf5",
+                      "is_trailer": "0"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

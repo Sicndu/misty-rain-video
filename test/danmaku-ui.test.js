@@ -92,6 +92,14 @@ test('turning off cancels requests and ignores a late match response', async () 
     assert.equal(view.calls.length, 1); assert.equal(document.querySelector('.danmaku-overlay').childElementCount, 0);
   } finally { view.app.unmount(); }
 });
+test('目录没有作品时明确提示未找到，而不是暗示确认片名后一定有弹幕', async () => {
+  const view = mount(() => ({ selected: null, candidates: [], status: 'missing' }));
+  try {
+    button('弹幕关').click(); await flush();
+    assert.match(document.querySelector('[role="status"]').textContent, /暂未找到这部作品的弹幕/);
+    assert.equal(view.calls.filter(call => call.url.includes('/segment')).length, 0);
+  } finally { view.app.unmount(); }
+});
 test('seeking requests the actual segment and a failed response remains a danmaku-only notice', async () => {
   const view = mount(url => {
     if (url.includes('index=2')) throw new Error('弹幕服务离线');

@@ -10,7 +10,7 @@ const array = value => value == null ? [] : Array.isArray(value) ? value : [valu
 
 // Fixed upstreams only. User input is never fetched as a URL; redirects are rejected.
 export async function upstream(url, options = {}) {
-  const allowed = new Set(['api.so.360kan.com', 'api.web.360kan.com', 'dm.video.qq.com', 'cmts.iqiyi.com', 'pcw-api.iq.com', 'acs.youku.com', 'log.mmstat.com']);
+  const allowed = new Set(['api.so.360kan.com', 'api.web.360kan.com', 'pbaccess.video.qq.com', 'dm.video.qq.com', 'cmts.iqiyi.com', 'pcw-api.iq.com', 'acs.youku.com', 'log.mmstat.com']);
   const parsed = new URL(url);
   if (parsed.protocol !== 'https:' || !allowed.has(parsed.hostname) || parsed.port || parsed.username || parsed.password) throw fail('弹幕数据地址无效');
   const response = await fetch(parsed, {

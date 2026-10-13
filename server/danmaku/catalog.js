@@ -1,4 +1,5 @@
 import { parseVideoUrl, platforms, upstream } from './providers.js';
+import { TencentCatalog } from './tencentCatalog.js';
 
 const categoryIds = { movie: '1', tv: '2', variety: '3', anime: '4' };
 const categoryNames = { '1': '电影', '2': '电视剧', '3': '综艺', '4': '动漫' };
@@ -26,12 +27,14 @@ const error = message => Object.assign(new Error(message), { statusCode: 502, co
 export const missingEpisode = (message = '本集暂未收录弹幕，可稍后再试或查看作品是否选对') =>
   Object.assign(new Error(message), { statusCode: 404, code: 'DANMAKU_EPISODE_NOT_FOUND' });
 export function validateWorkId(id) {
+  const direct = String(id).match(/^qq:2:([A-Za-z0-9]{15})$/);
+  if (direct) return { category: '2', id: direct[1], provider: 'qq' };
   const match = String(id).match(/^([1-4]):([A-Za-z0-9]{5,40})$/);
   if (!match) throw Object.assign(new Error('作品编号无效'), { statusCode: 400 });
   return { category: match[1], id: match[2] };
 }
 export class DanmakuCatalog {
-  constructor(request = upstream) { this.request = request; this.cache = new Map(); this.pending = new Map(); }
+  constructor(request = upstream) { this.request = request; this.tencent = new TencentCatalog(request); this.cache = new Map(); this.pending = new Map(); }
   async cached(key, loader) {
     const old = this.cache.get(key);
     if (old && Date.now() - old.time < 10 * 60_000) return old.value;
@@ -48,19 +51,32 @@ export class DanmakuCatalog {
     const keyword = text(query);
     if (!keyword || keyword.length > 100) throw Object.assign(new Error('请输入有效片名'), { statusCode: 400 });
     return this.cached(`search:${keyword}`, async () => {
-      const data = (await this.request(`https://api.so.360kan.com/index?${new URLSearchParams({ force_v: '1', kw: keyword, from: '', pageno: '1', v_ap: '1', tab: 'all' })}`)).json();
-      if (data.code !== 0 || !data.data) throw error('作品搜索暂不可用，可以粘贴平台剧集链接');
-      const rows = data.data.longData?.rows || [];
-      return rows.filter(row => /^[1-4]$/.test(row.cat_id) && /^[A-Za-z0-9]{5,40}$/.test(row.en_id)).slice(0, 15).map(row => ({
-        id: `${row.cat_id}:${row.en_id}`, title: text(row.titleTxt || row.title), year: String(row.year || ''),
-        category: String(row.cat_id), categoryLabel: categoryNames[row.cat_id],
-        platforms: Object.keys(row.playlinks || {}).filter(key => Object.hasOwn(platforms, key))
-      })).filter(row => row.platforms.length);
+      let primaryError, primaryResults = [];
+      try {
+        const data = (await this.request(`https://api.so.360kan.com/index?${new URLSearchParams({ force_v: '1', kw: keyword, from: '', pageno: '1', v_ap: '1', tab: 'all' })}`)).json();
+        if (data.code !== 0 || !data.data) throw error('作品搜索暂不可用，可以粘贴平台剧集链接');
+        const rows = data.data.longData?.rows || [];
+        primaryResults = rows.filter(row => /^[1-4]$/.test(row.cat_id) && /^[A-Za-z0-9]{5,40}$/.test(row.en_id)).slice(0, 15).map(row => ({
+          id: `${row.cat_id}:${row.en_id}`, title: text(row.titleTxt || row.title), year: String(row.year || ''),
+          category: String(row.cat_id), categoryLabel: categoryNames[row.cat_id],
+          platforms: Object.keys(row.playlinks || {}).filter(key => Object.hasOwn(platforms, key))
+        })).filter(row => row.platforms.length);
+        if (primaryResults.some(work => normalizeTitle(work.title) === normalizeTitle(keyword))) return primaryResults;
+      } catch (failure) { primaryError = failure; }
+      let secondary;
+      try { secondary = await this.tencent.search(keyword); }
+      catch {
+        if (primaryResults.length) return primaryResults;
+        throw error('备用作品目录暂不可用，请稍后重试');
+      }
+      if (!secondary.length && primaryError) throw error('作品目录连接失败，请稍后重试');
+      return [...primaryResults, ...secondary];
     });
   }
   async details(workId) {
-    const { category, id } = validateWorkId(workId);
+    const { category, id, provider } = validateWorkId(workId);
     return this.cached(`detail:${workId}`, async () => {
+      if (provider === 'qq') return this.tencent.details(workId, id);
       const result = (await this.request(`https://api.web.360kan.com/v1/detail?${new URLSearchParams({ cat: category, id })}`)).json();
       const data = result.data;
       if (!data?.title) throw error('暂时无法读取作品集数');
