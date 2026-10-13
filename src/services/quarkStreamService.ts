@@ -30,6 +30,7 @@ export interface PlaybackSource {
   isHls: boolean;
   delivery?: 'direct' | 'proxy';
   url: string;
+  proxyUrl?: string;
 }
 
 export interface PlaybackAudioTrack {
@@ -151,13 +152,17 @@ export class QuarkStreamService {
     });
   }
 
-  static prepareEpisode(sessionId: string, episodeFid: string): Promise<PreparedPlayback> {
+  static prepareEpisode(sessionId: string, episodeFid: string, capabilities: { nativeHls: boolean } = { nativeHls: false }): Promise<PreparedPlayback> {
     return request<PreparedPlayback>(
       `/api/player/sessions/${encodeURIComponent(sessionId)}/episodes/${encodeURIComponent(episodeFid)}/prepare`,
-      { method: 'POST' }
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(capabilities) }
     ).then(playback => ({
       ...playback,
-      sources: playback.sources.map(source => ({ ...source, url: withAppBase(source.url) })),
+      sources: playback.sources.map(source => ({
+        ...source,
+        url: withAppBase(source.url),
+        ...(source.proxyUrl ? { proxyUrl: withAppBase(source.proxyUrl) } : {})
+      })),
       subtitles: playback.subtitles.map(subtitle => ({ ...subtitle, url: withAppBase(subtitle.url) }))
     }));
   }

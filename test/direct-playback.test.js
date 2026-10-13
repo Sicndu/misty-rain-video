@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { Readable } from 'node:stream';
 import { handleApiRequest } from '../server/api.js';
 import { QuarkGateway } from '../server/quarkGateway.js';
 import { TvPlaybackClient } from '../server/tvPlaybackClient.js';
@@ -30,9 +31,10 @@ const responseSink = () => ({
 });
 
 const admin = { username: 'admin', role: 'admin', folder: 'admin' };
-const api = async ({ gateway, url, method = 'GET', user = admin, tvPlaybackClient }) => {
+const api = async ({ gateway, url, method = 'GET', user = admin, tvPlaybackClient, body }) => {
   const response = responseSink();
-  await handleApiRequest({ method, url, headers: { host: 'localhost' } }, response, {
+  const request = Object.assign(Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]), { method, url, headers: { host: 'localhost' } });
+  await handleApiRequest(request, response, {
     authService: { authenticate: () => user, assertSameOrigin() {} },
     userContext: () => ({}), quarkGateway: gateway, tvPlaybackClient
   });
@@ -91,7 +93,7 @@ test('较旧的直连地址重新解析后再签发', async () => {
   assert.equal(await gateway.getDirectStreamUrl('session', source.id), 'https://media.example.test/fresh.mp4');
 });
 
-test('缺少 CORS 的 TV HLS 不会被标记为直连，并单独提供原文件选项', async () => {
+test('未声明原生 HLS 的设备保留中转，并单独提供原文件选项', async () => {
   const gateway = makeGateway({ format: 'm3u8' });
   const result = await gateway.prepareEpisode('session', 'episode');
   assert.equal(result.sources[0].isHls, true);
@@ -100,6 +102,83 @@ test('缺少 CORS 的 TV HLS 不会被标记为直连，并单独提供原文件
   assert.equal(original.delivery, 'direct');
   assert.equal(original.mimeType, 'video/x-matroska');
   assert.equal(await gateway.getDirectStreamUrl('session', result.sources[0].id), null);
+});
+
+test('原生 HLS 能力经 API 传递，清单入口只返回 302，服务器不下载分片', async () => {
+  const gateway = makeGateway({ format: 'm3u8' });
+  gateway.tvPlaybackClient.getDownload = () => { throw new Error('native HLS should not request original'); };
+  const prepared = await api({ gateway, method: 'POST', url: '/api/player/sessions/session/episodes/episode/prepare', body: { nativeHls: true } });
+  assert.equal(prepared.statusCode, 200, prepared.body);
+  const sources = JSON.parse(prepared.body).data.sources;
+  assert.equal(sources.length, 1);
+  assert.equal(sources[0].isHls, true);
+  assert.equal(sources[0].delivery, 'direct');
+  assert.equal(sources[0].proxyUrl, `${sources[0].url}?delivery=proxy`);
+  gateway.fetchMedia = () => { throw new Error('direct HLS must not fetch media'); };
+  for (const method of ['GET', 'HEAD']) {
+    const response = await api({ gateway, method, url: sources[0].url });
+    assert.equal(response.statusCode, 302);
+    assert.equal(response.headers.get('location'), 'https://media.example.test/video.m3u8');
+    assert.equal(response.body, '');
+  }
+});
+
+test('旧客户端和非布尔能力值不能意外启用 HLS 直连', async () => {
+  for (const body of [undefined, { nativeHls: 'true' }, { nativeHls: false }]) {
+    const gateway = makeGateway({ format: 'm3u8' });
+    const response = await api({ gateway, method: 'POST', url: '/api/player/sessions/session/episodes/episode/prepare', body });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(JSON.parse(response.body).data.sources[0].delivery, 'proxy');
+  }
+});
+
+test('用户明确切换兼容播放后才改写 HLS 清单并中转，仍校验会话所属用户', async () => {
+  const gateway = makeGateway({ format: 'm3u8' });
+  const result = await gateway.prepareEpisode('session', 'episode', admin, undefined, { nativeHls: true });
+  gateway.fetchMedia = async () => new Response('#EXTM3U\n#EXTINF:4,\nsegment.ts\n', { headers: { 'content-type': 'application/vnd.apple.mpegurl' } });
+  const response = await api({ gateway, url: result.sources[0].proxyUrl });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers.has('location'), false);
+  assert.match(response.body, /\/api\/player\/sessions\/session\/assets\//);
+  const denied = await api({ gateway, url: result.sources[0].proxyUrl, user: { username: 'other', folder: 'other', role: 'user' } });
+  assert.equal(denied.statusCode, 403);
+});
+
+test('HLS 地址刷新后保留客户端的原生直连能力', async () => {
+  const gateway = makeGateway({ format: 'm3u8' });
+  const result = await gateway.prepareEpisode('session', 'episode', admin, undefined, { nativeHls: true });
+  const { source } = gateway.getStreamSource('session', result.sources[0].id);
+  source.resolvedAt = Date.now() - 11 * 60 * 1000;
+  gateway.tvPlaybackClient.getStreaming = async () => ({ video_list: [{ resolution: '4k', video_info: { url: 'https://media.example.test/fresh.m3u8', format: 'm3u8' } }] });
+  assert.equal(await gateway.getDirectStreamUrl('session', source.id), 'https://media.example.test/fresh.m3u8');
+  assert.equal(source.delivery, 'direct');
+  assert.equal(source.nativeHls, true);
+});
+
+test('直连源刷新失败回退网页源时不静默中转，重复请求也不能绕过', async () => {
+  const gateway = makeGateway();
+  const result = await gateway.prepareEpisode('session', 'episode');
+  const { source } = gateway.getStreamSource('session', result.sources[0].id);
+  source.resolvedAt = Date.now() - 11 * 60 * 1000;
+  gateway.tvPlaybackClient.getStreaming = async () => { throw new Error('TV unavailable'); };
+  const originalFetch = globalThis.fetch;
+  let mediaFetches = 0;
+  globalThis.fetch = async () => Response.json({ code: 0, data: { video_list: [{ resolution: '4k', video_info: { url: 'https://media.example.test/web.m3u8', format: 'm3u8' } }] } });
+  gateway.fetchMedia = async () => {
+    mediaFetches += 1;
+    return new Response('#EXTM3U\nsegment.ts\n', { headers: { 'content-type': 'application/vnd.apple.mpegurl' } });
+  };
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await api({ gateway, url: result.sources[0].url });
+      assert.equal(response.statusCode, 409);
+      assert.equal(JSON.parse(response.body).code, 'DIRECT_SOURCE_UNAVAILABLE');
+    }
+    assert.equal(mediaFetches, 0);
+    const compatible = await api({ gateway, url: `${result.sources[0].url}?delivery=proxy` });
+    assert.equal(compatible.statusCode, 200);
+    assert.equal(mediaFetches, 1);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test('没有原文件下载权限时仍保留 HLS 播放源', async () => {

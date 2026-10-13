@@ -21,6 +21,26 @@ test('原生直连移除 crossorigin，切回代理/HLS 恢复匿名 CORS', () =
   assert.equal(video.crossOrigin, 'anonymous');
 });
 
+test('Safari 原生 HLS 直连不启用 CORS，非原生客户端仍保留 CORS', () => {
+  const video = new JSDOM('<video crossorigin="anonymous"></video>').window.document.querySelector('video');
+  const native = { ...hls4k, delivery: 'direct' };
+  video.canPlayType = () => 'maybe';
+  configureVideoRequest(video, native);
+  assert.equal(video.hasAttribute('crossorigin'), false);
+  video.canPlayType = () => '';
+  configureVideoRequest(video, native);
+  assert.equal(video.crossOrigin, 'anonymous');
+});
+
+test('原生 HLS 设备优先转码直连，旧的杜比视界偏好不会锁定 MKV', () => {
+  const native4k = { ...hls4k, delivery: 'direct' };
+  const nativeSuper = { ...compatible, delivery: 'direct' };
+  const all = [direct, native4k, nativeSuper];
+  assert.equal(selectInitialPlaybackSource(all, { mobile: true, preferNativeHls: true, preferred: 'dolby_vision', preferredDelivery: 'direct' }), nativeSuper);
+  assert.equal(selectInitialPlaybackSource(all, { preferNativeHls: true, preferred: '4k', preferredDelivery: 'direct' }), native4k);
+  assert.equal(selectInitialPlaybackSource([...all, compatible], { preferNativeHls: true, preferred: 'super', preferredDelivery: 'proxy' }), compatible);
+});
+
 test('混合直连和 HLS 来源时，旧的超高清偏好不会继续锁定中转', () => {
   for (const mobile of [false, true]) {
     assert.equal(selectInitialPlaybackSource([direct, hls4k, compatible], { preferred: 'super', mobile }), direct);

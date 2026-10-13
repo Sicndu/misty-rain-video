@@ -913,7 +913,7 @@ export class QuarkGateway {
     };
   }
 
-  async prepareEpisode(sessionId, episodeFid, user = SYSTEM_USER, playbackCache = this.playbackCache) {
+  async prepareEpisode(sessionId, episodeFid, user = SYSTEM_USER, playbackCache = this.playbackCache, capabilities = {}) {
     const principal = normalizeUser(user);
     const session = this.#getSession(sessionId, principal);
     const episode = session.episodes.find(item => item.fid === episodeFid);
@@ -959,7 +959,7 @@ export class QuarkGateway {
       playData = await this.#loadPlayData(savedFid);
     }
 
-    const normalized = await this.#normalizePlayData(playData, savedFid, cookie);
+    const normalized = await this.#normalizePlayData(playData, savedFid, cookie, capabilities?.nativeHls === true);
     if (!normalized.sources.length) {
       throw new QuarkApiError('播放服务没有返回当前文件可用的播放地址', {
         code: 'QUARK_PLAY_SOURCE_EMPTY',
@@ -973,9 +973,11 @@ export class QuarkGateway {
 
     const sources = normalized.sources.map(source => {
       const sourceId = createOpaqueId();
+      const streamUrl = `/api/player/sessions/${encodeURIComponent(sessionId)}/streams/${encodeURIComponent(sourceId)}`;
       session.sources.set(sourceId, {
         ...source,
         id: sourceId,
+        directOnly: source.delivery === 'direct',
         episodeFid: episode.fid,
         savedFid,
         resolvedAt: Date.now(),
@@ -993,7 +995,8 @@ export class QuarkGateway {
         mimeType: source.mimeType,
         isHls: source.isHls,
         delivery: source.delivery,
-        url: `/api/player/sessions/${encodeURIComponent(sessionId)}/streams/${encodeURIComponent(sourceId)}`
+        url: streamUrl,
+        ...(source.isHls && source.delivery === 'direct' ? { proxyUrl: `${streamUrl}?delivery=proxy` } : {})
       };
     });
 
@@ -1032,7 +1035,7 @@ export class QuarkGateway {
     const { source } = this.getStreamSource(sessionId, sourceId, user);
     const cookie = this.#requireCookie();
     const playData = await this.#loadPlayData(source.savedFid);
-    const normalized = await this.#normalizePlayData(playData, source.savedFid, cookie);
+    const normalized = await this.#normalizePlayData(playData, source.savedFid, cookie, source.nativeHls === true);
     const replacement = normalized.sources.find(item => item.resolution === source.resolution)
       || normalized.sources.find(item => item.label === source.label)
       || normalized.sources[0];
@@ -1043,11 +1046,19 @@ export class QuarkGateway {
 
   async getDirectStreamUrl(sessionId, sourceId, user = SYSTEM_USER) {
     let { source } = this.getStreamSource(sessionId, sourceId, user);
-    if (source.delivery !== 'direct') return null;
+    const unavailable = () => new QuarkApiError('直连暂不可用，请重新连接或选择兼容画质', {
+      code: 'DIRECT_SOURCE_UNAVAILABLE', statusCode: 409
+    });
+    if (source.delivery !== 'direct') {
+      if (source.directOnly) throw unavailable();
+      return null;
+    }
     if (Date.now() - source.resolvedAt >= 10 * 60 * 1000) {
       source = await this.refreshStreamSource(sessionId, sourceId, user);
     }
-    return source.delivery === 'direct' ? this.#assertRemoteUrl(source.upstreamUrl) : null;
+    // 客户端仍显示直连时，不能因刷新回退而悄悄开始服务器中转。
+    if (source.delivery !== 'direct') throw unavailable();
+    return this.#assertRemoteUrl(source.upstreamUrl);
   }
 
   registerAsset(session, upstreamUrl, requestProfile = 'web', requestCookie = '') {
@@ -1861,7 +1872,7 @@ export class QuarkGateway {
     return webData;
   }
 
-  async #normalizePlayData(data, savedFid, cookie) {
+  async #normalizePlayData(data, savedFid, cookie, nativeHls = false) {
     const rawSources = playbackVideoItems(data);
     const seen = new Set();
     const sources = [];
@@ -1901,13 +1912,14 @@ export class QuarkGateway {
         bitrate: Number(info.bit_rate || info.bitrate || item.bit_rate || item.bitrate) || 0,
         mimeType: isHls ? 'application/vnd.apple.mpegurl' : (item.mime_type || (/mkv|matroska/i.test(formatHints) ? 'video/x-matroska' : 'video/mp4')),
         isHls,
-        delivery: this.directPlaybackEnabled && data?.__playbackProfile === 'tv' && !isHls ? 'direct' : 'proxy'
+        nativeHls,
+        delivery: this.directPlaybackEnabled && data?.__playbackProfile === 'tv' && (!isHls || nativeHls) ? 'direct' : 'proxy'
       });
     }
 
-    // TV 的部分 HLS 分片没有 CORS，不能盲目 302；另提供原文件直连，
-    // 由用户按设备解码能力选择，默认仍使用兼容画质。
-    if (this.directPlaybackEnabled && data?.__playbackProfile === 'tv' && sources.length && sources.every(source => source.isHls)) {
+    // 依赖 hls.js 的设备仍需要 CORS；原生 HLS 设备直接播放转码流，
+    // 无需额外获取格式兼容性较差的原文件。
+    if (!nativeHls && this.directPlaybackEnabled && data?.__playbackProfile === 'tv' && sources.length && sources.every(source => source.isHls)) {
       try {
         const download = await this.tvPlaybackClient?.getDownload?.(savedFid);
         if (download?.download_url) {

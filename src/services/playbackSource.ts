@@ -1,9 +1,9 @@
 import type { PlaybackSource } from './quarkStreamService';
 
 export const configureVideoRequest = (video: HTMLVideoElement, source: PlaybackSource) => {
-  // 原生媒体播放不要求 CORS；TV 的部分 MKV 节点没有 ACAO。
-  // hls.js 读取清单/分片仍需 CORS，不能按相同方式绕过。
-  if (source.delivery === 'direct' && !source.isHls) video.removeAttribute('crossorigin');
+  // 原生媒体（含 Safari HLS）不要求 CORS；hls.js 读取分片仍需 CORS。
+  const nativeMedia = !source.isHls || Boolean(video.canPlayType('application/vnd.apple.mpegurl'));
+  if (source.delivery === 'direct' && nativeMedia) video.removeAttribute('crossorigin');
   else video.crossOrigin = 'anonymous';
 };
 
@@ -15,14 +15,17 @@ export const playbackSourceLabel = (source: PlaybackSource) => {
 
 export const selectInitialPlaybackSource = (
   available: PlaybackSource[],
-  { preferred = '', preferredDelivery = '', mobile = false, respectPreference = true } = {}
+  { preferred = '', preferredDelivery = '', mobile = false, respectPreference = true, preferNativeHls = false } = {}
 ) => {
+  const nativeHls = preferNativeHls ? available.filter(source => source.delivery === 'direct' && source.isHls) : [];
+  // 原生 HLS 设备优先转码流，不能被历史上的杜比 MKV 选择锁定。
+  const preferredPool = nativeHls.length && preferredDelivery !== 'proxy' ? nativeHls : available;
   // 新版明确手选的画质和传输方式优先；旧版只保存分辨率，不能因此一直中转。
   if (respectPreference && preferredDelivery) {
-    const explicit = available.find(source => source.resolution === preferred && source.delivery === preferredDelivery);
+    const explicit = preferredPool.find(source => source.resolution === preferred && source.delivery === preferredDelivery);
     if (explicit) return explicit;
   }
-  const direct = available.filter(source => source.delivery === 'direct' && source.resolution !== 'original');
+  const direct = nativeHls.length ? nativeHls : available.filter(source => source.delivery === 'direct' && source.resolution !== 'original');
   const pool = direct.length ? direct : available;
   const efficient = pool.filter(source => source.width || source.height
     ? source.width <= 1920 && source.height <= 1080

@@ -97,6 +97,8 @@ const loadPlaybackAutomation = (): PlaybackAutomationSettings => {
 const playbackAutomation = ref<PlaybackAutomationSettings>(loadPlaybackAutomation());
 const isIOSPlaybackDevice = typeof navigator !== 'undefined'
   && /iPhone|iPad|iPod/i.test(navigator.userAgent);
+const nativeHlsSupported = typeof document !== 'undefined'
+  && Boolean(document.createElement('video').canPlayType('application/vnd.apple.mpegurl'));
 const storedSoundEffect = localStorage.getItem('misty_rain_sound_effect');
 const soundEffectMode = ref<SoundEffectMode>(
   !isIOSPlaybackDevice && ['original', 'dialogue', 'cinema', 'night'].includes(storedSoundEffect || '')
@@ -207,7 +209,11 @@ const sources = computed(() => playback.value?.sources || []);
 const selectedSource = computed(() => sources.value.find(source => source.id === selectedSourceId.value) || sources.value[0]);
 const sourceAllowsSoundEffects = computed(() => soundEffectAvailable.value && selectedSource.value?.delivery !== 'direct');
 const compatibleSource = computed(() => selectInitialPlaybackSource(
-  sources.value.filter(source => source.delivery === 'proxy' && source.resolution !== 'original'),
+  sources.value.flatMap(source => {
+    if (source.delivery === 'proxy' && source.resolution !== 'original') return [source];
+    if (source.isHls && source.proxyUrl) return [{ ...source, delivery: 'proxy' as const, url: source.proxyUrl }];
+    return [];
+  }),
   { mobile: true, respectPreference: false }
 ));
 const audioTracks = computed(() => detectedAudioTracks.value.length
@@ -569,6 +575,7 @@ const attachSource = async (
   // Safari/iOS 可直接交给原生视频管线；仅在原生不支持 HLS 的浏览器
   // 懒加载 hls.js，避免 WebClip 不必要地下载并初始化解码器。
   if (source.isHls && !video.canPlayType('application/vnd.apple.mpegurl')) {
+    if (source.delivery === 'direct') throw new Error('当前浏览器无法原生播放此视频，请使用兼容画质');
     const { default: HlsRuntime } = await import('hls.js');
     if (attachSequence !== sourceAttachSequence || video !== videoRef.value) return;
     if (HlsRuntime.isSupported()) {
@@ -644,6 +651,7 @@ const chooseInitialSource = (available: PlaybackSource[]) => {
     preferred: localStorage.getItem('misty_rain_player_quality') || '',
     preferredDelivery: localStorage.getItem('misty_rain_player_delivery') || '',
     mobile: isMobilePlaybackDevice,
+    preferNativeHls: nativeHlsSupported,
     respectPreference: !isMobilePlaybackDevice || mobileQualityManuallySelected
   });
 };
@@ -973,7 +981,7 @@ const prepareEpisode = async (index: number, resumeAt = 0) => {
   announce(`正在准备${episode.episodeTitle}`);
 
   try {
-    const result = await QuarkStreamService.prepareEpisode(activeSession.sessionId, episode.fid);
+    const result = await QuarkStreamService.prepareEpisode(activeSession.sessionId, episode.fid, { nativeHls: nativeHlsSupported });
     if (sequence !== requestSequence || !props.isOpen) return;
     playback.value = result;
     const initialSource = chooseInitialSource(result.sources);
@@ -1075,6 +1083,7 @@ const changeQuality = async (source: PlaybackSource) => {
 const useCompatibleSource = async () => {
   const source = compatibleSource.value;
   if (!source) return;
+  if (playback.value) playback.value.sources = playback.value.sources.map(item => item.id === source.id ? source : item);
   selectedSourceId.value = source.id;
   errorMessage.value = '';
   phase.value = 'ready';

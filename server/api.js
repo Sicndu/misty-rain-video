@@ -544,7 +544,10 @@ export const handleApiRequest = async (request, response, context) => {
     if (prepareMatch && request.method === 'POST') {
       const sessionId = decodeURIComponent(prepareMatch[1]);
       const episodeFid = decodeURIComponent(prepareMatch[2]);
-      const playback = await context.quarkGateway.prepareEpisode(sessionId, episodeFid, user, userData.playbackCache);
+      const capabilities = await readRequestBody(request, 4 * 1024);
+      const playback = await context.quarkGateway.prepareEpisode(sessionId, episodeFid, user, userData.playbackCache, {
+        nativeHls: capabilities?.nativeHls === true
+      });
       sendSuccess(response, playback);
       return true;
     }
@@ -554,7 +557,7 @@ export const handleApiRequest = async (request, response, context) => {
       const sessionId = decodeURIComponent(streamMatch[1]);
       const sourceId = decodeURIComponent(streamMatch[2]);
       const { session, source } = context.quarkGateway.getStreamSource(sessionId, sourceId, user);
-      if (source.delivery === 'direct') {
+      if ((source.directOnly || source.delivery === 'direct') && url.searchParams.get('delivery') !== 'proxy') {
         const location = await context.quarkGateway.getDirectStreamUrl(sessionId, sourceId, user);
         if (location) {
           response.statusCode = 302;
