@@ -1899,7 +1899,7 @@ export class QuarkGateway {
         fps: Number(info.fps || item.fps) || 0,
         codec: firstNonEmpty(info.video_codec, info.codec, item.video_codec, item.codec),
         bitrate: Number(info.bit_rate || info.bitrate || item.bit_rate || item.bitrate) || 0,
-        mimeType: isHls ? 'application/vnd.apple.mpegurl' : (item.mime_type || 'video/mp4'),
+        mimeType: isHls ? 'application/vnd.apple.mpegurl' : (item.mime_type || (/mkv|matroska/i.test(formatHints) ? 'video/x-matroska' : 'video/mp4')),
         isHls,
         delivery: this.directPlaybackEnabled && data?.__playbackProfile === 'tv' && !isHls ? 'direct' : 'proxy'
       });

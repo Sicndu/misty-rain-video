@@ -3,6 +3,7 @@ import type Hls from 'hls.js';
 import DanmakuControls from './DanmakuControls.vue';
 import MobilePlaybackControls from './MobilePlaybackControls.vue';
 import { playbackHealth } from '../../services/playbackHealth';
+import { configureVideoRequest, playbackSourceLabel, selectInitialPlaybackSource } from '../../services/playbackSource';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { Check, ChevronDown, CircleAlert, ListVideo, LoaderCircle, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
 import type { MediaItem, PlaybackHistoryEntry, PlaybackHistoryUpdate } from '../../types/media';
@@ -204,6 +205,11 @@ const visibleEpisodeEntries = computed(() => {
 });
 const sources = computed(() => playback.value?.sources || []);
 const selectedSource = computed(() => sources.value.find(source => source.id === selectedSourceId.value) || sources.value[0]);
+const sourceAllowsSoundEffects = computed(() => soundEffectAvailable.value && selectedSource.value?.delivery !== 'direct');
+const compatibleSource = computed(() => selectInitialPlaybackSource(
+  sources.value.filter(source => source.delivery === 'proxy' && source.resolution !== 'original'),
+  { mobile: true, respectPreference: false }
+));
 const audioTracks = computed(() => detectedAudioTracks.value.length
   ? detectedAudioTracks.value
   : (playback.value?.audioTracks || []));
@@ -235,8 +241,7 @@ const playbackAutomationSummary = computed(() => {
 });
 
 const sourceDetail = (source: PlaybackSource) => {
-  const parts = [source.label];
-  if (source.delivery) parts.push(source.delivery === 'direct' ? '网盘直连' : '服务器中转');
+  const parts = [playbackSourceLabel(source)];
   if (source.width && source.height) parts.push(`${source.width}×${source.height}`);
   if (source.fps) parts.push(`${Math.round(source.fps)} FPS`);
   if (source.codec) parts.push(source.codec.toUpperCase());
@@ -373,7 +378,7 @@ const configureSoundEffect = (mode: SoundEffectMode) => {
 
 const ensureSoundEffectGraph = async () => {
   const video = videoRef.value;
-  if (!video || !soundEffectAvailable.value) return false;
+  if (!video || !sourceAllowsSoundEffects.value) return false;
   try {
     if (!audioContext) {
       const AudioContextConstructor = window.AudioContext
@@ -421,6 +426,7 @@ const ensureSoundEffectGraph = async () => {
 };
 
 const selectSoundEffect = async (mode: SoundEffectMode) => {
+  if (!sourceAllowsSoundEffects.value) return;
   if (mode === soundEffectMode.value) return;
   soundEffectMode.value = mode;
   localStorage.setItem('misty_rain_sound_effect', mode);
@@ -533,6 +539,16 @@ const attachSource = async (
   shouldPlay = false,
   applyIntroSkip = false
 ) => {
+  if (source.delivery === 'direct') {
+    // 跨域媒体接入 Web Audio 会输出静音。已有音频节点无法从媒体元素解绑，
+    // 从中转音效切换直连时必须更换元素，而不只是 disconnect。
+    soundEffectMode.value = 'original';
+    if (audioContext || mediaAudioSource) {
+      videoRef.value?.pause();
+      destroyPlaybackEngine();
+      resetSoundEffectGraph(true);
+    }
+  }
   await nextTick();
   const video = videoRef.value;
   if (!video) return;
@@ -541,6 +557,7 @@ const attachSource = async (
   destroyPlaybackEngine();
   video.pause();
   video.removeAttribute('src');
+  configureVideoRequest(video, source);
   video.load();
   playbackStarting.value = shouldPlay;
   manualPlayRequired.value = false;
@@ -623,26 +640,12 @@ const attachSource = async (
 };
 
 const chooseInitialSource = (available: PlaybackSource[]) => {
-  const preferred = localStorage.getItem('misty_rain_player_quality');
-  const mobileEfficientSources = available.filter(source => {
-    const width = Number(source.width) || 0;
-    const height = Number(source.height) || 0;
-    return width || height
-      ? width <= 1920 && height <= 1080
-      : !['2k', '4k', 'source', 'original'].includes(source.resolution);
+  return selectInitialPlaybackSource(available, {
+    preferred: localStorage.getItem('misty_rain_player_quality') || '',
+    preferredDelivery: localStorage.getItem('misty_rain_player_delivery') || '',
+    mobile: isMobilePlaybackDevice,
+    respectPreference: !isMobilePlaybackDevice || mobileQualityManuallySelected
   });
-  const candidates = isMobilePlaybackDevice && mobileEfficientSources.length ? mobileEfficientSources : available;
-  const preferredSource = (!isMobilePlaybackDevice || mobileQualityManuallySelected)
-    ? candidates.find(source => source.resolution === preferred)
-    : null;
-  return preferredSource
-    || (isMobilePlaybackDevice
-      ? candidates.find(source => source.resolution === 'super' || Number(source.height) === 1080)
-      : null)
-    || candidates.find(source => source.height === 1080 || source.resolution === 'super')
-    || (isMobilePlaybackDevice ? candidates.find(source => source.resolution === 'high') : null)
-    || candidates[0]
-    || available[0];
 };
 
 const progressPayload = (completed = false): PlaybackHistoryUpdate | null => {
@@ -1063,8 +1066,19 @@ const changeQuality = async (source: PlaybackSource) => {
   selectedSourceId.value = source.id;
   mobileQualityManuallySelected = true;
   localStorage.setItem('misty_rain_player_quality', source.resolution);
-  announce(`已切换到${source.label}`);
+  if (source.delivery) localStorage.setItem('misty_rain_player_delivery', source.delivery);
+  else localStorage.removeItem('misty_rain_player_delivery');
+  announce(`已切换到${playbackSourceLabel(source)}`);
   await attachSource(source, resumeAt, shouldPlay);
+};
+
+const useCompatibleSource = async () => {
+  const source = compatibleSource.value;
+  if (!source) return;
+  selectedSourceId.value = source.id;
+  errorMessage.value = '';
+  phase.value = 'ready';
+  await attachSource(source, interruptionPosition.value, true);
 };
 
 const selectAudioTrack = (index: number) => {
@@ -1226,7 +1240,6 @@ defineExpose({ retry });
               controlslist="nodownload noremoteplayback"
               playsinline
               :preload="isIOSPlaybackDevice ? 'auto' : 'metadata'"
-              crossorigin="anonymous"
               :poster="isMobilePlaybackDevice ? undefined : media.poster"
               @play="resumeSoundEffect"
               @volumechange="handleVolumeChange"
@@ -1278,6 +1291,12 @@ defineExpose({ retry });
                 <button type="button" class="secondary-button reload-button" @click="retry">
                   <RefreshCw aria-hidden="true" />
                   {{ interruptionPosition > 0 ? '重新连接并续播' : '重新连接' }}
+                </button>
+                <button
+                  v-if="phase === 'error' && selectedSource?.delivery === 'direct' && compatibleSource"
+                  type="button" class="secondary-button" @click="useCompatibleSource"
+                >
+                  使用兼容画质（服务器中转）
                 </button>
               </div>
             </div>
@@ -1372,7 +1391,7 @@ defineExpose({ retry });
                   @click="changeQuality(source)"
                 >
                   <Check v-if="selectedSourceId === source.id" aria-hidden="true" />
-                  {{ source.label }}
+                  {{ playbackSourceLabel(source) }}
                 </button>
               </div>
               <p v-if="selectedSource?.delivery === 'proxy'" class="delivery-hint">当前画质经服务器加载，带宽较低时可降低画质。若有“原画直连”，可尝试切换；部分设备不支持原画格式。</p>
@@ -1399,7 +1418,7 @@ defineExpose({ retry });
               </div>
             </div>
 
-            <div v-if="soundEffectAvailable" class="setting-group">
+            <div v-if="sourceAllowsSoundEffects" class="setting-group">
               <div class="setting-heading">
                 <span>音效</span>
                 <small>{{ selectedSoundEffect?.hint || '设备端实时处理' }}</small>

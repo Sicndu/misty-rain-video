@@ -109,6 +109,13 @@ test('没有原文件下载权限时仍保留 HLS 播放源', async () => {
   assert.equal(result.sources[0].delivery, 'proxy');
 });
 
+test('TV MKV 保留真实媒体类型供原生播放，不冒充 MP4', async () => {
+  const gateway = makeGateway({ format: 'mkv' });
+  const result = await gateway.prepareEpisode('session', 'episode');
+  assert.equal(result.sources[0].delivery, 'direct');
+  assert.equal(result.sources[0].mimeType, 'video/x-matroska');
+});
+
 test('TV 失效时回退网页源且继续代理，绝不把 Cookie 地址当成直链', async () => {
   const gateway = makeGateway();
   gateway.tvPlaybackClient.getStreaming = async () => { throw new Error('TV expired'); };
