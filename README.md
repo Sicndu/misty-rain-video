@@ -106,6 +106,12 @@ Compose 使用唯一命名卷 `misty-rain-video-data` 持久化 `/app/data`，�
 
 ## 更新与日志
 
+搜索默认并行请求内置引擎的插件和频道通道，先展示已返回的候选，再自动补充其余结果。公共备用服务每个关键词只请求一次，浏览器不再重复调用它；每个渠道默认最多等待 8 秒（`RESOURCE_SEARCH_TIMEOUT_MS`），无逐级重试。超时、来源失败和本站检索并发已满分别提示，部分来源失败时仍可展示已返回的候选。
+
+内置引擎只通过容器内回环地址通信，禁用其响应压缩，并发送 `Accept-Encoding: identity`，避开部分 PanSou 版本压缩中间件重复写正文导致的 JSON 解析错误（如 `Unexpected non-whitespace character after JSON`）。外部来源和网站对外压缩不受影响；不会截取损坏响应中的第一段 JSON 冒充完整结果。
+
+成功检索缓存保存在数据卷的 `resource_search_cache.json`，新鲜结果复用 5 分钟，12 小时内旧结果可先展示并后台刷新；界面会说明缓存或部分结果状态，转存时仍验证分享。空结果只短暂缓存 10 秒。自动追更检索保留严格刷新策略，并为手动搜索预留并发容量。检索仍依赖上游可达性，不能保证新关键词在所有来源故障时返回结果。
+
 ```bash
 docker compose pull
 docker compose up -d

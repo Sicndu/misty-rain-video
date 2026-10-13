@@ -77,7 +77,10 @@ export const startBundledResourceSearch = async ({ appDir, dataDir, port = 8888 
       ASYNC_MAX_BACKGROUND_WORKERS: '12',
       ASYNC_MAX_BACKGROUND_TASKS: '60',
       ASYNC_CACHE_TTL_HOURS: '2',
-      ENABLE_COMPRESSION: 'true'
+      // This engine only serves the app over loopback. Some bundled versions
+      // write the uncompressed body before their compression middleware writes
+      // it again, yielding concatenated JSON (or JSON followed by gzip bytes).
+      ENABLE_COMPRESSION: 'false'
     },
     stdio: ['ignore', 'inherit', 'inherit']
   });

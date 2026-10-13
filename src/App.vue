@@ -61,6 +61,7 @@ const {
   currentMedia: selectedMedia,
   quarkResources,
   searchError,
+  searchNotice,
   searchKeyword,
   openTransferModal,
   closeTransferModal,
@@ -586,6 +587,7 @@ const navigateMobileTab = (tab: MobileDockTab) => {
     :current-category="currentCategory"
     :quark-resources="quarkResources"
     :search-error="searchError"
+    :search-notice="searchNotice"
     :search-keyword="searchKeyword"
     :is-saving="isSavingTransfer"
     :saving-resource-id="savingResourceId"

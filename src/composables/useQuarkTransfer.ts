@@ -14,8 +14,25 @@ export function useQuarkTransfer() {
   const currentMedia = ref<MediaItem | null>(null);
   const quarkResources = ref<ResourceItem[]>([]);
   const searchError = ref('');
+  const searchNotice = ref('');
   const searchKeyword = ref('');
   let searchSequence = 0;
+
+  const followSearch = async (keyword: string, sequence: number) => {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      if (sequence !== searchSequence || !isOpen.value) return;
+      try {
+        const result = await engine.readCached(keyword);
+        if (sequence !== searchSequence || !isOpen.value) return;
+        if (!result) break;
+        quarkResources.value = result.quarkItems;
+        searchNotice.value = result.message || '';
+        if (!result.refreshing) return;
+      } catch { break; }
+    }
+    if (sequence === searchSequence && isOpen.value) searchNotice.value = '已展示当前候选；其余来源暂未返回，可稍后重新搜索';
+  };
 
   /**
    * 在当前资源面板内执行检索。关键词与媒体标题分离，允许用户使用别名
@@ -29,6 +46,7 @@ export function useQuarkTransfer() {
     isOpen.value = true;
     isAnalyzing.value = true;
     searchError.value = '';
+    searchNotice.value = '';
     quarkResources.value = [];
 
     try {
@@ -42,6 +60,8 @@ export function useQuarkTransfer() {
       quarkResources.value = res.quarkItems && res.quarkItems.length > 0
         ? res.quarkItems
         : res.items.filter(i => i.driveType === 'quark');
+      searchNotice.value = res.message || '';
+      if (res.refreshing) void followSearch(normalizedKeyword, sequence);
     } catch (error) {
       if (sequence !== searchSequence || !isOpen.value) return;
       searchError.value = error instanceof Error ? error.message : '资源检索失败，请稍后重试';
@@ -64,6 +84,7 @@ export function useQuarkTransfer() {
     isOpen.value = false;
     isAnalyzing.value = false;
     searchError.value = '';
+    searchNotice.value = '';
     searchKeyword.value = '';
   };
 
@@ -81,6 +102,7 @@ export function useQuarkTransfer() {
     currentMedia,
     quarkResources,
     searchError,
+    searchNotice,
     searchKeyword,
     openTransferModal,
     refreshResources,

@@ -4,13 +4,9 @@ import { authFetch } from './authService';
 import { parseLibraryInput } from './libraryFeedback';
 
 const SEARCH_THROTTLE_MS = 300;
-const REQUEST_TIMEOUT_MS = 28_000;
-const DIRECT_FALLBACK_TIMEOUT_MS = 10_000;
+const REQUEST_TIMEOUT_MS = 12_000;
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_SEARCH_CACHE_ENTRIES = 40;
-const PUBLIC_FALLBACK_ENDPOINTS = [
-  'https://so.252035.xyz/api/search'
-];
 
 /**
  * =========================================================================
@@ -34,22 +30,23 @@ export class SilentSearchEngine {
 
     const cacheKey = cleanKw.toLocaleLowerCase('zh-CN');
     const cached = this.cache.get(cacheKey);
-    if (!options.force && cached && Date.now() - cached.createdAt <= SEARCH_CACHE_TTL_MS) {
+    if (!options.force && cached && Date.now() - cached.createdAt <= (cached.data.partial || cached.data.stale ? 5_000 : SEARCH_CACHE_TTL_MS)) {
       return { ...cached.data, fromCache: true };
     }
 
-    const requestKey = options.force ? `${cacheKey}:refresh` : cacheKey;
+    const requestKey = cacheKey;
     if (this.inFlight.has(requestKey)) {
-      return this.inFlight.get(requestKey)!;
+      return this.inFlight.get(requestKey)!.catch(error => this.getEmptyResult(error instanceof Error ? error.message : '资源检索失败'));
     }
 
-    const now = Date.now();
-    if (now - this.lastRequestTime < SEARCH_THROTTLE_MS) {
-      await new Promise(r => setTimeout(r, SEARCH_THROTTLE_MS - (now - this.lastRequestTime)));
-    }
-    this.lastRequestTime = Date.now();
-
-    const task = this.executeResilientFetch(cleanKw, Boolean(options.force));
+    // Register the promise before the throttle waits, so concurrent requests
+    // cannot pass the in-flight check and send duplicate upstream searches.
+    const task = (async () => {
+      const remaining = SEARCH_THROTTLE_MS - (Date.now() - this.lastRequestTime);
+      if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
+      this.lastRequestTime = Date.now();
+      return this.executeBackendFetch(cleanKw, Boolean(options.force));
+    })();
     this.inFlight.set(requestKey, task);
 
     try {
@@ -71,29 +68,19 @@ export class SilentSearchEngine {
     }
   }
 
-  private async executeResilientFetch(keyword: string, force: boolean): Promise<SearchResult> {
-    let backendResult: SearchResult | null = null;
-    let backendError: unknown = null;
+  async readCached(keyword: string): Promise<SearchResult | null> {
+    const params = new URLSearchParams({ kw: keyword, cached: '1' });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4_000);
     try {
-      backendResult = await this.executeBackendFetch(keyword, force);
-      if (backendResult.items.length > 0) return backendResult;
-    } catch (error) {
-      backendError = error;
-    }
-
-    const fallbackController = new AbortController();
-    try {
-      const fallbackResult = await this.executePublicFallback(keyword, fallbackController.signal);
-      if (fallbackResult.items.length > 0 || !backendResult) return fallbackResult;
-    } catch (fallbackError) {
-      if (!backendResult) {
-        if (backendError instanceof Error) throw backendError;
-        throw fallbackError;
-      }
-    }
-    if (backendResult) return backendResult;
-    if (backendError instanceof Error) throw backendError;
-    throw new Error('资源检索服务暂时不可用');
+      const response = await authFetch(`${apiUrl('/api/resource-search')}?${params}`, { cache: 'no-store', signal: controller.signal });
+      const payload = await response.json();
+      if (!response.ok || payload.code !== 0 || !payload.data) return null;
+      const result = this.normalizeResponse(payload.data, 'direct');
+      // Do not let an earlier partial client cache hide the completed server result.
+      this.cache.delete(keyword.normalize('NFKC').replace(/[《》()（）]/g, ' ').replace(/\s+/g, ' ').trim().toLocaleLowerCase('zh-CN'));
+      return result;
+    } finally { clearTimeout(timer); }
   }
 
   private async executeBackendFetch(keyword: string, force: boolean): Promise<SearchResult> {
@@ -124,43 +111,6 @@ export class SilentSearchEngine {
     }
   }
 
-  private async executePublicFallback(keyword: string, parentSignal: AbortSignal): Promise<SearchResult> {
-    let lastError: unknown = null;
-    for (const endpoint of PUBLIC_FALLBACK_ENDPOINTS) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), DIRECT_FALLBACK_TIMEOUT_MS);
-      const abort = () => controller.abort();
-      parentSignal.addEventListener('abort', abort, { once: true });
-      try {
-        const url = new URL(endpoint);
-        url.searchParams.set('kw', keyword);
-        url.searchParams.set('res', 'merge');
-        url.searchParams.set('src', 'all');
-        url.searchParams.set('cloud_types', 'quark');
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-          cache: 'no-store',
-          signal: controller.signal
-        });
-        const json = await response.json().catch(() => ({}));
-        if (!response.ok || Number(json.code) !== 0 || !json.data) {
-          throw new Error(json.message || `备用检索服务请求失败（HTTP ${response.status}）`);
-        }
-        return this.normalizeResponse(json.data, 'cors_proxy');
-      } catch (error) {
-        lastError = error;
-      } finally {
-        clearTimeout(timer);
-        parentSignal.removeEventListener('abort', abort);
-      }
-    }
-    if (lastError instanceof DOMException && lastError.name === 'AbortError') {
-      throw new Error('备用检索超时，请稍后重试');
-    }
-    throw lastError instanceof Error ? lastError : new Error('备用检索服务暂时不可用');
-  }
-
   private normalizeResponse(data: any, sourceMode: 'direct' | 'cors_proxy'): SearchResult {
     const items: ResourceItem[] = [];
     const seen = new Set<string>();
@@ -179,7 +129,11 @@ export class SilentSearchEngine {
       total: items.length,
       items,
       quarkItems: items,
-      source: sourceMode
+      source: sourceMode,
+      stale: Boolean(data.stale),
+      partial: Boolean(data.partial),
+      refreshing: Boolean(data.refreshing),
+      ...(data.message ? { message: String(data.message) } : {})
     };
   }
 
