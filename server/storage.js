@@ -65,6 +65,33 @@ export class MediaRepository {
     return cards;
   }
 
+  matchesSource(expected) {
+    return this.all().some(card => card.quarkFid === expected.quarkFid
+      && String(card.quarkShareUrl || '') === String(expected.quarkShareUrl || '')
+      && String(card.quarkPasscode || '') === String(expected.quarkPasscode || ''));
+  }
+
+  relinkSource(expected, source) {
+    const cards = this.all();
+    const index = cards.findIndex(card => card.quarkFid === expected.quarkFid
+      && String(card.quarkShareUrl || '') === String(expected.quarkShareUrl || '')
+      && String(card.quarkPasscode || '') === String(expected.quarkPasscode || ''));
+    if (index < 0) return false;
+    cards[index] = { ...cards[index], quarkShareUrl: source.quarkShareUrl, quarkPasscode: source.quarkPasscode,
+      sourceUpdatedAt: new Date().toISOString() };
+    writeJson(this.filePath, cards, 0o644);
+    return cards[index];
+  }
+
+}
+
+export class LibraryMaintenanceRepository {
+  constructor(dataDir) {
+    this.filePath = path.resolve(dataDir, 'library_maintenance.json');
+  }
+
+  read() { return readJson(this.filePath, { items: {}, checkedAt: '', message: '' }); }
+  write(value) { writeJson(this.filePath, value); }
 }
 
 const normalizeLibraryTitle = value => String(value || '')

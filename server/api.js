@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { readRequestBody, readWebResponseText, sendError, sendJson, sendSuccess, pipeWebResponse } from './http.js';
 import { AuthService } from './auth.js';
 import { DanmakuService } from './danmaku/service.js';
-import { LibraryConfigStore, LibraryViewRepository, MediaRepository, PlaybackCacheRepository, PlaybackHistoryRepository, QuarkCredentialStore } from './storage.js';
+import { LibraryConfigStore, LibraryViewRepository, MediaRepository, PlaybackCacheRepository, PlaybackHistoryRepository, QuarkCredentialStore, LibraryMaintenanceRepository } from './storage.js';
+import { LibraryMaintenance } from './libraryMaintenance.js';
 import { QUARK_LIBRARY_FOLDERS, QuarkGateway } from './quarkGateway.js';
 import { isGenericPoster, LEGACY_DEFAULT_POSTER, PosterService } from './posterService.js';
 import { ResourceSearchService } from './resourceSearch.js';
@@ -32,12 +33,13 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
         legacyFilePath: isAdmin ? path.resolve(dataDir, 'library_view.json') : ''
       }),
       playbackCache: new PlaybackCacheRepository(userDataDir),
+      maintenanceRepository: new LibraryMaintenanceRepository(userDataDir),
       playbackHistory: new PlaybackHistoryRepository(userDataDir)
     };
     userContexts.set(key, value);
     return value;
   };
-  return {
+  const context = {
     authService,
     userContext,
     credentialStore,
@@ -47,6 +49,8 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
     tvPlaybackClient,
     quarkGateway: new QuarkGateway({ credentialStore, libraryConfigStore, tvPlaybackClient })
   };
+  context.libraryMaintenance = new LibraryMaintenance(context);
+  return context;
 };
 
 const setSecurityHeaders = response => {
@@ -395,6 +399,11 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
+    if (pathname === '/api/library-maintenance' && request.method === 'GET') {
+      sendSuccess(response, context.libraryMaintenance.status(user));
+      return true;
+    }
+
     if (pathname === '/api/library-updates/apply' && request.method === 'POST') {
       const body = await readRequestBody(request, 32 * 1024);
       const requestedFids = Array.isArray(body?.quarkFids)
@@ -412,10 +421,15 @@ export const handleApiRequest = async (request, response, context) => {
         error.statusCode = 403;
         throw error;
       }
-      const result = await context.quarkGateway.applyLibraryUpdates(cards, user);
+      const result = await context.quarkGateway.applyLibraryUpdates(cards, user, {
+        isCurrent: card => {
+          const saved = userData.mediaRepository.all().find(item => item.quarkFid === card.quarkFid);
+          return !saved || userData.mediaRepository.matchesSource(card);
+        }
+      });
       sendSuccess(response, result, result.transferredCount
         ? `已补充 ${result.transferredCount} 个正片文件`
-        : '当前片库已是最新');
+        : result.failedCount ? '部分影片未能完成更新，请稍后重试' : '当前来源暂无待补剧集');
       return true;
     }
 

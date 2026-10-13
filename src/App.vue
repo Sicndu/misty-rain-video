@@ -189,7 +189,7 @@ const applyLibraryUpdates = async (mediaItems: MediaItem[]) => {
       ? `已补充 ${summary.transferredCount} 个新正片文件${summary.failedCount ? `，${summary.failedCount} 部未完成` : ''}`
       : summary.failedCount
         ? `${summary.failedCount} 部未完成剧集补充，请稍后重试或查看具体原因`
-        : '所选影片已是最新';
+        : '当前来源暂无待补剧集';
     toast.show(message, summary.failedCount ? '!' : '✓', 3600);
   } catch (error) {
     toast.show(error instanceof Error ? error.message : '片库更新失败', '!', 3600);
@@ -517,7 +517,7 @@ const navigateMobileTab = (tab: MobileDockTab) => {
       :disabled="isApplyingUpdates || isCheckingUpdates"
       @click="applyLibraryUpdates(availableUpdateMedia)"
     >
-      {{ isApplyingUpdates ? '正在补充新剧集…' : `${availableUpdateMedia.length} 部影片有新剧集，点击更新` }}
+      {{ isApplyingUpdates ? '正在补充新剧集…' : `${availableUpdateMedia.length} 部影片发现新剧集，可立即补集` }}
     </button>
 
     <!-- 影视卡片网格 -->

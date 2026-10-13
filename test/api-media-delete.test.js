@@ -88,3 +88,22 @@ test('仅本地卡片不会调用云端目录删除', async () => {
     ['remove', 'local-card']
   ]);
 });
+
+test('维护状态只按当前登录用户读取，不接受查询参数选择其他用户', async () => {
+  const calls = [];
+  const context = createContext(calls);
+  context.libraryMaintenance = { status: user => ({ folder: user.folder, items: [] }) };
+  const response = createResponse();
+  await handleApiRequest({ method: 'GET', url: '/api/library-maintenance?user=someone-else', headers: { host: 'localhost' } }, response, context);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.body).data, { folder: 'admin', items: [] });
+});
+
+test('未登录不能读取维护状态', async () => {
+  const context = createContext([]);
+  context.authService.authenticate = () => { throw Object.assign(new Error('请登录'), { statusCode: 401, code: 'APP_AUTH_REQUIRED' }); };
+  context.libraryMaintenance = { status: () => assert.fail('Unauthenticated status access') };
+  const response = createResponse();
+  await handleApiRequest({ method: 'GET', url: '/api/library-maintenance', headers: { host: 'localhost' } }, response, context);
+  assert.equal(response.statusCode, 401);
+});
