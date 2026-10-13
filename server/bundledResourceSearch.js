@@ -19,6 +19,7 @@ const DEFAULT_CHANNELS = [
 ].join(',');
 
 const DEFAULT_PLUGINS = [
+  'wanou',
   'quarktv',
   'quark4k',
   'quarksoo',

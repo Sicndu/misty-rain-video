@@ -97,3 +97,24 @@ test('首批结果立即可用，慢通道候选自动补齐；关闭面板后�
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(calls.length, 3);
 });
+
+test('页面等待真正后台完成，超过旧的 8 秒轮询窗口仍接收补齐的正篇候选', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  let polls = 0;
+  t.mock.method(globalThis, 'fetch', async url => {
+    const cached = String(url).includes('cached=1');
+    if (cached) polls += 1;
+    const complete = polls >= 12;
+    const result = data({ partial: !complete, refreshing: !complete, message: complete ? '' : '继续补查' });
+    if (complete) result.merged_by_type.quark.push({ url: 'https://pan.quark.cn/s/mainseries', note: '仙逆正篇' });
+    return Response.json({ code: 0, data: result });
+  });
+  const view = useQuarkTransfer();
+  await view.openTransferModal({ title: '仙逆长窗口测试', category: 'anime' });
+  for (let i = 0; i < 12; i += 1) { t.mock.timers.tick(1_000); await new Promise(resolve => setImmediate(resolve)); }
+  assert.equal(polls, 12);
+  assert.equal(view.quarkResources.value.length, 2);
+  assert.equal(view.searchPending.value, false);
+  t.mock.timers.tick(10_000); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(polls, 12);
+});

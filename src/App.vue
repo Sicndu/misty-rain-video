@@ -62,6 +62,7 @@ const {
   quarkResources,
   searchError,
   searchNotice,
+  searchPending,
   searchKeyword,
   openTransferModal,
   closeTransferModal,
@@ -588,6 +589,7 @@ const navigateMobileTab = (tab: MobileDockTab) => {
     :quark-resources="quarkResources"
     :search-error="searchError"
     :search-notice="searchNotice"
+    :search-pending="searchPending"
     :search-keyword="searchKeyword"
     :is-saving="isSavingTransfer"
     :saving-resource-id="savingResourceId"

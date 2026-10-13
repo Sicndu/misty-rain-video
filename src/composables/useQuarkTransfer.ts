@@ -15,11 +15,13 @@ export function useQuarkTransfer() {
   const quarkResources = ref<ResourceItem[]>([]);
   const searchError = ref('');
   const searchNotice = ref('');
+  const searchPending = ref(false);
   const searchKeyword = ref('');
   let searchSequence = 0;
 
   const followSearch = async (keyword: string, sequence: number) => {
-    for (let attempt = 0; attempt < 8; attempt += 1) {
+    const deadline = Date.now() + 35_000;
+    for (let attempt = 0; attempt < 35 && Date.now() < deadline; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 1_000));
       if (sequence !== searchSequence || !isOpen.value) return;
       try {
@@ -28,10 +30,16 @@ export function useQuarkTransfer() {
         if (!result) break;
         quarkResources.value = result.quarkItems;
         searchNotice.value = result.message || '';
+        searchPending.value = Boolean(result.refreshing);
         if (!result.refreshing) return;
       } catch { break; }
     }
-    if (sequence === searchSequence && isOpen.value) searchNotice.value = '已展示当前候选；其余来源暂未返回，可稍后重新搜索';
+    if (sequence === searchSequence && isOpen.value) {
+      searchPending.value = false;
+      searchNotice.value = quarkResources.value.length
+        ? '已展示当前候选；其余来源暂未返回，可稍后重新搜索'
+        : '本轮未取得可用候选，来源可能超时；可稍后重新搜索';
+    }
   };
 
   /**
@@ -47,6 +55,7 @@ export function useQuarkTransfer() {
     isAnalyzing.value = true;
     searchError.value = '';
     searchNotice.value = '';
+    searchPending.value = false;
     quarkResources.value = [];
 
     try {
@@ -61,6 +70,7 @@ export function useQuarkTransfer() {
         ? res.quarkItems
         : res.items.filter(i => i.driveType === 'quark');
       searchNotice.value = res.message || '';
+      searchPending.value = Boolean(res.refreshing);
       if (res.refreshing) void followSearch(normalizedKeyword, sequence);
     } catch (error) {
       if (sequence !== searchSequence || !isOpen.value) return;
@@ -85,6 +95,7 @@ export function useQuarkTransfer() {
     isAnalyzing.value = false;
     searchError.value = '';
     searchNotice.value = '';
+    searchPending.value = false;
     searchKeyword.value = '';
   };
 
@@ -103,6 +114,7 @@ export function useQuarkTransfer() {
     quarkResources,
     searchError,
     searchNotice,
+    searchPending,
     searchKeyword,
     openTransferModal,
     refreshResources,

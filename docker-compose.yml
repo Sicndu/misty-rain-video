@@ -26,7 +26,7 @@ services:
       LEGACY_LIBRARY_ROOT_FOLDER: 烟雨视频
       LIBRARY_AUTO_MAINTENANCE: ${LIBRARY_AUTO_MAINTENANCE:-true}
       LIBRARY_MAINTENANCE_MINUTES: ${LIBRARY_MAINTENANCE_MINUTES:-30}
-      # all 拆分插件/频道检索，先返回候选；每个渠道最多等待 8 秒。
+      # all 拆分插件/频道检索；8 秒返回首批状态，后台最多补查 30 秒。
       RESOURCE_SEARCH_SOURCE: all
       RESOURCE_SEARCH_TIMEOUT_MS: ${RESOURCE_SEARCH_TIMEOUT_MS:-8000}
       RESOURCE_SEARCH_URLS: http://127.0.0.1:8888/api/search,https://so.252035.xyz/api/search

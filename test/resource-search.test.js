@@ -14,7 +14,7 @@ const gate = () => {
   return { promise, resolve };
 };
 const create = options => new ResourceSearchService({ urls: ['http://127.0.0.1:8888/api/search'], timeoutMs: 300,
-  aggregationMs: 0, ...options });
+  aggregationMs: 0, followUpDelaysMs: [], completionTimeoutMs: options?.timeoutMs || 300, ...options });
 
 test('快速通道先返回，慢通道继续补缓存；刷新与普通搜索合并为一份任务', async () => {
   const slow = gate();
@@ -74,14 +74,14 @@ test('正文阻塞也受截止时间限制，没有逐级重试；失败渠道�
     signals.push(options.signal);
     return { ok: true, json: () => new Promise(() => {}) };
   } });
-  await assert.rejects(service.search('测试剧'), { code: 'RESOURCE_SEARCH_TIMEOUT' });
+  await assert.rejects(service.search('测试剧', { priority: 'background' }), { code: 'RESOURCE_SEARCH_TIMEOUT' });
   assert.equal(calls, 2);
   assert.ok(signals.every(signal => signal.aborted));
   assert.equal(service.inFlight.size, 0);
   await assert.rejects(service.search('另一部'), { code: 'RESOURCE_SEARCH_UNAVAILABLE' });
   assert.equal(calls, 2);
   clock += 9_000;
-  await assert.rejects(service.search('另一部'), { code: 'RESOURCE_SEARCH_TIMEOUT' });
+  await assert.rejects(service.search('另一部', { priority: 'background' }), { code: 'RESOURCE_SEARCH_TIMEOUT' });
   assert.equal(calls, 4);
 });
 
@@ -191,4 +191,99 @@ test('忽略 identity 的异常来源仍报错，不截断、拼凑或缓存损�
     assert.equal(service.cache.size, 0);
   }
   assert.ok(warnings.every(([, detail]) => detail.code === 'RESOURCE_SEARCH_INVALID_RESPONSE'));
+});
+
+test('第一批只有剧场版时再次读取引擎缓存，正篇迟到后自动补齐且不缩减已显示结果', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const calls = [];
+  let plugins = 0;
+  const service = create({ completionTimeoutMs: 30_000, followUpDelaysMs: [5_000, 15_000],
+    fetchImpl: async url => {
+      calls.push(url);
+      if (url.searchParams.get('src') === 'tg') return reply();
+      plugins += 1;
+      return plugins === 1 ? reply('movie') : plugins === 2 ? reply('series1', 'series2') : reply('series3');
+    }
+  });
+  const first = service.search('仙逆', { force: true });
+  const complete = service.search('仙逆', { priority: 'background', force: true });
+  await flush(); t.mock.timers.tick(0); await flush();
+  assert.equal((await first).total, 1);
+  assert.equal(service.peek('仙逆').refreshing, true);
+  t.mock.timers.tick(5_000); await flush();
+  assert.equal(service.peek('仙逆').total, 3);
+  assert.equal(service.peek('仙逆').refreshing, true);
+  t.mock.timers.tick(10_000); await flush();
+  assert.equal((await complete).total, 4);
+  assert.equal(service.peek('仙逆').refreshing, false);
+  assert.equal(calls.length, 6);
+  assert.ok(calls.every(url => !url.searchParams.has('conc')));
+  assert.ok(calls.slice(0, 2).every(url => url.searchParams.get('refresh') === 'true'));
+  assert.ok(calls.slice(2).every(url => !url.searchParams.has('refresh')));
+});
+
+test('8 秒是首屏等待而非取消全部检索，12 秒才返回的来源仍会进入结果', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const slow = gate();
+  let signal;
+  const service = create({ source: 'plugin', timeoutMs: 8_000, completionTimeoutMs: 30_000,
+    fetchImpl: async (_url, options) => { signal = options.signal; return slow.promise; } });
+  const first = service.search('仙逆');
+  await flush();
+  t.mock.timers.tick(8_000); await flush();
+  const early = await first;
+  assert.equal(early.total, 0);
+  assert.equal(early.refreshing, true);
+  assert.equal(signal.aborted, false);
+  t.mock.timers.tick(4_000);
+  slow.resolve(reply('series'));
+  await flush();
+  assert.equal(service.peek('仙逆').total, 1);
+  assert.equal(service.peek('仙逆').refreshing, false);
+  assert.equal(service.inFlight.size, 0);
+});
+
+test('强制刷新重开初始检索，但在途请求和补查不重复刷新引擎', async t => {
+  const calls = [];
+  const service = create({ fetchImpl: async url => { calls.push(url); return reply('cached'); } });
+  await service.search('仙逆'); await flush();
+  calls.length = 0;
+  await service.search('仙逆', { force: true }); await flush();
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every(url => url.searchParams.get('refresh') === 'true'));
+});
+
+test('旧版本把单条结果当完整缓存时，升级后立即重新补查而非继续缓存 5 分钟', async t => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'misty-search-legacy-'));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dataDir, 'resource_search_cache.json'), JSON.stringify([
+    ['仙逆', { createdAt: Date.now(), data: payload('movie').data, isEmpty: false, partial: false }]
+  ]));
+  const calls = [];
+  const service = create({ dataDir, fetchImpl: async url => { calls.push(url); return reply('series'); } });
+  const early = await service.search('仙逆');
+  assert.equal(early.stale, true);
+  assert.equal(early.refreshing, true);
+  await flush();
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every(url => url.searchParams.get('refresh') === 'true'));
+  assert.equal(service.peek('仙逆').merged_by_type.quark[0].url, 'https://pan.quark.cn/s/series');
+});
+
+test('公共来源的多个同名正篇保留不同链接，不被内置单条剧场版或后续缓存覆盖', async () => {
+  const pending = gate();
+  const service = create({ urls: ['http://127.0.0.1:8888/api/search', 'https://public.example/api/search'],
+    fetchImpl: async url => url.hostname === 'public.example' ? pending.promise : reply('movie') });
+  const first = await service.search('仙逆');
+  assert.equal(first.total, 1);
+  pending.resolve(Response.json({ code: 0, data: { merged_by_type: { quark: [
+    { url: 'https://pan.quark.cn/s/series1', note: '仙逆', source: 'plugin:wanou' },
+    { url: 'https://pan.quark.cn/s/series2', note: '仙逆', source: 'plugin:erxiaopan' },
+    { url: 'https://pan.quark.cn/s/movie', note: '仙逆剧场版 神临之战', source: 'plugin:quark4k' }
+  ] } } }));
+  await flush();
+  const final = service.peek('仙逆');
+  assert.equal(final.total, 3);
+  assert.equal(final.merged_by_type.quark.filter(item => item.note === '仙逆').length, 2);
+  assert.equal((await service.search('仙逆')).total, 3);
 });
