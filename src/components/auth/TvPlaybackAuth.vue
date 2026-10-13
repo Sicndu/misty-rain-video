@@ -93,7 +93,7 @@ onBeforeUnmount(cancel);
 </template>
 
 <style scoped>
-.tv-auth { margin-top: 22px; padding-top: 20px; border-top: 1px solid rgb(255 255 255 / .08); }
+.tv-auth { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--divider); }
 .tv-auth-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: .88rem; }
 .tv-auth-heading span { color: var(--text-tertiary); font-size: .73rem; }
 .tv-auth p { margin: 9px 0 14px; color: var(--text-tertiary); font-size: .76rem; line-height: 1.7; overflow-wrap: anywhere; }

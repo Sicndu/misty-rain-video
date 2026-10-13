@@ -141,6 +141,13 @@ test('文件夹和其中的单集同时勾选，仅转存所选文件夹', async
   assert.deepEqual(writes.filter(item => item.type === 'save').map(item => item.fid_list), [['s1']]);
 });
 
+test('选集转存同时保留对应的字幕文件', async t => {
+  const { gateway, tree, writes } = createGateway(t);
+  tree.get('s1').push(file('sub-e1', 'S01E01.chs.srt'), file('sub-e2', 'S01E02.chs.srt'));
+  await gateway.importShare({ ...shareInput, quarkSelectionFids: ['e1'] });
+  assert.deepEqual(writes.filter(item => item.type === 'save').map(item => item.fid_list), [['e1', 'sub-e1']]);
+});
+
 test('未提供选择时保留原有一键全部保存，不递归扫描其它目录', async t => {
   const { gateway, writes, listReads } = createGateway(t);
   await gateway.importShare(shareInput);

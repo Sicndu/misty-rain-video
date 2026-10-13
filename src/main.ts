@@ -1,6 +1,9 @@
 import { createApp } from 'vue';
 import App from './App.vue';
 import './assets/styles/main.css';
+import './assets/styles/theme.css';
+import { initializeTheme } from './services/theme';
+initializeTheme();
 
 const navigatorWithStandalone = navigator as Navigator & { standalone?: boolean };
 const isWebClipLaunch = new URLSearchParams(window.location.search).get('webclip') === '1';

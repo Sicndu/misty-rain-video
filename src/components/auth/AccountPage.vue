@@ -9,6 +9,7 @@ import { useToast } from '../../composables/useToast';
 import type { PlaybackHistoryEntry } from '../../types/media';
 import UserAvatar from '../common/UserAvatar.vue';
 import TvPlaybackAuth from './TvPlaybackAuth.vue';
+import ThemeSwitch from '../common/ThemeSwitch.vue';
 
 const props = defineProps<{ user: AppUser; history: PlaybackHistoryEntry[]; historyError?: string; loadingHistory?: boolean; deletingHistoryId?: string }>();
 const emit = defineEmits<{
@@ -286,6 +287,11 @@ defineExpose({ focusAuth, refreshStatus });
       />
     </section>
 
+    <section class="settings-section theme-section" aria-labelledby="theme-title">
+      <div class="section-title-row"><div><span>外观</span><h2 id="theme-title">主题颜色</h2></div></div>
+      <ThemeSwitch />
+    </section>
+
     <section class="settings-section app-section" aria-labelledby="app-title">
       <div class="section-title-row compact">
         <div>
@@ -323,8 +329,8 @@ defineExpose({ focusAuth, refreshStatus });
 .back-button svg { width: 22px; height: 22px; }
 .heading-kicker { color: var(--text-tertiary); font-size: .72rem; }
 .page-heading h1 { font-size: 1.9rem; line-height: 1.3; font-weight: 780; letter-spacing: -.05em; }
-.profile-avatar { width: 48px; height: 48px; border: 1px solid rgb(255 255 255 / .09); border-radius: 50%; color: var(--liquid-accent); background: var(--surface-2); box-shadow: var(--glass-shadow-sm); }
-.profile-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0 28px; margin-bottom: 10px; border-bottom: 1px solid rgb(255 255 255 / .08); }
+.profile-avatar { width: 48px; height: 48px; border: 1px solid var(--divider); border-radius: 50%; color: var(--liquid-accent); background: var(--surface-2); box-shadow: var(--glass-shadow-sm); }
+.profile-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0 28px; margin-bottom: 10px; border-bottom: 1px solid var(--divider); }
 .profile-copy { min-width: 0; }
 .profile-copy small { color: var(--liquid-accent); font-size: .73rem; font-weight: 600; }
 .profile-copy h2 { margin: 5px 0; overflow-wrap: anywhere; font-size: 1.3rem; font-weight: 750; letter-spacing: -.03em; }
@@ -337,7 +343,7 @@ defineExpose({ focusAuth, refreshStatus });
 .history-count { color: var(--text-tertiary); font-size: .73rem; }
 .continue-history-section { margin-bottom: 26px; }
 .continue-history-scroll { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 12px; scroll-snap-type: x proximity; }
-.continue-history-card { position: relative; width: 192px; height: 130px; flex: 0 0 192px; overflow: hidden; border: 1px solid rgb(255 255 255 / .09); border-radius: 12px; text-align: left; background: #253b5a; box-shadow: var(--glass-shadow-sm); scroll-snap-align: start; }
+.continue-history-card { position: relative; width: 192px; height: 130px; flex: 0 0 192px; overflow: hidden; border: 1px solid var(--divider); border-radius: 12px; text-align: left; background: #253b5a; box-shadow: var(--glass-shadow-sm); scroll-snap-align: start; }
 .continue-history-card img { width: 100%; height: 100%; object-fit: cover; object-position: center 28%; }
 .continue-history-shade { position: absolute; inset: 0; background: linear-gradient(180deg, transparent, rgb(8 21 44 / .88)); }
 .continue-history-copy { position: absolute; right: 13px; bottom: 17px; left: 13px; display: grid; gap: 2px; color: #fff; }
@@ -389,6 +395,15 @@ defineExpose({ focusAuth, refreshStatus });
 .logout-button svg { width: 19px; height: 19px; }
 :global(html.ios-standalone .app-section) { display: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
+@media (min-width: 1024px) {
+  .account-page { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-content: start; align-items: start; gap: 24px; width: calc(100% - 240px); margin-left: 240px; padding: 40px clamp(28px, 3vw, 56px); }
+  .page-heading, .profile-card, .continue-history-section { grid-column: 1 / -1; margin: 0; }
+  .settings-section { margin: 0; }
+  .history-section { grid-column: 1; }
+  .auth-section { grid-column: 2; grid-row: span 2; }
+  .theme-section, .app-section { grid-column: 1; }
+  .logout-button { grid-column: 1 / -1; justify-self: start; width: 180px; margin: 0; }
+}
 @media (max-width: 640px) {
   .account-page { padding: calc(22px + var(--safe-area-top)) calc(20px + var(--safe-area-right)) var(--mobile-content-bottom) calc(20px + var(--safe-area-left)); }
   .page-heading { margin-bottom: 24px; }

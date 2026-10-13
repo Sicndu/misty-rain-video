@@ -108,7 +108,7 @@ const categoryLabels: Record<MediaItem['category'], string> = {
 .more-trigger svg { position: relative; width: 19px; height: 19px; }
 .category-trigger, .hover-actions { display: none; }
 .hover-play { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity .2s; }
-.play-disk { display: grid; width: 54px; height: 54px; place-items: center; border: 1px solid rgb(255 255 255 / .09); border-radius: 50%; color: #fff; background: var(--glass-bg); backdrop-filter: blur(10px); }
+.play-disk { display: grid; width: 54px; height: 54px; place-items: center; border: 1px solid var(--divider); border-radius: 50%; color: #fff; background: var(--glass-bg); backdrop-filter: blur(10px); }
 .play-disk svg { width: 22px; height: 22px; margin-left: 2px; }
 @media (hover: hover) { .card-play-target:hover .poster-image { transform: scale(1.035); } .card-play-target:hover .hover-play { opacity: 1; } }
 .card-play-target:focus-visible .hover-play { opacity: 1; }

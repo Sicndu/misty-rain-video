@@ -51,8 +51,8 @@ const emit = defineEmits<{
 @media (max-width: 640px) {
   .mobile-tabbar-layer { position: fixed; inset: 0; z-index: 1250; display: block; pointer-events: none; }
   .mobile-tabbar { position: absolute; bottom: calc(10px + var(--safe-area-bottom)); left: 50%; width: 204px; height: 56px; transform: translateX(-50%); pointer-events: auto; }
-  .tabbar-group { position: relative; display: grid; width: 100%; height: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 5px; border: var(--glass-border); border-radius: 36px; background: var(--glass-floating-material); backdrop-filter: var(--glass-blur-heavy); -webkit-backdrop-filter: var(--glass-blur-heavy); box-shadow: var(--glass-highlight-inner), 0 8px 28px rgb(0 0 0 / .35); }
-  .tabbar-lens { position: absolute; top: 5px; bottom: 5px; left: 5px; width: calc((100% - 10px) / 2); border-radius: 27px; background: rgb(255 255 255 / .09); transform: translateX(calc(var(--selected-index) * 100%)); transition: transform .25s var(--spring-ease); pointer-events: none; }
+  .tabbar-group { position: relative; display: grid; width: 100%; height: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 5px; border: var(--glass-border); border-radius: 36px; background: var(--glass-floating-material); backdrop-filter: var(--glass-blur-heavy); -webkit-backdrop-filter: var(--glass-blur-heavy); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-md); }
+  .tabbar-lens { position: absolute; top: 5px; bottom: 5px; left: 5px; width: calc((100% - 10px) / 2); border-radius: 27px; background: var(--glass-bg-active); transform: translateX(calc(var(--selected-index) * 100%)); transition: transform .25s var(--spring-ease); pointer-events: none; }
   .tabbar-item { position: relative; display: flex; align-items: center; justify-content: center; gap: 7px; min-width: 0; border: 1px solid transparent; border-radius: 29px; color: var(--text-secondary); background: transparent; transition: color .2s; }
   .tabbar-item.active { color: var(--liquid-accent-strong); }
   .item-icon { display: grid; place-items: center; width: 22px; height: 22px; }

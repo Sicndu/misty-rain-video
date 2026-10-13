@@ -23,7 +23,8 @@ const createContext = calls => {
       removeFid: fid => calls.push(['removeFid', fid])
     },
     playbackHistory: {
-      removeByMediaFid: fid => calls.push(['removeHistoryFid', fid])
+      removeByMediaFid: fid => calls.push(['removeHistoryFid', fid]),
+      removeByMediaId: id => calls.push(['removeHistoryId', id])
     }
   };
   return {
@@ -85,6 +86,7 @@ test('仅本地卡片不会调用云端目录删除', async () => {
   assert.equal(result.response.statusCode, 200);
   assert.deepEqual(result.calls, [
     ['assertSameOrigin'],
-    ['remove', 'local-card']
+    ['remove', 'local-card'],
+    ['removeHistoryId', 'local-card']
   ]);
 });

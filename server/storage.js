@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { DEFAULT_PLAYER_PREFERENCES, normalizePlayerPreferences } from './playerPreferences.js';
 
 const ensureDirectory = directory => {
   fs.mkdirSync(directory, { recursive: true });
@@ -292,9 +293,34 @@ export class PlaybackHistoryRepository {
   removeByMediaFid(quarkFid) {
     const fid = String(quarkFid || '').trim();
     if (!fid) return this.all();
-    const entries = this.all().filter(entry => String(entry?.media?.quarkFid || '').trim() !== fid);
+    const entries = this.all().filter(entry => {
+      const media = entry?.media || {};
+      const entryFid = String(media.quarkFid || (String(media.id || '').startsWith('quark:') ? String(media.id).slice(6) : '')).trim();
+      return entryFid !== fid;
+    });
     writeJson(this.filePath, { version: 1, entries }, 0o600);
     return entries;
+  }
+  removeByMediaId(mediaId) {
+    const id = String(mediaId || '').trim();
+    if (!id) return this.all();
+    const entries = this.all().filter(entry => String(entry?.media?.id || '') !== id);
+    writeJson(this.filePath, { version: 1, entries }, 0o600);
+    return entries;
+  }
+}
+
+export class PlayerPreferencesStore {
+  constructor(dataDir) { this.filePath = path.resolve(dataDir, 'player_preferences.json'); }
+  get() {
+    try { return normalizePlayerPreferences(readJson(this.filePath, DEFAULT_PLAYER_PREFERENCES)); }
+    catch { return { ...DEFAULT_PLAYER_PREFERENCES }; }
+  }
+  save(input) {
+    normalizePlayerPreferences(input);
+    const value = normalizePlayerPreferences({ ...this.get(), ...input });
+    writeJson(this.filePath, value, 0o600);
+    return value;
   }
 }
 

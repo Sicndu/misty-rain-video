@@ -112,7 +112,7 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
 .action-sheet { width: min(440px, 100%); padding: 24px; border-radius: 30px; }
 .drag-handle { display: none; }
 .media-summary { display: flex; align-items: center; gap: 13px; margin-bottom: 22px; }
-.summary-poster { width: 48px; height: 66px; flex-shrink: 0; object-fit: cover; border: 1px solid rgb(255 255 255 / .09); border-radius: 12px; box-shadow: var(--glass-shadow-sm); }
+.summary-poster { width: 48px; height: 66px; flex-shrink: 0; object-fit: cover; border: 1px solid var(--divider); border-radius: 12px; box-shadow: var(--glass-shadow-sm); }
 .summary-copy { min-width: 0; flex: 1; }
 .summary-copy span { color: var(--text-tertiary); font-size: .74rem; }
 .summary-copy h2 { margin-top: 4px; color: var(--text-primary); font-size: 1.12rem; font-weight: 700; overflow-wrap: anywhere; line-height: 1.45; }

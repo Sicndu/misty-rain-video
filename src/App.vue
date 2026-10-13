@@ -4,6 +4,7 @@ import { Plus, RefreshCw } from '@lucide/vue';
 import LoginScreen from './components/auth/LoginScreen.vue';
 import AccountPage from './components/auth/AccountPage.vue';
 import Navbar from './components/layout/Navbar.vue';
+import DesktopSidebar from './components/layout/DesktopSidebar.vue';
 import MobileTabBar, { type MobileTab as MobileDockTab } from './components/layout/MobileTabBar.vue';
 import CategoryTabs from './components/media/CategoryTabs.vue';
 import MediaGrid from './components/media/MediaGrid.vue';
@@ -36,7 +37,7 @@ const QuarkEmbedPlayerModal = defineAsyncComponent({
 
 const { user, authenticated, checking, loggingIn, errorMessage, login, logout } = useAuth();
 const toast = useToast();
-const { history, historyError, loadingHistory, deletingHistoryId, refreshHistory, updateLocalHistory, removeHistory } = usePlaybackHistory(authenticated);
+const { history, historyError, loadingHistory, deletingHistoryId, refreshHistory, updateLocalHistory, removeHistory, removeLocalMediaHistory } = usePlaybackHistory(authenticated);
 const isEmbedPlayerOpen = ref(false);
 
 const {
@@ -363,11 +364,17 @@ const updateActionMedia = () => {
   if (media) void applyLibraryUpdates([media]);
 };
 
+const receivePlaybackHistory = (entry: PlaybackHistoryEntry, username?: string) => {
+  if (authenticated.value && username === user.value?.username) updateLocalHistory(entry);
+};
+
 const confirmDeleteMedia = async () => {
   if (!deletingMedia.value || isDeletingMedia.value) return;
   isDeletingMedia.value = true;
   try {
-    await removeMedia(deletingMedia.value);
+    const media = deletingMedia.value;
+    await removeMedia(media);
+    removeLocalMediaHistory(media);
     requestLayerClose('delete', () => { deletingMedia.value = null; });
   } catch {
     // 保留确认窗供重试，错误由片库操作提示。
@@ -433,6 +440,11 @@ const showMobileLibrary = () => {
   nextTick(() => navbarRef.value?.scrollToTop());
 };
 
+const showDesktopLibrary = (category?: CategoryType) => {
+  if (category) currentCategory.value = category;
+  showMobileLibrary();
+};
+
 const showMobileAccount = () => {
   if (isSavingTransfer.value) return;
   const replaceHistory = currentHistoryLayer() === 'search';
@@ -463,10 +475,14 @@ const navigateMobileTab = (tab: MobileDockTab) => {
   />
 
   <template v-else-if="user">
+    <DesktopSidebar :active-page="mobileTab === 'account' ? 'account' : 'library'" :category="currentCategory"
+      :counts="categoryCounts" :user="user" :disabled="isSavingTransfer"
+      @library="showDesktopLibrary" @account="showMobileAccount" />
     <!-- 片库页面 -->
     <Navbar
       v-if="mobileTab !== 'account'"
       ref="navbarRef"
+      class="app-navbar"
       :current-category="currentCategory"
       :current-category-name="categoryNames[currentCategory]"
       :user="user"
@@ -570,11 +586,12 @@ const navigateMobileTab = (tab: MobileDockTab) => {
       v-if="isEmbedPlayerOpen"
       :is-open="isEmbedPlayerOpen"
       :media="embedPlayingMedia"
+      :username="user.username"
       :history-entry="selectedHistoryEntry"
       @close="closeEmbedPlayer"
       @re-search="handleReSearch"
       @open-auth-settings="openPlaybackAuth"
-      @history-updated="updateLocalHistory"
+      @history-updated="receivePlaybackHistory"
     />
 
   <!-- 网盘资源检索与换源面板 -->
@@ -649,6 +666,11 @@ const navigateMobileTab = (tab: MobileDockTab) => {
 .update-count-dot { position: absolute; top: 0; right: 0; display: grid; min-width: 17px; height: 17px; padding: 0 3px; place-items: center; border-radius: 20px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .58rem; }
 .check-updates-button.checking svg { animation: update-spin .9s linear infinite; }
 @keyframes update-spin { to { transform: rotate(360deg); } }
+@media (min-width: 1024px) {
+  .app-navbar { width: calc(100% - 240px); margin-left: 240px; }
+  .page-container { width: calc(100% - 240px); max-width: none; margin-left: 240px; padding: 36px clamp(28px, 3vw, 56px) 72px; }
+  .category-toolbar { display: none; }
+}
 @media (max-width: 640px) {
   .page-container { padding: 16px calc(20px + var(--safe-area-right)) var(--mobile-content-bottom) calc(20px + var(--safe-area-left)); }
   .library-intro { margin-bottom: 16px; }
