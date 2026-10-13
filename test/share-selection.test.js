@@ -1,0 +1,199 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import test from 'node:test';
+import { transform } from 'esbuild';
+import { resolveShareSelection, entriesInSelection, groupShareTransfers } from '../server/shareSelection.js';
+import { QuarkGateway } from '../server/quarkGateway.js';
+
+const { code } = await transform(fs.readFileSync('src/services/shareSelection.ts', 'utf8'), { loader: 'ts', format: 'esm' });
+const { toggleShareEntry, compactShareSelection } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+
+const folder = (fid, name) => ({ fid, file_name: name, file_type: 0, share_fid_token: `token:${fid}` });
+const file = (fid, name) => ({ fid, file_name: name, file_type: 1, size: 100, share_fid_token: `token:${fid}` });
+const rawTree = () => new Map([
+  ['0', [folder('series', '测试剧'), file('readme', '说明.txt')]],
+  ['series', [folder('s1', '第一季'), folder('s2', '第二季')]],
+  ['s1', [file('e1', 'S01E01.mp4'), file('e2', 'S01E02.mp4')]],
+  ['s2', [file('e3', 'S02E03.mp4'), file('e4', 'S02E04.mp4')]]
+]);
+
+const flattened = () => [...rawTree()].flatMap(([parentFid, items]) => items.map(item => ({
+  ...item, parentFid,
+  ancestorFids: parentFid === '0' ? [] : parentFid === 'series' ? ['series'] : ['series', parentFid]
+})));
+
+const createGateway = t => {
+  const tree = rawTree();
+  const drive = new Map([['0', []]]);
+  const writes = [];
+  const listReads = [];
+  let counter = 0;
+  const reply = data => Response.json({ code: 0, data });
+  const clone = (item, parentFid) => {
+    const copied = { ...item, fid: `saved-${++counter}`, pdir_fid: parentFid };
+    drive.get(parentFid).push(copied);
+    if (item.file_type === 0) {
+      drive.set(copied.fid, []);
+      for (const child of tree.get(item.fid) || []) clone(child, copied.fid);
+    }
+    return copied.fid;
+  };
+  t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
+    const url = new URL(input);
+    const body = init.body ? JSON.parse(init.body) : {};
+    if (url.pathname.endsWith('/share/sharepage/token')) return reply({ stoken: 'private-token', title: '测试资源' });
+    if (url.pathname.endsWith('/share/sharepage/detail')) {
+      const parent = url.searchParams.get('pdir_fid');
+      listReads.push(parent);
+      return reply({ list: tree.get(parent) || [] });
+    }
+    if (url.pathname.endsWith('/file/sort')) return reply({ list: drive.get(url.searchParams.get('pdir_fid')) || [] });
+    if (url.pathname.endsWith('/file') && init.method === 'POST') {
+      const item = folder(`drive-${++counter}`, body.file_name);
+      drive.get(body.pdir_fid).push(item);
+      drive.set(item.fid, []);
+      writes.push({ type: 'create', parent: body.pdir_fid, name: body.file_name });
+      return reply(item);
+    }
+    if (url.pathname.endsWith('/share/sharepage/save')) {
+      writes.push({ type: 'save', ...body });
+      const all = [...tree.values()].flat();
+      return reply({ save_as: { save_as_top_fids: body.fid_list.map(fid => clone(all.find(item => item.fid === fid), body.to_pdir_fid)) } });
+    }
+    if (url.pathname.endsWith('/file/rename')) {
+      const item = [...drive.values()].flat().find(item => item.fid === body.fid);
+      item.file_name = body.file_name;
+      writes.push({ type: 'rename', ...body });
+      return reply({});
+    }
+    if (url.pathname.endsWith('/file/delete')) {
+      for (const [fid, items] of drive) drive.set(fid, items.filter(item => !body.filelist.includes(item.fid)));
+      writes.push({ type: 'trash', ...body });
+      return reply({});
+    }
+    throw new Error(`Unexpected mock request ${url.pathname}`);
+  });
+  const gateway = new QuarkGateway({
+    credentialStore: { getCookie: () => 'test-cookie', saveCookie: () => {} },
+    libraryConfigStore: { get: () => ({ rootFolderName: '烟雨影视' }) }
+  });
+  t.after(() => clearInterval(gateway.cleanupTimer));
+  return { gateway, tree, drive, writes, listReads };
+};
+const shareInput = { shareUrl: 'https://pan.quark.cn/s/test123', title: '测试剧', category: 'tv' };
+
+test('父文件夹和子文件重复选择只转存一次，文件夹覆盖其完整子树', () => {
+  const entries = flattened();
+  const selected = resolveShareSelection(entries, ['s1', 'e1', 'e1']);
+  assert.deepEqual(selected.map(item => item.fid), ['s1']);
+  assert.deepEqual(entriesInSelection(entries, selected).map(item => item.fid), ['s1', 'e1', 'e2']);
+  assert.deepEqual(groupShareTransfers(selected)[0].ancestorFids, ['series']);
+});
+
+test('勾选整个目录后取消一集，保留其它文件并生成正确的保存范围', () => {
+  const entries = flattened().map(item => ({ ...item, isDirectory: item.file_type === 0 }));
+  const parent = entries.find(item => item.fid === 'series');
+  const e2 = entries.find(item => item.fid === 'e2');
+  let selected = toggleShareEntry(entries, new Set(), parent);
+  selected = toggleShareEntry(entries, selected, e2);
+  assert.deepEqual(compactShareSelection(entries, selected).sort(), ['e1', 's2']);
+  assert.equal(selected.has('e2'), false);
+  assert.equal(selected.has('e3'), true);
+});
+
+test('空选择、伪造标识和失效文件不触发全部保存', async t => {
+  const { gateway, writes } = createGateway(t);
+  for (const selection of [[], null, 'e1', ['foreign-file'], [{}]]) {
+    await assert.rejects(gateway.importShare({ ...shareInput, quarkSelectionFids: selection }),
+      error => ['QUARK_SELECTION_INVALID', 'QUARK_SELECTION_STALE'].includes(error.code));
+  }
+  assert.deepEqual(writes, []);
+});
+
+test('详情返回文件层级和集数，不暴露分享文件Token', async t => {
+  const { gateway, writes } = createGateway(t);
+  const result = await gateway.getShareDetails(shareInput);
+  assert.equal(result.videoCount, 4);
+  assert.equal(result.episodeCount, 4);
+  assert.equal(result.entries.find(item => item.fid === 'e1').episodeTitle, '第 1 集');
+  assert.equal(result.entries.find(item => item.fid === 's1').videoCount, 2);
+  assert.deepEqual(result.entries.find(item => item.fid === 'e3').ancestorFids, ['series', 's2']);
+  assert.equal(JSON.stringify(result).includes('private-token'), false);
+  assert.equal(JSON.stringify(result).includes('token:'), false);
+  assert.deepEqual(writes, []);
+});
+
+test('跨文件夹选集保留各自目录并只传服务端读取的文件凭证', async t => {
+  const { gateway, drive, writes } = createGateway(t);
+  const result = await gateway.importShare({ ...shareInput, quarkSelectionFids: ['e1', 'e3'] });
+  const saves = writes.filter(item => item.type === 'save');
+  assert.deepEqual(saves.map(item => item.fid_list), [['e1'], ['e3']]);
+  assert.deepEqual(saves.map(item => item.fid_token_list), [['token:e1'], ['token:e3']]);
+  assert.ok(saves.every(item => item.pdir_fid === '0'));
+  const parentNames = saves.map(item => [...drive.values()].flat().find(folder => folder.fid === item.to_pdir_fid).file_name);
+  assert.deepEqual(parentNames, ['第一季', '第二季']);
+  assert.equal(result.savedFids.length, 2);
+});
+
+test('文件夹和其中的单集同时勾选，仅转存所选文件夹', async t => {
+  const { gateway, writes } = createGateway(t);
+  await gateway.importShare({ ...shareInput, quarkSelectionFids: ['s1', 'e1'] });
+  assert.deepEqual(writes.filter(item => item.type === 'save').map(item => item.fid_list), [['s1']]);
+});
+
+test('未提供选择时保留原有一键全部保存，不递归扫描其它目录', async t => {
+  const { gateway, writes, listReads } = createGateway(t);
+  await gateway.importShare(shareInput);
+  assert.deepEqual(writes.filter(item => item.type === 'save').map(item => item.fid_list), [['series', 'readme']]);
+  assert.deepEqual(listReads, ['0']);
+});
+
+test('选择保存后只检查所选文件夹的新集数，不补入其它文件夹', async t => {
+  const { gateway, tree, writes } = createGateway(t);
+  const selection = ['s1'];
+  const imported = await gateway.importShare({ ...shareInput, quarkSelectionFids: selection });
+  const card = { ...imported.item, quarkShareUrl: shareInput.shareUrl, quarkSelectionFids: selection };
+  tree.get('s1').push(file('e5', 'S01E05.mp4'));
+  tree.get('s2').push(file('e6', 'S02E06.mp4'));
+  const [status] = await gateway.checkLibraryUpdates([card], undefined, { force: true });
+  assert.equal(status.newEpisodeCount, 1);
+  writes.length = 0;
+  await gateway.applyLibraryUpdates([card]);
+  assert.deepEqual(writes.filter(item => item.type === 'save').map(item => item.fid_list), [['e5']]);
+});
+
+test('重试同一组选集复用原目录，不重复转存', async t => {
+  const { gateway, writes } = createGateway(t);
+  const input = { ...shareInput, quarkSelectionFids: ['e1', 'e3'] };
+  await gateway.importShare(input);
+  writes.length = 0;
+  const reused = await gateway.importShare(input);
+  assert.deepEqual(writes.filter(item => item.type === 'save'), []);
+  assert.equal(reused.transferredCount, 0);
+});
+
+test('先保存一集再保存该文件夹，只补充其中尚未保存的内容', async t => {
+  const { gateway, writes } = createGateway(t);
+  await gateway.importShare({ ...shareInput, quarkSelectionFids: ['e1'] });
+  writes.length = 0;
+  await gateway.importShare({ ...shareInput, quarkSelectionFids: ['s1'] });
+  assert.deepEqual(writes.filter(item => item.type === 'save').map(item => item.fid_list), [['e2']]);
+});
+
+test('使用所选剧集换源，验证新目录后才切换旧片源', async t => {
+  const { gateway, writes } = createGateway(t);
+  const original = await gateway.importShare(shareInput);
+  writes.length = 0;
+  const replaced = await gateway.importShare({ ...shareInput, quarkFid: original.item.quarkFid, quarkSelectionFids: ['e1'] });
+  assert.equal(replaced.replacedFid, original.item.quarkFid);
+  assert.deepEqual(writes.filter(item => item.type === 'save').map(item => item.fid_list), [['e1']]);
+  assert.deepEqual(writes.map(item => item.type).slice(-3), ['rename', 'rename', 'trash']);
+});
+
+test('多个季包含相同集号时，详情保留各季的文件与实际集数', async t => {
+  const { gateway, tree } = createGateway(t);
+  tree.set('s2', [file('e3', 'S02E01.mp4'), file('e4', 'S02E02.mp4')]);
+  const details = await gateway.getShareDetails(shareInput);
+  assert.equal(details.episodeCount, 4);
+  assert.equal(details.entries.filter(entry => entry.episodeNumber === 1).length, 2);
+});
