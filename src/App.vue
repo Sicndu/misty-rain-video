@@ -272,12 +272,13 @@ const handleSearchMedia = (kw: string) => {
 };
 
 // 保存片单
-const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRes?: ResourceItem) => {
+const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRes?: ResourceItem, selectedFids?: string[]) => {
   if (isSavingTransfer.value) return false;
   const cat = targetCat || media.category || currentCategory.value;
   const cardToSave: MediaItem = {
     ...media,
     category: cat,
+    quarkSelectionFids: selectedFids,
     tag: bestRes?.quality || media.tag || '4K',
     quarkQuality: bestRes?.quality || media.quarkQuality || '4K 原画',
     quarkShareUrl: bestRes?.url || media.quarkShareUrl,

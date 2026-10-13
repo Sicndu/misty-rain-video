@@ -145,3 +145,15 @@ test('精确来源比较与交换不会覆盖手动换源、其他同名 FID，�
   repo.save({ ...card, quarkFid: 'another' });
   assert.equal(repo.matchesSource(card), false);
 });
+
+test('选集范围变更使旧任务失效，限定来源不可用时不自动扩大到全部剧集', async t => {
+  const f = fixture(t);
+  const repo = f.data.get('one').mediaRepository;
+  repo.save({ ...card, quarkSelectionFids: ['season-one'] });
+  assert.equal(repo.matchesSource(card), false);
+  assert.equal(repo.relinkSource(card, { quarkShareUrl: 'https://pan.quark.cn/s/new' }), false);
+  f.setStatus({ updateCheckAvailable: false, code: 'QUARK_SHARE_UNAVAILABLE' });
+  for (let i = 0; i < 4; i += 1) { await f.service.runOnce(); f.tick(); }
+  assert.equal(f.calls.length, 0);
+  assert.match(f.service.status(f.users[0]).items[0].message, /保留你的选集范围/);
+});

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { shareSelectionKey } from './shareSelection.js';
 
 const ensureDirectory = directory => {
   fs.mkdirSync(directory, { recursive: true });
@@ -68,14 +69,16 @@ export class MediaRepository {
   matchesSource(expected) {
     return this.all().some(card => card.quarkFid === expected.quarkFid
       && String(card.quarkShareUrl || '') === String(expected.quarkShareUrl || '')
-      && String(card.quarkPasscode || '') === String(expected.quarkPasscode || ''));
+      && String(card.quarkPasscode || '') === String(expected.quarkPasscode || '')
+      && shareSelectionKey(card.quarkSelectionFids) === shareSelectionKey(expected.quarkSelectionFids));
   }
 
   relinkSource(expected, source) {
     const cards = this.all();
     const index = cards.findIndex(card => card.quarkFid === expected.quarkFid
       && String(card.quarkShareUrl || '') === String(expected.quarkShareUrl || '')
-      && String(card.quarkPasscode || '') === String(expected.quarkPasscode || ''));
+      && String(card.quarkPasscode || '') === String(expected.quarkPasscode || '')
+      && shareSelectionKey(card.quarkSelectionFids) === shareSelectionKey(expected.quarkSelectionFids));
     if (index < 0) return false;
     cards[index] = { ...cards[index], quarkShareUrl: source.quarkShareUrl, quarkPasscode: source.quarkPasscode,
       sourceUpdatedAt: new Date().toISOString() };

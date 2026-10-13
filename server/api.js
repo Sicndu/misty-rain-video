@@ -117,7 +117,8 @@ const readLibrarySources = async (context, user, userData) => {
     return {
       ...item,
       quarkShareUrl: saved.quarkShareUrl || item.quarkShareUrl || '',
-      quarkPasscode: saved.quarkPasscode || item.quarkPasscode || ''
+      quarkPasscode: saved.quarkPasscode || item.quarkPasscode || '',
+      quarkSelectionFids: saved.quarkSelectionFids
     };
   });
 };
@@ -322,6 +323,12 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
+    if (pathname === '/api/quark/share-details' && request.method === 'POST') {
+      const input = await readRequestBody(request);
+      sendSuccess(response, await context.quarkGateway.getShareDetails(input));
+      return true;
+    }
+
     if (pathname === '/api/media-cards') {
       if (request.method === 'GET') {
         sendSuccess(response, await readLibrary(context, user, userData));
@@ -340,7 +347,11 @@ export const handleApiRequest = async (request, response, context) => {
             userData.mediaRepository.removeFid(imported.replacedFid);
             userData.playbackHistory.removeByMediaFid(imported.replacedFid);
           }
-          userData.mediaRepository.save({ ...item, ...imported.item, poster: persistablePoster(item.poster) });
+          userData.mediaRepository.save({
+            ...item, ...imported.item, poster: persistablePoster(item.poster),
+            // Explicitly clear a previous selection when the user switches back to saving everything.
+            quarkSelectionFids: item.quarkSelectionFids
+          });
           const message = imported.replacedFid
             ? imported.cleanupPending
               ? '换源完成；旧目录已保留为隐藏备份，可在网盘确认后清理'

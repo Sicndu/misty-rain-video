@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
+import { shareSelectionKey } from './shareSelection.js';
 
 const MINUTE = 60_000;
 const sourceFingerprint = card => crypto.createHash('sha256')
-  .update(JSON.stringify([card.quarkShareUrl || '', card.quarkPasscode || ''])).digest('hex');
+  .update(JSON.stringify([card.quarkShareUrl || '', card.quarkPasscode || '', shareSelectionKey(card.quarkSelectionFids)])).digest('hex');
 const unavailableCodes = new Set(['QUARK_SHARE_UNAVAILABLE', 'QUARK_SHARE_EMPTY', 'LIBRARY_SOURCE_MISSING']);
 const messageForError = error => error?.code === 'QUARK_AUTH_REQUIRED'
   ? '网盘认证需要更新，已保存的内容不受影响'
@@ -118,7 +119,10 @@ export class LibraryMaintenance {
                 entry.unavailableCount = unavailable ? (entry.unavailableCount || 0) + 1 : 0;
                 entry.status = 'retrying';
                 entry.message = unavailable ? '原来源暂不可用，保留已有剧集并等待复查' : '暂时无法检查来源，稍后重试';
-                if (entry.unavailableCount >= 3 && searches < 2 && !this.stopped) {
+                if (unavailable && card.quarkSelectionFids !== undefined) {
+                  entry.message = '所选来源暂不可用，保留你的选集范围等待恢复；不会自动改为保存全部';
+                }
+                if (entry.unavailableCount >= 3 && card.quarkSelectionFids === undefined && searches < 2 && !this.stopped) {
                   searches += 1;
                   const results = await this.context.resourceSearch.search(card.title, { force: true });
                   const candidates = [...new Map((results.merged_by_type?.quark || [])

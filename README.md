@@ -97,6 +97,8 @@ Compose 使用唯一命名卷 `misty-rain-video-data` 持久化 `/app/data`，�
 
 仅对有精确目录 FID 元数据的片库条目执行自动维护，避免按同名标题错配历史目录。`pnpm dev` 不启动维护；生产 `node server.js` 启动。环境变量：
 
+使用详情页选择部分剧集或文件夹时，也只平铺保存选中范围内的正片；后续补集遵守该范围。若这类来源失效，由于新分享的文件标识不同，后台保留选择范围等待恢复，不会自动换成“保存全部”。
+
 - `LIBRARY_AUTO_MAINTENANCE=false`：关闭后台自动维护，保留手动操作。
 - `LIBRARY_MAINTENANCE_MINUTES=30`：轮次间隔（15～1440 分钟）。
 
