@@ -54,8 +54,11 @@ export class TvPlaybackClient {
     }
   }
 
-  async createQrSession() {
+  async createQrSession(ownerUsername = '') {
     this.#cleanupSessions();
+    for (const [id, session] of this.authSessions) {
+      if (session.ownerUsername === ownerUsername) this.authSessions.delete(id);
+    }
     const stored = this.credentialStore.getTvAuth();
     const deviceId = stored.deviceId || crypto.randomBytes(16).toString('hex');
     const body = await this.#request('/oauth/authorize', {
@@ -79,7 +82,7 @@ export class TvPlaybackClient {
       });
     }
     const sessionId = crypto.randomBytes(18).toString('base64url');
-    this.authSessions.set(sessionId, { deviceId, queryToken, createdAt: Date.now() });
+    this.authSessions.set(sessionId, { deviceId, queryToken, ownerUsername, createdAt: Date.now() });
     return {
       sessionId,
       qrCode: `data:image/png;base64,${qrData}`,
@@ -87,11 +90,14 @@ export class TvPlaybackClient {
     };
   }
 
-  async pollQrSession(sessionId) {
+  async pollQrSession(sessionId, ownerUsername = '') {
     const session = this.authSessions.get(String(sessionId || ''));
     if (!session || Date.now() - session.createdAt > AUTH_SESSION_TTL_MS) {
       if (session) this.authSessions.delete(sessionId);
       return { state: 'expired' };
+    }
+    if ((session.ownerUsername || '') !== ownerUsername) {
+      throw new QuarkApiError('无权访问其他管理员的认证会话', { code: 'TV_QR_FORBIDDEN', statusCode: 403 });
     }
     let body;
     try {
@@ -134,6 +140,25 @@ export class TvPlaybackClient {
       video_info: item
     })) : [];
     return { ...data, video_list: videoList, audio_list: data.audio_info || [] };
+  }
+
+  async getDownload(fid) {
+    const auth = this.credentialStore.getTvAuth();
+    if (!auth.refreshToken) throw this.#authError();
+    const body = await this.#request('/file', {
+      deviceId: auth.deviceId,
+      accessToken: await this.#ensureAccessToken(),
+      query: { method: 'download', fid }
+    });
+    return body?.data || {};
+  }
+
+  getExchangeOrigin() {
+    try {
+      return new URL(process.env.TV_TOKEN_EXCHANGE_URL || 'https://api.extscreen.com/quarkdrive/token').origin;
+    } catch {
+      return '未正确配置';
+    }
   }
 
   async #ensureAccessToken() {

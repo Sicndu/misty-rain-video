@@ -44,7 +44,7 @@ const mimeTypes = {
 
 const setPageSecurityHeaders = response => {
   response.setHeader('X-Content-Type-Options', 'nosniff');
-  response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  response.setHeader('Referrer-Policy', 'no-referrer');
   response.setHeader('X-Frame-Options', 'SAMEORIGIN');
   response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
 };

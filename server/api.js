@@ -499,6 +499,7 @@ export const handleApiRequest = async (request, response, context) => {
       if (request.method === 'GET') {
         const status = await context.quarkGateway.getPlaybackStatus(true);
         const publicStatus = publicPlaybackStatus(status);
+        if (user.role === 'admin') publicStatus.tvTokenExchangeOrigin = context.tvPlaybackClient.getExchangeOrigin();
         if (user.role !== 'admin') delete publicStatus.nickname;
         sendSuccess(response, publicStatus);
         return true;
@@ -516,6 +517,20 @@ export const handleApiRequest = async (request, response, context) => {
         sendSuccess(response, publicPlaybackStatus(status), '片库与播放 Cookie 已验证并安全保存');
         return true;
       }
+    }
+
+    const tvQrMatch = pathname.match(/^\/api\/player\/tv-auth\/sessions(?:\/([^/]+))?$/);
+    if (tvQrMatch && request.method === 'POST') {
+      if (user.role !== 'admin') {
+        const error = new Error('只有管理员可以配置播放认证');
+        error.statusCode = 403;
+        throw error;
+      }
+      const result = tvQrMatch[1]
+        ? await context.tvPlaybackClient.pollQrSession(decodeURIComponent(tvQrMatch[1]), user.username)
+        : await context.tvPlaybackClient.createQrSession(user.username);
+      sendSuccess(response, result);
+      return true;
     }
 
     if ((pathname === '/api/player/sessions' || pathname === '/api/quark/resolve') && request.method === 'POST') {
@@ -539,6 +554,17 @@ export const handleApiRequest = async (request, response, context) => {
       const sessionId = decodeURIComponent(streamMatch[1]);
       const sourceId = decodeURIComponent(streamMatch[2]);
       const { session, source } = context.quarkGateway.getStreamSource(sessionId, sourceId, user);
+      if (source.delivery === 'direct') {
+        const location = await context.quarkGateway.getDirectStreamUrl(sessionId, sourceId, user);
+        if (location) {
+          response.statusCode = 302;
+          response.setHeader('Location', location);
+          response.setHeader('Referrer-Policy', 'no-referrer');
+          response.setHeader('Cache-Control', 'no-store');
+          response.end();
+          return true;
+        }
+      }
       const proxyRequest = createProxyRequestController(request, response);
       try {
         const refreshed = await fetchStreamWithRefresh({

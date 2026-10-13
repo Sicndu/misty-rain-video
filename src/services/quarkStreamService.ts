@@ -28,6 +28,7 @@ export interface PlaybackSource {
   bitrate: number;
   mimeType: string;
   isHls: boolean;
+  delivery?: 'direct' | 'proxy';
   url: string;
 }
 
@@ -66,6 +67,7 @@ export interface QuarkConfig {
   libraryConfigured?: boolean;
   cookiePlaybackConfigured?: boolean;
   advancedPlaybackConfigured?: boolean;
+  tvTokenExchangeOrigin?: string;
   isAuthenticated: boolean;
   nickname?: string;
 }
@@ -113,6 +115,14 @@ const request = async <T>(url: string, init?: RequestInit): Promise<T> => {
 };
 
 export class QuarkStreamService {
+  static createTvAuthSession(): Promise<{ sessionId: string; qrCode: string; expiresAt: string }> {
+    return request('/api/player/tv-auth/sessions', { method: 'POST' });
+  }
+
+  static pollTvAuthSession(sessionId: string): Promise<{ state: 'pending' | 'expired' | 'confirmed' }> {
+    return request(`/api/player/tv-auth/sessions/${encodeURIComponent(sessionId)}`, { method: 'POST' });
+  }
+
   static async getConfig(): Promise<QuarkConfig> {
     return request<QuarkConfig>('/api/quark/config');
   }

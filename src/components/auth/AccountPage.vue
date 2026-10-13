@@ -8,6 +8,7 @@ import { QuarkStreamService } from '../../services/quarkStreamService';
 import { useToast } from '../../composables/useToast';
 import type { PlaybackHistoryEntry } from '../../types/media';
 import UserAvatar from '../common/UserAvatar.vue';
+import TvPlaybackAuth from './TvPlaybackAuth.vue';
 
 const props = defineProps<{ user: AppUser; history: PlaybackHistoryEntry[]; historyError?: string; loadingHistory?: boolean; deletingHistoryId?: string }>();
 const emit = defineEmits<{
@@ -27,6 +28,8 @@ const statusError = ref('');
 const credentialError = ref('');
 const libraryConnected = ref(false);
 const playbackConnected = ref(false);
+const directPlaybackConnected = ref(false);
+const tvTokenExchangeOrigin = ref('');
 const isSaving = ref(false);
 const showCredentialForm = ref(false);
 const historyExpanded = ref(false);
@@ -53,6 +56,8 @@ const refreshStatus = async () => {
     const status = await QuarkStreamService.getConfig();
     libraryConnected.value = status.libraryConfigured ?? status.isConfigured;
     playbackConnected.value = status.isAuthenticated;
+    directPlaybackConnected.value = Boolean(status.advancedPlaybackConfigured);
+    tvTokenExchangeOrigin.value = status.tvTokenExchangeOrigin || '未配置';
   } catch {
     statusError.value = '暂时无法读取服务状态，请检查网络后重试。';
   } finally {
@@ -273,6 +278,12 @@ defineExpose({ focusAuth, refreshStatus });
       </template>
 
       <p v-else class="managed-hint">播放认证由管理员统一维护。如无法读取内容，请联系管理员更新。</p>
+      <TvPlaybackAuth
+        v-if="user.role === 'admin' && !loadingStatus && !statusError"
+        :connected="directPlaybackConnected"
+        :exchange-origin="tvTokenExchangeOrigin"
+        @confirmed="refreshStatus(); emit('auth-updated'); toast.show('直连认证已保存', '✓')"
+      />
     </section>
 
     <section class="settings-section app-section" aria-labelledby="app-title">

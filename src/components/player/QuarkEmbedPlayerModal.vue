@@ -236,6 +236,7 @@ const playbackAutomationSummary = computed(() => {
 
 const sourceDetail = (source: PlaybackSource) => {
   const parts = [source.label];
+  if (source.delivery) parts.push(source.delivery === 'direct' ? '网盘直连' : '服务器中转');
   if (source.width && source.height) parts.push(`${source.width}×${source.height}`);
   if (source.fps) parts.push(`${Math.round(source.fps)} FPS`);
   if (source.codec) parts.push(source.codec.toUpperCase());
@@ -931,6 +932,10 @@ const monitorPlayback = () => {
 
 const handleVideoError = () => {
   if (phase.value !== 'ready') return;
+  if (selectedSource.value?.resolution === 'original' && videoRef.value?.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+    interruptPlayback('当前设备不支持此原画格式，请在播放设置中选择其他画质');
+    return;
+  }
   interruptPlayback(videoRef.value?.error?.code === MediaError.MEDIA_ERR_NETWORK
     ? '视频连接中断，请检查网络后重新连接'
     : '当前视频无法继续播放，请重新连接后重试');
@@ -1370,6 +1375,8 @@ defineExpose({ retry });
                   {{ source.label }}
                 </button>
               </div>
+              <p v-if="selectedSource?.delivery === 'proxy'" class="delivery-hint">当前画质经服务器加载，带宽较低时可降低画质。若有“原画直连”，可尝试切换；部分设备不支持原画格式。</p>
+              <p v-else-if="selectedSource?.resolution === 'original'" class="delivery-hint">原画直接从网盘加载，播放效果取决于设备对原始视频与音频格式的支持。</p>
             </div>
 
             <div v-if="audioTracks.length" class="setting-group">
@@ -1517,6 +1524,7 @@ defineExpose({ retry });
 </template>
 
 <style scoped>
+.delivery-hint { margin-top: 9px; color: var(--text-tertiary); font-size: .73rem; line-height: 1.6; }
 .player-backdrop { position: fixed; inset: 0; z-index: 1400; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / .58); opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s; }
 .player-backdrop.active { opacity: 1; visibility: visible; }
 .player-backdrop:not(.active) { display: none; }

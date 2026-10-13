@@ -483,6 +483,7 @@ export class QuarkGateway {
     this.playbackCache = playbackCache;
     this.libraryConfigStore = libraryConfigStore;
     this.tvPlaybackClient = tvPlaybackClient;
+    this.directPlaybackEnabled = process.env.PLAYER_MEDIA_DELIVERY !== 'proxy';
     this.sessions = new Map();
     this.accountCache = null;
     this.libraryRootCache = null;
@@ -977,6 +978,7 @@ export class QuarkGateway {
         id: sourceId,
         episodeFid: episode.fid,
         savedFid,
+        resolvedAt: Date.now(),
         touchedAt: Date.now()
       });
       return {
@@ -990,6 +992,7 @@ export class QuarkGateway {
         bitrate: source.bitrate,
         mimeType: source.mimeType,
         isHls: source.isHls,
+        delivery: source.delivery,
         url: `/api/player/sessions/${encodeURIComponent(sessionId)}/streams/${encodeURIComponent(sourceId)}`
       };
     });
@@ -1034,8 +1037,17 @@ export class QuarkGateway {
       || normalized.sources.find(item => item.label === source.label)
       || normalized.sources[0];
     if (!replacement) return source;
-    Object.assign(source, replacement, { id: sourceId, touchedAt: Date.now() });
+    Object.assign(source, replacement, { id: sourceId, resolvedAt: Date.now(), touchedAt: Date.now() });
     return source;
+  }
+
+  async getDirectStreamUrl(sessionId, sourceId, user = SYSTEM_USER) {
+    let { source } = this.getStreamSource(sessionId, sourceId, user);
+    if (source.delivery !== 'direct') return null;
+    if (Date.now() - source.resolvedAt >= 10 * 60 * 1000) {
+      source = await this.refreshStreamSource(sessionId, sourceId, user);
+    }
+    return source.delivery === 'direct' ? this.#assertRemoteUrl(source.upstreamUrl) : null;
   }
 
   registerAsset(session, upstreamUrl, requestProfile = 'web', requestCookie = '') {
@@ -1784,6 +1796,16 @@ export class QuarkGateway {
     const cookie = this.#requireCookie();
     let webData = { __playbackProfile: 'web' };
 
+    // TV 的渐进式视频可免 Cookie 直连。片库管理仍保留原有网页认证。
+    if (this.directPlaybackEnabled && this.credentialStore.getTvAuth?.()?.refreshToken && this.tvPlaybackClient) {
+      try {
+        const data = await this.tvPlaybackClient.getStreaming(savedFid);
+        if (hasRawPlaybackSource(data)) return { ...data, __playbackProfile: 'tv' };
+      } catch {
+        // TV 认证或接口不可用时保留已有 Cookie 播放能力。
+      }
+    }
+
     // fmp4_av 要求上游返回同一时间轴的音视频复用流。旧 fmp4
     // 模式在部分 60 FPS/HDR 文件上会产生音频 PTS 偏移，表现为声音
     // 与画面内字幕逐渐不同步。保留旧参数仅作老文件兼容兜底。
@@ -1878,8 +1900,28 @@ export class QuarkGateway {
         codec: firstNonEmpty(info.video_codec, info.codec, item.video_codec, item.codec),
         bitrate: Number(info.bit_rate || info.bitrate || item.bit_rate || item.bitrate) || 0,
         mimeType: isHls ? 'application/vnd.apple.mpegurl' : (item.mime_type || 'video/mp4'),
-        isHls
+        isHls,
+        delivery: this.directPlaybackEnabled && data?.__playbackProfile === 'tv' && !isHls ? 'direct' : 'proxy'
       });
+    }
+
+    // TV 的部分 HLS 分片没有 CORS，不能盲目 302；另提供原文件直连，
+    // 由用户按设备解码能力选择，默认仍使用兼容画质。
+    if (this.directPlaybackEnabled && data?.__playbackProfile === 'tv' && sources.length && sources.every(source => source.isHls)) {
+      try {
+        const download = await this.tvPlaybackClient?.getDownload?.(savedFid);
+        if (download?.download_url) {
+          sources.push({
+            upstreamUrl: download.download_url, requestProfile: 'tv', requestCookie: '',
+            resolution: 'original', label: '原画直连', rank: 0,
+            width: 0, height: 0, fps: 0, codec: '', bitrate: 0,
+            mimeType: /\.mkv$/i.test(download.file_name || '') ? 'video/x-matroska' : 'video/mp4',
+            isHls: false, delivery: 'direct'
+          });
+        }
+      } catch {
+        // 原文件下载权限与转码播放权限可能不同。
+      }
     }
 
     if (!sources.length && data?.__playbackProfile !== 'tv') {
@@ -1910,7 +1952,8 @@ export class QuarkGateway {
           codec: '',
           bitrate: 0,
           mimeType: 'video/mp4',
-          isHls: false
+          isHls: false,
+          delivery: 'proxy'
         });
       }
     }
