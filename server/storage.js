@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_PLAYER_PREFERENCES, normalizePlayerPreferences } from './playerPreferences.js';
+import { shareSelectionKey } from './shareSelection.js';
 
 const ensureDirectory = directory => {
   fs.mkdirSync(directory, { recursive: true });
@@ -66,6 +67,35 @@ export class MediaRepository {
     return cards;
   }
 
+  matchesSource(expected) {
+    return this.all().some(card => card.quarkFid === expected.quarkFid
+      && String(card.quarkShareUrl || '') === String(expected.quarkShareUrl || '')
+      && String(card.quarkPasscode || '') === String(expected.quarkPasscode || '')
+      && shareSelectionKey(card.quarkSelectionFids) === shareSelectionKey(expected.quarkSelectionFids));
+  }
+
+  relinkSource(expected, source) {
+    const cards = this.all();
+    const index = cards.findIndex(card => card.quarkFid === expected.quarkFid
+      && String(card.quarkShareUrl || '') === String(expected.quarkShareUrl || '')
+      && String(card.quarkPasscode || '') === String(expected.quarkPasscode || '')
+      && shareSelectionKey(card.quarkSelectionFids) === shareSelectionKey(expected.quarkSelectionFids));
+    if (index < 0) return false;
+    cards[index] = { ...cards[index], quarkShareUrl: source.quarkShareUrl, quarkPasscode: source.quarkPasscode,
+      sourceUpdatedAt: new Date().toISOString() };
+    writeJson(this.filePath, cards, 0o644);
+    return cards[index];
+  }
+
+}
+
+export class LibraryMaintenanceRepository {
+  constructor(dataDir) {
+    this.filePath = path.resolve(dataDir, 'library_maintenance.json');
+  }
+
+  read() { return readJson(this.filePath, { items: {}, checkedAt: '', message: '' }); }
+  write(value) { writeJson(this.filePath, value); }
 }
 
 const normalizeLibraryTitle = value => String(value || '')

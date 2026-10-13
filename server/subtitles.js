@@ -1,3 +1,4 @@
+import { seasonNumber } from './libraryPolicy.js';
 const subtitleExtensions = /\.(?:srt|vtt|ass|ssa|sub|idx)$/i;
 export const isSubtitleFile = item => item?.file_type !== 0 && !item?.dir && subtitleExtensions.test(item?.file_name || item?.name || '');
 export const isTextSubtitleFile = item => item?.file_type !== 0 && !item?.dir && /\.(?:srt|vtt|ass|ssa)$/i.test(item?.file_name || item?.name || '');
@@ -14,7 +15,7 @@ const episodeKey = name => {
   const match = String(name).match(/s(\d{1,2})[._ -]*e(\d{1,4})/i);
   if (match) return `s${Number(match[1])}e${Number(match[2])}`;
   const episode = String(name).match(/(?:第\s*(\d+)\s*集|(?:ep?|episode)[._ -]*(\d+))/i);
-  return episode ? `e${Number(episode[1] || episode[2])}` : '';
+  return episode ? `s${seasonNumber(name) || 1}e${Number(episode[1] || episode[2])}` : '';
 };
 export const subtitleMatches = (videoName, subtitleName) => {
   const video = stem(videoName); const subtitle = stem(subtitleName);

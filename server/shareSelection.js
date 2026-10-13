@@ -2,6 +2,8 @@ const selectionError = (message, code = 'QUARK_SELECTION_INVALID') => Object.ass
   code, statusCode: 422
 });
 
+export const shareSelectionKey = value => JSON.stringify(Array.isArray(value) ? [...new Set(value)].sort() : value ?? null);
+
 /** Only server-enumerated entries carry share tokens; client input is a list of FIDs. */
 export const resolveShareSelection = (entries, selectedFids, { allowMissing = false } = {}) => {
   if (!Array.isArray(selectedFids) || !selectedFids.length || selectedFids.length > 5000

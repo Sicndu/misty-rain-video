@@ -115,7 +115,7 @@ test('详情返回文件层级和集数，不暴露分享文件Token', async t =
   const result = await gateway.getShareDetails(shareInput);
   assert.equal(result.videoCount, 4);
   assert.equal(result.episodeCount, 4);
-  assert.equal(result.entries.find(item => item.fid === 'e1').episodeTitle, '第 1 集');
+  assert.equal(result.entries.find(item => item.fid === 'e1').episodeTitle, '第 1 季 · 第 1 集');
   assert.equal(result.entries.find(item => item.fid === 's1').videoCount, 2);
   assert.deepEqual(result.entries.find(item => item.fid === 'e3').ancestorFids, ['series', 's2']);
   assert.equal(JSON.stringify(result).includes('private-token'), false);
@@ -123,36 +123,46 @@ test('详情返回文件层级和集数，不暴露分享文件Token', async t =
   assert.deepEqual(writes, []);
 });
 
-test('跨文件夹选集保留各自目录并只传服务端读取的文件凭证', async t => {
+test('跨文件夹选集平铺到影片目录、保留季数且只传服务端读取的文件凭证', async t => {
   const { gateway, drive, writes } = createGateway(t);
   const result = await gateway.importShare({ ...shareInput, quarkSelectionFids: ['e1', 'e3'] });
   const saves = writes.filter(item => item.type === 'save');
-  assert.deepEqual(saves.map(item => item.fid_list), [['e1'], ['e3']]);
-  assert.deepEqual(saves.map(item => item.fid_token_list), [['token:e1'], ['token:e3']]);
+  assert.deepEqual(saves.flatMap(item => item.fid_list).sort(), ['e1', 'e3']);
+  for (const save of saves) assert.deepEqual(save.fid_token_list, save.fid_list.map(fid => `token:${fid}`));
   assert.ok(saves.every(item => item.pdir_fid === '0'));
   const parentNames = saves.map(item => [...drive.values()].flat().find(folder => folder.fid === item.to_pdir_fid).file_name);
-  assert.deepEqual(parentNames, ['第一季', '第二季']);
+  assert.ok(parentNames.every(name => name === '测试剧'));
+  assert.deepEqual(drive.get(result.item.quarkFid).map(item => item.file_name).sort(), ['第01季 第01集.mp4', '第02季 第03集.mp4']);
   assert.equal(result.savedFids.length, 2);
 });
 
-test('文件夹和其中的单集同时勾选，仅转存所选文件夹', async t => {
+test('文件夹和其中的单集同时勾选，只转存一份目录内正片', async t => {
   const { gateway, writes } = createGateway(t);
   await gateway.importShare({ ...shareInput, quarkSelectionFids: ['s1', 'e1'] });
-  assert.deepEqual(writes.filter(item => item.type === 'save').map(item => item.fid_list), [['s1']]);
+  assert.deepEqual(writes.filter(item => item.type === 'save').flatMap(item => item.fid_list).sort(), ['e1', 'e2']);
 });
 
 test('选集转存同时保留对应的字幕文件', async t => {
-  const { gateway, tree, writes } = createGateway(t);
+  const { gateway, tree, writes, drive } = createGateway(t);
   tree.get('s1').push(file('sub-e1', 'S01E01.chs.srt'), file('sub-e2', 'S01E02.chs.srt'));
   await gateway.importShare({ ...shareInput, quarkSelectionFids: ['e1'] });
-  assert.deepEqual(writes.filter(item => item.type === 'save').map(item => item.fid_list), [['e1', 'sub-e1']]);
+  assert.deepEqual(writes.filter(item => item.type === 'save').flatMap(item => item.fid_list), ['e1', 'sub-e1']);
+  const names = [...drive.values()].flat().map(item => item.file_name);
+  assert.ok(names.some(name => /^第01季 第01集.*\.srt$/.test(name)));
 });
 
-test('未提供选择时保留原有一键全部保存，不递归扫描其它目录', async t => {
+test('保存文件夹时保留未按集数命名的字幕附件', async t => {
+  const { gateway, tree, writes } = createGateway(t);
+  tree.get('s1').push(file('generic-caption', '中文字幕.srt'));
+  await gateway.importShare({ ...shareInput, quarkSelectionFids: ['s1'] });
+  assert.ok(writes.filter(item => item.type === 'save').flatMap(item => item.fid_list).includes('generic-caption'));
+});
+
+test('未提供选择时递归识别全部正片，跳过分享目录和说明附件', async t => {
   const { gateway, writes, listReads } = createGateway(t);
   await gateway.importShare(shareInput);
-  assert.deepEqual(writes.filter(item => item.type === 'save').map(item => item.fid_list), [['series', 'readme']]);
-  assert.deepEqual(listReads, ['0']);
+  assert.deepEqual(writes.filter(item => item.type === 'save').flatMap(item => item.fid_list).sort(), ['e1', 'e2', 'e3', 'e4']);
+  assert.deepEqual([...new Set(listReads)].sort(), ['0', 's1', 's2', 'series']);
 });
 
 test('选择保存后只检查所选文件夹的新集数，不补入其它文件夹', async t => {

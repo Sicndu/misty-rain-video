@@ -34,6 +34,8 @@ test('选集保存附带字幕，保留字幕目录并排除不同季和不同�
   assert.deepEqual(includeSubtitleCompanions(entries, [video]).map(item => item.fid), ['video', 'zh', 'bitmap']);
   assert.equal(subtitleMatches('S01E01.mp4', 'S02E01.srt'), false);
   assert.equal(subtitleMatches('S01E01.mp4', 'S01E010.srt'), false);
+  assert.equal(subtitleMatches('第01季 第01集.mp4', '第01季 第01集.S01E01.chs.srt'), true);
+  assert.equal(subtitleMatches('第02季 第01集.mp4', 'S01E01.chs.srt'), false);
 });
 
 test('同目录字幕绑定播放会话并转换为VTT，其他用户不能读取', async t => {

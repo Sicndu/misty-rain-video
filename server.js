@@ -103,6 +103,7 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(port, host, () => {
   console.log(`[烟雨影视] 服务已启动：http://${host}:${port}`);
+  apiContext.libraryMaintenance.start();
 });
 
 let isShuttingDown = false;
@@ -111,6 +112,7 @@ const shutdown = signal => {
   isShuttingDown = true;
   console.log(`[烟雨影视] 收到 ${signal}，正在安全停止服务...`);
   bundledResourceSearch?.stop();
+  apiContext.libraryMaintenance.stop();
   server.close(error => {
     if (error) {
       console.error('[烟雨影视] 停止服务失败', error);

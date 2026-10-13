@@ -89,7 +89,7 @@ watch(() => props.resource, load, { immediate: true });
           </template>
         </nav>
         <div class="selection-tools">
-          <span>勾选文件或文件夹后保存</span>
+          <span>选择视频或目录，仅保存其中正片</span>
           <button type="button" :disabled="isSaving || !visibleEntries.length" @click="selectCurrentFolder">全选当前目录</button>
           <button type="button" :disabled="isSaving || !selected.size" @click="selected = new Set()">清空选择</button>
         </div>
@@ -97,14 +97,14 @@ watch(() => props.resource, load, { immediate: true });
           <li v-for="entry in visibleEntries" :key="entry.fid" class="file-row">
             <input type="checkbox" :checked="selected.has(entry.fid)" :indeterminate="partial(entry)"
               :aria-label="`选择${entry.isDirectory ? '文件夹' : '文件'} ${entry.name}`"
-              :disabled="isSaving" @change="toggle(entry)" />
+              :disabled="isSaving || (!entry.isDirectory && !entry.isVideo && !entry.isSubtitle)" @change="toggle(entry)" />
             <component :is="entry.isDirectory ? Folder : entry.isVideo ? Video : File" class="file-icon" aria-hidden="true" />
             <div class="file-info">
               <button v-if="entry.isDirectory" type="button" class="folder-name" :disabled="isSaving" @click="currentFolder = entry.fid">
                 {{ entry.name }}<ChevronRight aria-hidden="true" />
               </button>
               <button v-else type="button" class="file-name" :disabled="isSaving" @click="toggle(entry)">{{ entry.name }}</button>
-              <p v-if="entry.isDirectory">{{ entry.videoCount }} 个视频 · 保存文件夹将包含全部子文件</p>
+              <p v-if="entry.isDirectory">{{ entry.videoCount }} 个视频 · 正片和字幕将保存到影片目录，其他附件跳过</p>
               <p v-else><span v-if="entry.episodeNumber">{{ entry.episodeTitle }} · </span>{{ entry.sizeFormatted }}<span v-if="entry.isSubtitle"> · 字幕文件</span><span v-else-if="!entry.isVideo"> · 非视频文件</span></p>
             </div>
           </li>
@@ -120,9 +120,9 @@ watch(() => props.resource, load, { immediate: true });
       <p>已选 {{ selectedFids.length }} 项<span v-if="selected.size"> · 包含 {{ selectedVideoCount }} 个视频</span></p>
       <p class="subtitle-save-hint">保存视频时会同时保留匹配的字幕文件。</p>
       <div class="detail-save-actions">
-        <button type="button" class="save-all" :disabled="isSaving" @click="emit('save')">全部{{ replacingSource ? '替换' : '保存' }}</button>
-        <button type="button" class="save-selected" :disabled="isSaving || isLoading || !selectedFids.length" @click="emit('save', selectedFids)">
-          {{ isSaving ? '正在保存…' : replacingSource ? '用所选内容替换' : '保存所选内容' }}
+        <button type="button" class="save-all" :disabled="isSaving" @click="emit('save')">{{ replacingSource ? '用全部正片替换' : '保存全部正片' }}</button>
+        <button type="button" class="save-selected" :disabled="isSaving || isLoading || !selectedVideoCount" @click="emit('save', selectedFids)">
+          {{ isSaving ? '正在保存…' : replacingSource ? '用所选正片替换' : '保存所选正片' }}
         </button>
       </div>
     </footer>

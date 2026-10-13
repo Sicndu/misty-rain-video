@@ -10,6 +10,7 @@ import type { PlaybackHistoryEntry } from '../../types/media';
 import UserAvatar from '../common/UserAvatar.vue';
 import TvPlaybackAuth from './TvPlaybackAuth.vue';
 import ThemeSwitch from '../common/ThemeSwitch.vue';
+import LibraryMaintenanceStatus from './LibraryMaintenanceStatus.vue';
 
 const props = defineProps<{ user: AppUser; history: PlaybackHistoryEntry[]; historyError?: string; loadingHistory?: boolean; deletingHistoryId?: string }>();
 const emit = defineEmits<{
@@ -279,6 +280,7 @@ defineExpose({ focusAuth, refreshStatus });
       </template>
 
       <p v-else class="managed-hint">播放认证由管理员统一维护。如无法读取内容，请联系管理员更新。</p>
+      <LibraryMaintenanceStatus />
       <TvPlaybackAuth
         v-if="user.role === 'admin' && !loadingStatus && !statusError"
         :connected="directPlaybackConnected"
