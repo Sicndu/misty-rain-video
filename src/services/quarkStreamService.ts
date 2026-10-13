@@ -17,6 +17,27 @@ export interface QuarkEpisode {
   maxResolution: string;
 }
 
+export interface QuarkShareEntry {
+  fid: string;
+  parentFid: string;
+  ancestorFids: string[];
+  name: string;
+  isDirectory: boolean;
+  isVideo: boolean;
+  size: number;
+  sizeFormatted: string;
+  episodeNumber: number;
+  episodeTitle: string;
+  videoCount: number;
+}
+
+export interface QuarkShareDetails {
+  title: string;
+  videoCount: number;
+  episodeCount: number;
+  entries: QuarkShareEntry[];
+}
+
 export interface PlaybackSource {
   id: string;
   label: string;
@@ -116,6 +137,14 @@ const request = async <T>(url: string, init?: RequestInit): Promise<T> => {
 };
 
 export class QuarkStreamService {
+  static getShareDetails(shareUrl: string, passcode = ''): Promise<QuarkShareDetails> {
+    return request('/api/quark/share-details', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shareUrl, passcode })
+    });
+  }
+
   static createTvAuthSession(): Promise<{ sessionId: string; qrCode: string; expiresAt: string }> {
     return request('/api/player/tv-auth/sessions', { method: 'POST' });
   }

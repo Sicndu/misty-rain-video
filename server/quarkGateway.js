@@ -1,5 +1,6 @@
 import dns from 'node:dns';
 import { createOpaqueId } from './http.js';
+import { resolveShareSelection, entriesInSelection, groupShareTransfers } from './shareSelection.js';
 
 dns.setDefaultResultOrder('ipv4first');
 
@@ -666,7 +667,8 @@ export class QuarkGateway {
     category,
     passcode = '',
     quarkPasscode = '',
-    quarkFid: replaceQuarkFid = ''
+    quarkFid: replaceQuarkFid = '',
+    quarkSelectionFids
   }, user = SYSTEM_USER) {
     const principal = normalizeUser(user);
     const cookie = this.#requireCookie();
@@ -690,6 +692,11 @@ export class QuarkGateway {
       passcode: resourcePasscode,
       cookie
     });
+    // Validate the complete selection before creating or replacing any library directory.
+    const selectionTree = quarkSelectionFids === undefined
+      ? null : await this.#readShareTree(share, cookie);
+    const selectedItems = selectionTree
+      ? resolveShareSelection(selectionTree, quarkSelectionFids) : null;
     const mediaTitle = resolveMediaTitle(title, share.title);
     const replacementFid = String(replaceQuarkFid || '').trim();
     if (replacementFid.length > 240) {
@@ -705,7 +712,7 @@ export class QuarkGateway {
     try {
       const userRoot = await this.#getUserRoot(cookie, principal, true);
       const categoryFolder = await this.#ensureDriveFolder(userRoot.fid, folderName, cookie);
-      const shareItems = await this.#listShareFolder({
+      const shareItems = selectedItems || await this.#listShareFolder({
         pwdId: share.pwdId,
         stoken: share.stoken,
         parentFid: '0',
@@ -726,22 +733,25 @@ export class QuarkGateway {
           replacementFid,
           share,
           shareItems,
+          selectionTree,
           resourcePasscode
         });
       }
 
       const mediaFolder = await this.#ensureDriveFolder(categoryFolder.fid, mediaTitle, cookie);
       const existing = await this.#listDriveFolder(mediaFolder.fid, cookie);
-      const missing = shareItems.filter(item => !existing.some(saved => saved.file_name === item.file_name
+      const missing = selectionTree ? shareItems : shareItems.filter(item => !existing.some(saved => saved.file_name === item.file_name
         && (item.file_type === 0 || Number(saved.size) === Number(item.size))));
       const savedFids = await this.#transferSharedItems({
         share,
         items: missing,
+        selectionTree,
         targetFolderFid: mediaFolder.fid,
         cookie,
         passcode: resourcePasscode
       });
       this.driveEpisodeCache.delete(mediaFolder.fid);
+      this.libraryUpdateCache.clear();
 
       return {
         item: this.#libraryItem({
@@ -751,8 +761,8 @@ export class QuarkGateway {
           folderName,
           pwdId: share.pwdId
         }),
-        transferredCount: missing.length,
-        reusedCount: shareItems.length - missing.length,
+        transferredCount: selectionTree ? savedFids.length : missing.length,
+        reusedCount: selectionTree ? Math.max(0, shareItems.length - savedFids.length) : shareItems.length - missing.length,
         savedFids
       };
     } finally {
@@ -800,7 +810,17 @@ export class QuarkGateway {
           continue;
         }
         if (!status.missingEpisodes.length) continue;
-        for (let offset = 0; offset < status.missingEpisodes.length; offset += 50) {
+        if (status.selectionTree) {
+          await this.#transferSharedItems({
+            share: { pwdId: status.pwdId, stoken: status.stoken },
+            items: status.selectedMissingItems,
+            selectionTree: status.selectionTree,
+            targetFolderFid: card.quarkFid,
+            cookie,
+            passcode: status.passcode
+          });
+          transferredCount += status.missingEpisodes.length;
+        } else for (let offset = 0; offset < status.missingEpisodes.length; offset += 50) {
           const batch = status.missingEpisodes.slice(offset, offset + 50);
           await this.#saveSharedItems({
             pwdId: status.pwdId,
@@ -837,6 +857,63 @@ export class QuarkGateway {
       return this.#createDrivePlaybackSession({ quarkFid, title }, principal);
     }
     return this.#createSharePlaybackSession({ shareUrl, title, passcode }, principal);
+  }
+
+  async getShareDetails({ shareUrl, passcode = '' }) {
+    const cookie = this.#requireCookie();
+    const share = await this.#resolveShareCredentials({ shareUrl, passcode, cookie });
+    const entries = await this.#readShareTree(share, cookie);
+    const videoCounts = new Map();
+    for (const item of entries.filter(isVideoFile)) {
+      for (const fid of item.ancestorFids) videoCounts.set(fid, (videoCounts.get(fid) || 0) + 1);
+    }
+    return {
+      title: share.title,
+      videoCount: entries.filter(isVideoFile).length,
+      episodeCount: entries.filter(item => isVideoFile(item) && !ancillaryVideoPattern.test(item.file_name)
+        && extractEpisodeNumber(item.file_name) > 0).length,
+      entries: entries.map(item => {
+        const video = isVideoFile(item);
+        const episode = video ? serializeEpisode(item) : null;
+        return {
+          fid: item.fid, parentFid: item.parentFid, ancestorFids: item.ancestorFids,
+          name: item.file_name, isDirectory: item.file_type === 0 || Boolean(item.dir),
+          isVideo: video, size: Number(item.size) || 0, sizeFormatted: formatBytes(item.size),
+          episodeNumber: episode?.episodeNumber || 0, episodeTitle: episode?.episodeTitle || '',
+          videoCount: videoCounts.get(item.fid) || 0
+        };
+      })
+    };
+  }
+
+  async #readShareTree(share, cookie) {
+    const entries = [];
+    const queue = [{ fid: '0', ancestorFids: [] }];
+    const visited = new Set();
+    while (queue.length) {
+      if (visited.size >= 300) {
+        throw new QuarkApiError('分享目录过大，暂时无法完整预览，请使用全部保存', {
+          code: 'QUARK_SHARE_TOO_LARGE', statusCode: 422
+        });
+      }
+      const parent = queue.shift();
+      if (visited.has(parent.fid)) continue;
+      visited.add(parent.fid);
+      const list = await this.#listShareFolder({ ...share, parentFid: parent.fid, cookie });
+      if (entries.length + list.length > 5000) {
+        throw new QuarkApiError('分享文件过多，暂时无法完整预览，请使用全部保存', {
+          code: 'QUARK_SHARE_TOO_LARGE', statusCode: 422
+        });
+      }
+      for (const item of list) {
+        const entry = { ...item, parentFid: parent.fid, ancestorFids: parent.ancestorFids };
+        entries.push(entry);
+        if (item.file_type === 0 || item.dir) queue.push({
+          fid: item.fid, ancestorFids: [...parent.ancestorFids, item.fid]
+        });
+      }
+    }
+    return entries;
   }
 
   async #createSharePlaybackSession({ shareUrl, title, passcode = '' }, user) {
@@ -1244,7 +1321,7 @@ export class QuarkGateway {
   }
 
   #libraryUpdateCacheKey(card, user) {
-    return `${user.username}:${card.quarkFid}:${String(card.quarkShareUrl || '')}`;
+    return `${user.username}:${card.quarkFid}:${String(card.quarkShareUrl || '')}:${JSON.stringify(card.quarkSelectionFids || null)}`;
   }
 
   async #inspectLibraryUpdate(card, user, cookie, force) {
@@ -1286,7 +1363,12 @@ export class QuarkGateway {
       passcode: card.quarkPasscode || '',
       cookie
     });
-    const sourceEpisodes = await this.#walkShareDirectory({ pwdId: share.pwdId, stoken: share.stoken, cookie });
+    const selectionTree = card.quarkSelectionFids === undefined ? null : await this.#readShareTree(share, cookie);
+    const sourceItems = selectionTree ? entriesInSelection(selectionTree,
+      resolveShareSelection(selectionTree, card.quarkSelectionFids, { allowMissing: true })) : null;
+    const sourceEpisodes = sourceItems
+      ? normalizePlaybackEpisodes(sourceItems)
+      : await this.#walkShareDirectory({ pwdId: share.pwdId, stoken: share.stoken, cookie });
     const localKeys = new Set(localEpisodes.map(episodeIdentity));
     const missingEpisodes = sourceEpisodes.filter(episode => !localKeys.has(episodeIdentity(episode)));
     const latest = sourceEpisodes[0] || localEpisodes[0];
@@ -1301,6 +1383,9 @@ export class QuarkGateway {
       updateCheckedAt: new Date().toISOString(),
       updateCheckAvailable: true,
       missingEpisodes,
+      selectionTree,
+      selectedMissingItems: selectionTree
+        ? selectionTree.filter(item => missingEpisodes.some(episode => episode.fid === item.fid)) : null,
       pwdId: share.pwdId,
       stoken: share.stoken,
       passcode: card.quarkPasscode || ''
@@ -1437,7 +1522,35 @@ export class QuarkGateway {
     };
   }
 
-  async #transferSharedItems({ share, items, targetFolderFid, cookie, passcode }) {
+  async #transferSharedItems({ share, items, selectionTree, targetFolderFid, cookie, passcode }) {
+    if (selectionTree) {
+      const byId = new Map(selectionTree.map(item => [item.fid, item]));
+      const savedFids = [];
+      const transferInto = async (sourceItems, destination) => {
+        const existing = await this.#listDriveFolder(destination, this.#requireCookie());
+        const missing = [];
+        for (const item of sourceItems) {
+          const saved = existing.find(entry => entry.file_name === item.file_name
+            && (entry.file_type === 0 || Boolean(entry.dir)) === (item.file_type === 0 || Boolean(item.dir)));
+          if (saved && (item.file_type === 0 || item.dir)) {
+            // A previous partial save may have created this folder with only one episode.
+            await transferInto(selectionTree.filter(entry => entry.parentFid === item.fid), saved.fid);
+          } else if (!saved || Number(saved.size) !== Number(item.size)) missing.push(item);
+        }
+        savedFids.push(...await this.#transferSharedItems({
+          share, items: missing, targetFolderFid: destination, cookie: this.#requireCookie(), passcode
+        }));
+      };
+      for (const group of groupShareTransfers(items)) {
+        let destination = targetFolderFid;
+        for (const fid of group.ancestorFids) {
+          const folder = byId.get(fid);
+          destination = (await this.#ensureDriveFolder(destination, folder.file_name, this.#requireCookie())).fid;
+        }
+        await transferInto(group.items, destination);
+      }
+      return savedFids;
+    }
     const savedFids = [];
     for (let offset = 0; offset < items.length; offset += 50) {
       const batch = await this.#saveSharedItems({
@@ -1464,6 +1577,7 @@ export class QuarkGateway {
     replacementFid,
     share,
     shareItems,
+    selectionTree,
     resourcePasscode
   }) {
     await this.#assertLibraryAccess(replacementFid, principal);
@@ -1488,6 +1602,7 @@ export class QuarkGateway {
       const savedFids = await this.#transferSharedItems({
         share,
         items: shareItems,
+        selectionTree,
         targetFolderFid: stagedFolder.fid,
         cookie,
         passcode: resourcePasscode

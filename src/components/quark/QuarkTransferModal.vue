@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { Check, ChevronDown, RefreshCw, Search, SlidersHorizontal, X } from '@lucide/vue';
 import MediaPoster from '../common/MediaPoster.vue';
+import QuarkResourceDetails from './QuarkResourceDetails.vue';
 import type { MediaItem, CategoryType } from '../../types/media';
 import type { ResourceItem } from '../../types/search';
 import SkeletonCard from '../common/SkeletonCard.vue';
@@ -28,9 +29,10 @@ const emit = defineEmits<{
   (e: 'transfer', res: ResourceItem): void;
   (e: 'retry-search'): void;
   (e: 'search', keyword: string): void;
-  (e: 'save-to-cards', media: MediaItem, targetCategory: CategoryType, bestRes?: ResourceItem): void;
+  (e: 'save-to-cards', media: MediaItem, targetCategory: CategoryType, bestRes?: ResourceItem, selectedFids?: string[]): void;
 }>();
 
+const detailResource = ref<ResourceItem | null>(null);
 const targetCategory = ref<CategoryType>('tv');
 const categoryExpanded = ref(false);
 const categories: Array<{ value: CategoryType; label: string }> = [
@@ -151,6 +153,8 @@ watch([() => props.isOpen, () => props.searchKeyword], ([isOpen, keyword]) => {
   if (isOpen) searchQuery.value = keyword || props.media?.title || '';
 }, { immediate: true });
 
+watch([() => props.isOpen, () => props.media?.id, () => props.searchKeyword], () => { detailResource.value = null; });
+
 watch([() => props.isOpen, () => props.media?.id, resultFilter], () => {
   visibleCount.value = batchSize;
 });
@@ -173,6 +177,9 @@ const handleBodyScroll = (event: Event) => {
 
 const requestClose = () => {
   if (!props.isSaving) emit('close');
+};
+const saveDetails = (selectedFids?: string[]) => {
+  if (props.media && detailResource.value) emit('save-to-cards', props.media, targetCategory.value, detailResource.value, selectedFids);
 };
 const dialogRef = ref<HTMLElement | null>(null);
 useDialog(dialogRef, () => props.isOpen, requestClose);
@@ -229,7 +236,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
         </div>
       </div>
 
-      <form class="result-search" role="search" @submit.prevent="submitSearch">
+      <form v-if="!detailResource" class="result-search" role="search" @submit.prevent="submitSearch">
         <Search class="result-search-icon" aria-hidden="true" />
         <input
           v-model="searchQuery"
@@ -260,13 +267,13 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
         </button>
       </form>
 
-      <div v-if="!isAnalyzing && !searchError" class="result-summary" aria-live="polite">
+      <div v-if="!detailResource && !isAnalyzing && !searchError" class="result-summary" aria-live="polite">
         <span>找到</span>
         <strong>{{ rankedQuarkResources.length }}</strong>
         <span>条候选资源 · 添加时验证链接</span>
       </div>
 
-      <div v-if="!isAnalyzing" class="result-filters" role="radiogroup" aria-label="资源筛选">
+      <div v-if="!detailResource && !isAnalyzing" class="result-filters" role="radiogroup" aria-label="资源筛选">
         <SlidersHorizontal aria-hidden="true" />
         <button
           v-for="option in filterOptions"
@@ -284,8 +291,14 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
       </div>
 
       <!-- 列表内容 -->
-      <div class="dialog-body" @scroll.passive="handleBodyScroll">
-        <template v-if="isAnalyzing">
+      <div class="dialog-body" :class="{ 'showing-details': detailResource }" @scroll.passive="handleBodyScroll">
+        <QuarkResourceDetails v-if="detailResource"
+          :resource="detailResource" :is-saving="isSaving" :replacing-source="replacingSource"
+          :save-error="failedResourceId === detailResource.id ? saveError : null"
+          @back="detailResource = null" @open-auth-settings="emit('open-auth-settings')"
+          @save="saveDetails"
+        />
+        <template v-else-if="isAnalyzing">
           <div class="loading-bar">
             <div class="mini-spinner"></div>
             <span>正在检索《{{ searchKeyword || media.title }}》网盘资源...</span>
@@ -323,13 +336,14 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
               </div>
 
               <div class="row-right">
+                <button type="button" class="btn-action btn-details" :disabled="isSaving" @click="detailResource = res">查看资源</button>
                 <button
                   class="btn-action btn-transfer"
                   :class="{ 'is-saving': isSaving && savingResourceId === res.id }"
                   :disabled="isSaving"
                   @click="emit('save-to-cards', media, targetCategory, res)"
                 >
-                  {{ isSaving && savingResourceId === res.id ? (replacingSource ? '正在替换…' : '正在添加…') : failedResourceId === res.id && saveError ? '重试' : replacingSource ? '替换片源' : '加入片库' }}
+                  {{ isSaving && savingResourceId === res.id ? (replacingSource ? '正在替换…' : '正在添加…') : failedResourceId === res.id && saveError ? '重试' : replacingSource ? '全部替换' : '全部保存' }}
                 </button>
               </div>
             </div>
@@ -388,6 +402,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
 .filter-chip { min-height: 44px; padding: 0 17px; border: 1px solid transparent; border-radius: 22px; color: var(--text-secondary); background: transparent; font-size: .8rem; flex-shrink: 0; }
 .filter-chip.active { color: var(--liquid-accent); border-color: rgb(255 255 255 / .14); background: var(--surface-elevated); box-shadow: var(--glass-shadow-sm); font-weight: 650; }
 .dialog-body { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 24px; }
+.dialog-body.showing-details { display: flex; overflow: hidden; }
 .resource-rows { display: grid; gap: 0; }
 .liquid-resource-row { display: flex; align-items: center; gap: 20px; padding: 20px 0; border-bottom: 1px solid rgb(255 255 255 / .08); background: transparent; }
 .row-left { min-width: 0; flex: 1; }
@@ -397,8 +412,9 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
 .recommended-badge svg { width: 12px; height: 12px; }
 .row-tags { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 8px; color: var(--text-tertiary); font-size: .73rem; overflow-wrap: anywhere; }
 .tag-badge { padding: 1px 6px; border: 1px solid rgb(85 113 158 / .14); border-radius: 5px; color: var(--text-secondary); font-size: .67rem; }
-.row-right { display: flex; flex-shrink: 0; }
+.row-right { display: flex; gap: 8px; flex-shrink: 0; }
 .btn-action { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; color: var(--text-primary); background: var(--glass-bg-active); font-size: .81rem; font-weight: 600; }
+.btn-details { color: var(--liquid-accent); background: transparent; border: 1px solid var(--liquid-accent-subtle); }
 .btn-action:hover:not(:disabled) { background: var(--glass-bg-hover); }
 .resource-save-error { margin-top: 12px; }
 .empty-notice { padding: 40px 16px; color: var(--text-secondary); text-align: center; font-size: .9rem; }
@@ -427,7 +443,8 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
   .filter-chip { padding: 0 15px; }
   .dialog-body { padding: 0 16px calc(20px + var(--safe-area-bottom)); }
   .liquid-resource-row { align-items: stretch; flex-direction: column; gap: 14px; padding: 20px 4px; border-radius: 0; background: transparent; }
-  .row-right, .btn-action { width: 100%; }
+  .row-right { width: 100%; }
+  .row-right .btn-action { flex: 1; padding: 0 10px; }
   .row-title { font-size: .91rem; }
 }
 @media (max-height: 500px) and (orientation: landscape) {
