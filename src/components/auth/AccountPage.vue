@@ -310,7 +310,13 @@ defineExpose({ focusAuth, refreshStatus });
 </template>
 
 <style scoped>
-.account-page { position: relative; z-index: 1; width: min(780px, 100%); margin: 0 auto; padding: calc(40px + var(--safe-area-top)) 24px 70px; }
+.account-page { position: relative; z-index: 1; width: min(780px, 100%); height: var(--app-viewport-height); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; margin: 0 auto; padding: calc(40px + var(--safe-area-top)) 24px 70px; }
+.account-page::-webkit-scrollbar { width: 10px; }
+.account-page::-webkit-scrollbar-track { border-radius: 8px; background: var(--glass-bg); }
+.account-page::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 8px; background: var(--text-tertiary); background-clip: padding-box; }
+@supports not selector(::-webkit-scrollbar) {
+  .account-page { scrollbar-width: thin; scrollbar-color: var(--text-tertiary) transparent; }
+}
 .page-heading, .heading-copy { display: flex; align-items: center; gap: 13px; }
 .page-heading { justify-content: space-between; margin-bottom: 27px; }
 .back-button { display: grid; width: 46px; height: 46px; flex-shrink: 0; place-items: center; border: var(--glass-border); border-radius: 50%; color: var(--text-secondary); background: var(--glass-bg); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }

@@ -246,6 +246,9 @@ export class ResourceSearchService {
         method: 'GET',
         headers: {
           Accept: 'application/json',
+          // PanSou's compression middleware can append gzip bytes to a cached JSON response.
+          // Request a single uncompressed document rather than accepting a malformed body.
+          'Accept-Encoding': 'identity',
           'User-Agent': 'MistyRainVideo/1.0'
         },
         signal: controller.signal
