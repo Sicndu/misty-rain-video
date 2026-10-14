@@ -17,7 +17,7 @@ const ENDPOINT_FAILURE_BASE_COOLDOWN_MS = 8 * 1000;
 const ENDPOINT_FAILURE_MAX_COOLDOWN_MS = 2 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 120;
 const MAX_RESULTS = 100;
-const SEARCH_CACHE_REVISION = 3;
+const SEARCH_CACHE_REVISION = 4;
 const COMPLETION_TIMEOUT_MS = 30_000;
 const FOLLOW_UP_DELAYS_MS = [5_000, 15_000];
 
@@ -172,7 +172,7 @@ export class ResourceSearchService {
         throw createSearchError('正在处理其他检索，请稍后重试', 'RESOURCE_SEARCH_BUSY', 503);
       }
       // Register before work begins, so normal/refresh requests share one job.
-      job = this.#startSearch(keyword, key, { refreshLocal: force || cached?.revision !== SEARCH_CACHE_REVISION });
+      job = this.#startSearch(keyword, key, { refreshLocal: force || Boolean(cached && cached.revision !== SEARCH_CACHE_REVISION) });
       this.inFlight.set(key, job);
     }
     if (stale && !force) {
@@ -257,10 +257,17 @@ export class ResourceSearchService {
     const run = async channel => {
       try {
         collect(channel, await this.#fetchEndpoint(channel, keyword, {
-          timeoutMs: Math.max(1, deadline - this.now()),
-          refresh: refreshLocal && isBundledEndpoint(channel.endpoint)
+          timeoutMs: Math.max(1, deadline - this.now())
         }));
         if (isBundledEndpoint(channel.endpoint)) {
+          // A forced PanSou search can immediately return only fast plugins,
+          // even when its cache already contains late results from the previous
+          // round. Capture those first and merge the refresh into them.
+          if (refreshLocal && deadline > this.now()) {
+            collect(channel, await this.#fetchEndpoint(channel, keyword, {
+              timeoutMs: deadline - this.now(), refresh: true
+            }));
+          }
           const receivedAt = this.now();
           for (const delayMs of this.followUpDelaysMs) {
             const dueAt = receivedAt + delayMs;
