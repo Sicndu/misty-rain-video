@@ -14,8 +14,33 @@ export function useQuarkTransfer() {
   const currentMedia = ref<MediaItem | null>(null);
   const quarkResources = ref<ResourceItem[]>([]);
   const searchError = ref('');
+  const searchNotice = ref('');
+  const searchPending = ref(false);
   const searchKeyword = ref('');
   let searchSequence = 0;
+
+  const followSearch = async (keyword: string, sequence: number) => {
+    const deadline = Date.now() + 35_000;
+    for (let attempt = 0; attempt < 35 && Date.now() < deadline; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      if (sequence !== searchSequence || !isOpen.value) return;
+      try {
+        const result = await engine.readCached(keyword);
+        if (sequence !== searchSequence || !isOpen.value) return;
+        if (!result) break;
+        quarkResources.value = result.quarkItems;
+        searchNotice.value = result.message || '';
+        searchPending.value = Boolean(result.refreshing);
+        if (!result.refreshing) return;
+      } catch { break; }
+    }
+    if (sequence === searchSequence && isOpen.value) {
+      searchPending.value = false;
+      searchNotice.value = quarkResources.value.length
+        ? '已展示当前候选；其余来源暂未返回，可稍后重新搜索'
+        : '本轮未取得可用候选，来源可能超时；可稍后重新搜索';
+    }
+  };
 
   /**
    * 在当前资源面板内执行检索。关键词与媒体标题分离，允许用户使用别名
@@ -29,6 +54,8 @@ export function useQuarkTransfer() {
     isOpen.value = true;
     isAnalyzing.value = true;
     searchError.value = '';
+    searchNotice.value = '';
+    searchPending.value = false;
     quarkResources.value = [];
 
     try {
@@ -42,6 +69,9 @@ export function useQuarkTransfer() {
       quarkResources.value = res.quarkItems && res.quarkItems.length > 0
         ? res.quarkItems
         : res.items.filter(i => i.driveType === 'quark');
+      searchNotice.value = res.message || '';
+      searchPending.value = Boolean(res.refreshing);
+      if (res.refreshing) void followSearch(normalizedKeyword, sequence);
     } catch (error) {
       if (sequence !== searchSequence || !isOpen.value) return;
       searchError.value = error instanceof Error ? error.message : '资源检索失败，请稍后重试';
@@ -64,6 +94,8 @@ export function useQuarkTransfer() {
     isOpen.value = false;
     isAnalyzing.value = false;
     searchError.value = '';
+    searchNotice.value = '';
+    searchPending.value = false;
     searchKeyword.value = '';
   };
 
@@ -81,6 +113,8 @@ export function useQuarkTransfer() {
     currentMedia,
     quarkResources,
     searchError,
+    searchNotice,
+    searchPending,
     searchKeyword,
     openTransferModal,
     refreshResources,

@@ -116,6 +116,18 @@ Compose 使用唯一命名卷 `misty-rain-video-data` 持久化 `/app/data`，�
 
 ## 更新与日志
 
+搜索默认并行请求内置引擎的插件和频道通道，先展示已返回的候选，再自动补充其余结果。首批结果/进度默认最多等待 8 秒（`RESOURCE_SEARCH_TIMEOUT_MS`），后台任务最多运行 30 秒，慢来源不会因为首屏已返回而被取消。内置引擎正常响应后，在约 5 秒、15 秒各读取一次其已补齐的缓存（受整轮 30 秒限制），新增候选会自动出现在页面。公共备用服务每个关键词只请求一次，浏览器不再重复调用它；异常渠道不会密集重试。
+
+内置引擎固定为官方 2026-10-12 的 amd64 镜像，源码版本 `221665fb2c9279f22af4684ea2d8c0c331eac1cc`，使用不可变镜像摘要（见 `Dockerfile`）。不再使用停留在 5 月的 `search-amd64` 镜像。默认启用 `erxiaopan`、`wanou`、`quarktv`、`quark4k`、`quarksoo`、`pansearch`、`hunhepan`；移除新引擎已不注册的 `qupanshe`、`qupansou`、`hdr4k`、`jikepan`，防止配置存在但实际未加载。显式配置 `RESOURCE_SEARCH_PLUGINS` 时以管理员配置为准，需要将 `erxiaopan` 加入列表。
+
+镜像构建会在生产运行环境中执行 `scripts/verify-search-runtime.mjs`，只验证启动和插件注册，不搜索或操作网盘；未加载 `erxiaopan` 或配置中的插件时不发布镜像。启动日志也会列出实际加载的插件及缺失项。新引擎使用 `data/search-cache-v2`，保留旧缓存目录方便回滚；应用的旧搜索缓存会重新核对，不需要删除整个数据卷。新来源是否能从生产服务器访问仍取决于站点和网络。
+
+“重新搜索”先读取内置引擎已经补齐的结果，再传递 `refresh=true` 刷新并合并；不会因为重跑时只返回较快的插件结果，就丢掉已找到的正篇。后续补查不强制刷新，以便读取异步完成的结果。后台自动维护等待本轮检索结束后再选择来源。
+
+内置引擎只通过容器内回环地址通信，禁用其响应压缩，并发送 `Accept-Encoding: identity`，避开部分 PanSou 版本压缩中间件重复写正文导致的 JSON 解析错误（如 `Unexpected non-whitespace character after JSON`）。外部来源和网站对外压缩不受影响；不会截取损坏响应中的第一段 JSON 冒充完整结果。
+
+成功检索缓存保存在数据卷的 `resource_search_cache.json`，新鲜结果复用 5 分钟，12 小时内旧结果可先展示并后台刷新；界面会说明缓存或部分结果状态，转存时仍验证分享。空结果只短暂缓存 10 秒。自动追更检索保留严格刷新策略，并为手动搜索预留并发容量。检索仍依赖上游可达性，不能保证新关键词在所有来源故障时返回结果。
+
 ```bash
 docker compose pull
 docker compose up -d

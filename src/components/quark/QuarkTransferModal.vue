@@ -16,6 +16,8 @@ const props = defineProps<{
   currentCategory: CategoryType;
   quarkResources: ResourceItem[];
   searchError?: string;
+  searchNotice?: string;
+  searchPending?: boolean;
   searchKeyword?: string;
   isSaving?: boolean;
   savingResourceId?: string;
@@ -272,6 +274,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
         <strong>{{ rankedQuarkResources.length }}</strong>
         <span>条候选资源 · 添加时验证链接</span>
       </div>
+      <p v-if="!detailResource && !isAnalyzing && searchNotice" class="result-summary" role="status">{{ searchNotice }}</p>
 
       <div v-if="!detailResource && !isAnalyzing" class="result-filters" role="radiogroup" aria-label="资源筛选">
         <SlidersHorizontal aria-hidden="true" />
@@ -354,7 +357,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
           </div>
 
           <div v-else class="empty-notice" role="status">
-            <span>{{ searchError || (resultFilter === 'recommended' ? '暂时没有可用资源，可以修改上方片名重新搜索。' : '当前筛选下没有结果，试试“推荐”。') }}</span>
+            <span>{{ searchError || (searchPending ? '仍在搜索其他来源，找到结果后会自动显示。' : resultFilter === 'recommended' ? '暂时没有可用资源，可以修改上方片名重新搜索。' : '当前筛选下没有结果，试试“推荐”。') }}</span>
             <button v-if="searchError" type="button" class="retry-search-button" :disabled="isSaving" @click="emit('retry-search')">
               <RefreshCw aria-hidden="true" />
               重新检索

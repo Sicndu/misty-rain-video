@@ -65,3 +65,22 @@ test('选集保存传递并持久化范围，随后全部保存清除旧范围',
   await handleApiRequest(makeRequest('/api/media-cards', base), makeResponse(), context);
   assert.equal(context.saved().quarkSelectionFids, undefined);
 });
+
+test('搜索补充接口只读现有缓存，不触发上游请求；同样需要登录', async () => {
+  const context = makeContext();
+  const calls = [];
+  context.resourceSearch = {
+    search: () => assert.fail('Cached polling must not search upstream'),
+    peek: keyword => { calls.push(keyword); return { total: 1, refreshing: true }; }
+  };
+  const request = { method: 'GET', url: '/api/resource-search?kw=仙逆&cached=1', headers: { host: 'localhost' } };
+  const response = makeResponse();
+  await handleApiRequest(request, response, context);
+  assert.equal(JSON.parse(response.body).data.total, 1);
+  assert.deepEqual(calls, ['仙逆']);
+  context.authService.authenticate = () => { throw Object.assign(new Error('login'), { statusCode: 401 }); };
+  const denied = makeResponse();
+  await handleApiRequest(request, denied, context);
+  assert.equal(denied.statusCode, 401);
+  assert.deepEqual(calls, ['仙逆']);
+});

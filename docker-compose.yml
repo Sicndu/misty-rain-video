@@ -26,8 +26,9 @@ services:
       LEGACY_LIBRARY_ROOT_FOLDER: 烟雨视频
       LIBRARY_AUTO_MAINTENANCE: ${LIBRARY_AUTO_MAINTENANCE:-true}
       LIBRARY_MAINTENANCE_MINUTES: ${LIBRARY_MAINTENANCE_MINUTES:-30}
-      # all 表示合并多个检索渠道；cloud_types 始终由服务端锁定为 quark。
+      # all 拆分插件/频道检索；8 秒返回首批状态，后台最多补查 30 秒。
       RESOURCE_SEARCH_SOURCE: all
+      RESOURCE_SEARCH_TIMEOUT_MS: ${RESOURCE_SEARCH_TIMEOUT_MS:-8000}
       RESOURCE_SEARCH_URLS: http://127.0.0.1:8888/api/search,https://so.252035.xyz/api/search
     volumes:
       - misty-rain-data:/app/data

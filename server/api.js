@@ -45,7 +45,7 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
     userContext,
     credentialStore,
     posterService: new PosterService(dataDir),
-    resourceSearch: new ResourceSearchService(),
+    resourceSearch: new ResourceSearchService({ dataDir }),
     danmaku: new DanmakuService(dataDir),
     tvPlaybackClient,
     quarkGateway: new QuarkGateway({ credentialStore, libraryConfigStore, tvPlaybackClient })
@@ -303,8 +303,12 @@ export const handleApiRequest = async (request, response, context) => {
 
     if (pathname === '/api/resource-search' && request.method === 'GET') {
       const keyword = url.searchParams.get('kw');
+      if (url.searchParams.get('cached') === '1') {
+        sendSuccess(response, context.resourceSearch.peek(keyword));
+        return true;
+      }
       const force = url.searchParams.get('refresh') === '1';
-      sendSuccess(response, await context.resourceSearch.search(keyword, { force }));
+      sendSuccess(response, await context.resourceSearch.search(keyword, { force, allowStale: true }));
       return true;
     }
 

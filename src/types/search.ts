@@ -20,6 +20,9 @@ export interface SearchResult {
   quarkItems: ResourceItem[];
   source: 'direct' | 'cors_proxy' | 'cache' | 'error';
   fromCache?: boolean;
+  stale?: boolean;
+  partial?: boolean;
+  refreshing?: boolean;
   message?: string;
 }
 

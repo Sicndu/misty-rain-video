@@ -19,54 +19,64 @@ const DEFAULT_CHANNELS = [
 ].join(',');
 
 const DEFAULT_PLUGINS = [
+  'erxiaopan',
+  'wanou',
   'quarktv',
   'quark4k',
   'quarksoo',
-  'qupanshe',
-  'qupansou',
-  'hdr4k',
   'pansearch',
-  'jikepan',
   'hunhepan'
 ].join(',');
 
 const wait = delay => new Promise(resolve => setTimeout(resolve, delay));
 
-const probeHealth = async endpoint => {
+export const probeBundledSearch = async (endpoint, { fetchImpl = globalThis.fetch, expectedPlugins = [] } = {}) => {
   try {
-    const response = await fetch(`${endpoint.replace(/\/api\/search$/, '')}/api/health`, {
+    const response = await fetchImpl(`${endpoint.replace(/\/api\/search$/, '')}/api/health`, {
+      headers: { 'Accept-Encoding': 'identity' },
       signal: AbortSignal.timeout(700)
     });
-    return response.ok;
+    if (!response.ok) return { ready: false, missingPlugins: [] };
+    const status = await response.json();
+    const plugins = Array.isArray(status.plugins) ? status.plugins.filter(name => typeof name === 'string') : [];
+    return {
+      ready: status.status === 'ok',
+      plugins,
+      missingPlugins: expectedPlugins.filter(name => !plugins.includes(name))
+    };
   } catch {
-    return false;
+    return { ready: false, missingPlugins: [] };
   }
 };
 
-export const startBundledResourceSearch = async ({ appDir, dataDir, port = 8888 }) => {
+export const startBundledResourceSearch = async ({ appDir, dataDir, port = 8888, spawnImpl = spawn, fetchImpl = globalThis.fetch, delay = wait }) => {
   const binaryPath = path.resolve(appDir, 'bin', 'pansou');
   if (!fs.existsSync(binaryPath)) {
     console.warn('[resource-search] 当前镜像未包含内置检索引擎，将使用远端备用源');
     return null;
   }
 
-  let cachePath = path.resolve(dataDir, 'search-cache');
+  // Isolate the upgraded engine's cache format and source set from the May build.
+  // Keep old files intact so rolling the application image back remains safe.
+  let cachePath = path.resolve(dataDir, 'search-cache-v2');
   try {
     fs.mkdirSync(cachePath, { recursive: true });
     fs.accessSync(cachePath, fs.constants.W_OK);
   } catch {
-    cachePath = path.resolve('/tmp', 'misty-rain-search-cache');
+    cachePath = path.resolve('/tmp', 'misty-rain-search-cache-v2');
     fs.mkdirSync(cachePath, { recursive: true });
     console.warn('[resource-search] 数据卷缓存目录不可写，本次运行改用临时缓存');
   }
   const endpoint = `http://127.0.0.1:${port}/api/search`;
-  const child = spawn(binaryPath, [], {
+  const enabledPlugins = process.env.RESOURCE_SEARCH_PLUGINS || DEFAULT_PLUGINS;
+  const expectedPlugins = enabledPlugins.split(',').map(value => value.trim()).filter(Boolean);
+  const child = spawnImpl(binaryPath, [], {
     cwd: appDir,
     env: {
       ...process.env,
       PORT: String(port),
       CHANNELS: process.env.RESOURCE_SEARCH_CHANNELS || DEFAULT_CHANNELS,
-      ENABLED_PLUGINS: process.env.RESOURCE_SEARCH_PLUGINS || DEFAULT_PLUGINS,
+      ENABLED_PLUGINS: enabledPlugins,
       AUTH_ENABLED: 'false',
       CACHE_ENABLED: 'true',
       CACHE_PATH: cachePath,
@@ -77,12 +87,16 @@ export const startBundledResourceSearch = async ({ appDir, dataDir, port = 8888 
       ASYNC_MAX_BACKGROUND_WORKERS: '12',
       ASYNC_MAX_BACKGROUND_TASKS: '60',
       ASYNC_CACHE_TTL_HOURS: '2',
-      ENABLE_COMPRESSION: 'true'
+      // This engine only serves the app over loopback. Some bundled versions
+      // write the uncompressed body before their compression middleware writes
+      // it again, yielding concatenated JSON (or JSON followed by gzip bytes).
+      ENABLE_COMPRESSION: 'false'
     },
     stdio: ['ignore', 'inherit', 'inherit']
   });
 
   let exited = false;
+  const closed = new Promise(resolve => child.once('close', resolve));
   child.once('exit', (code, signal) => {
     exited = true;
     if (code !== 0 && signal !== 'SIGTERM') {
@@ -93,23 +107,24 @@ export const startBundledResourceSearch = async ({ appDir, dataDir, port = 8888 
     console.error(`[resource-search] 内置检索引擎启动失败：${error.message}`);
   });
 
-  let ready = false;
+  let health = { ready: false, missingPlugins: [] };
   for (let attempt = 0; attempt < 36 && !exited; attempt += 1) {
-    if (await probeHealth(endpoint)) {
-      ready = true;
-      break;
-    }
-    await wait(250);
+    health = await probeBundledSearch(endpoint, { expectedPlugins, fetchImpl });
+    if (health.ready) break;
+    await delay(250);
   }
 
-  if (ready) console.log(`[resource-search] 内置检索引擎已就绪：${endpoint}`);
+  if (health.ready) console.log(`[resource-search] 内置检索引擎已就绪：${endpoint}；插件：${health.plugins.join(',')}`);
   else console.warn('[resource-search] 内置检索引擎未能及时就绪，将保留远端备用源');
+  if (health.missingPlugins.length) console.error(`[resource-search] 配置的检索插件未加载：${health.missingPlugins.join(',')}，请检查引擎镜像与插件配置`);
 
   return {
     endpoint,
-    ready,
-    stop: () => {
+    ...health,
+    stop: async () => {
       if (!exited) child.kill('SIGTERM');
+      const timeout = setTimeout(() => { if (!exited) child.kill('SIGKILL'); }, 3_000);
+      try { await closed; } finally { clearTimeout(timeout); }
     }
   };
 };

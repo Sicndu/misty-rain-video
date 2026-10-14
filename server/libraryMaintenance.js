@@ -124,7 +124,7 @@ export class LibraryMaintenance {
                 }
                 if (entry.unavailableCount >= 3 && card.quarkSelectionFids === undefined && searches < 2 && !this.stopped) {
                   searches += 1;
-                  const results = await this.context.resourceSearch.search(card.title, { force: true });
+                  const results = await this.context.resourceSearch.search(card.title, { force: true, priority: 'background' });
                   const candidates = [...new Map((results.merged_by_type?.quark || [])
                     .filter(item => /^https:\/\/pan\.quark\.cn\/s\/[a-zA-Z0-9]+$/.test(item.url) && item.url !== card.quarkShareUrl)
                     .map(item => [item.url, item])).values()].slice(0, 5);
