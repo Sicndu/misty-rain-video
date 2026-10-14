@@ -1,4 +1,4 @@
-import type { ResourceItem, SearchResult } from '../types/search';
+import type { ResourceItem, SearchResult, ShareValidationResult } from '../types/search';
 import { apiUrl } from './appUrl';
 import { authFetch } from './authService';
 import { parseLibraryInput } from './libraryFeedback';
@@ -118,6 +118,25 @@ export class SilentSearchEngine {
     })().finally(() => this.publicInFlight.delete(key));
     this.publicInFlight.set(key, task);
     return task;
+  }
+
+  async validateResources(items: ResourceItem[], force = false): Promise<ShareValidationResult> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8_000);
+    try {
+      const response = await authFetch(apiUrl('/api/resource-search/validate'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+        body: JSON.stringify({ items: items.map(item => ({ url: item.url, password: item.password || '' })), force })
+      });
+      const payload = await response.json();
+      if (response.status === 401 || response.status === 403) throw Object.assign(new Error('登录状态已失效'), { requiresAuth: true });
+      if (!response.ok || payload.code !== 0 || !Array.isArray(payload.data?.entries)) throw new Error('链接校验暂不可用');
+      return payload.data;
+    } catch (error) {
+      if (error && typeof error === 'object' && 'requiresAuth' in error) throw error;
+      // A network failure is uncertainty, never evidence that every share was cancelled.
+      return { entries: items.map(item => ({ url: item.url, password: item.password || '', status: 'unknown' })), pending: false };
+    } finally { clearTimeout(timer); }
   }
 
   private failedSearch(error: unknown): SearchResult {

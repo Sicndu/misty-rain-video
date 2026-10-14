@@ -1,4 +1,5 @@
 import dns from 'node:dns';
+import { shareFailureCode } from './shareAvailability.js';
 import { createOpaqueId } from './http.js';
 import { resolveShareSelection, entriesInSelection } from './shareSelection.js';
 import { includeSubtitleCompanions, isSubtitleFile, isTextSubtitleFile, subtitleMatchesVideo, subtitleLanguage, decodeSubtitle, subtitleToVtt } from './subtitles.js';
@@ -899,6 +900,10 @@ export class QuarkGateway {
     return this.#createSharePlaybackSession({ shareUrl, title, passcode }, principal);
   }
 
+  async probeShare({ shareUrl, passcode = '' }) {
+    await this.#resolveShareCredentials({ shareUrl, passcode, cookie: this.#requireCookie(), timeoutMs: 3_000 });
+  }
+
   async getShareDetails({ shareUrl, passcode = '' }) {
     const cookie = this.#requireCookie();
     const share = await this.#resolveShareCredentials({ shareUrl, passcode, cookie });
@@ -1400,20 +1405,20 @@ export class QuarkGateway {
     return cookie;
   }
 
-  async #resolveShareCredentials({ shareUrl, passcode = '', cookie }) {
+  async #resolveShareCredentials({ shareUrl, passcode = '', cookie, timeoutMs = API_REQUEST_TIMEOUT_MS }) {
     const { pwdId } = parseShareUrl(shareUrl);
     const tokenData = await this.#requestJson(`${SHARE_HOST}/share/sharepage/token?pr=ucpro&fr=pc`, {
       method: 'POST',
       cookie,
       userAgent: QUARK_DESKTOP_USER_AGENT,
-      body: { pwd_id: pwdId, passcode: String(passcode || '') }
+      body: { pwd_id: pwdId, passcode: String(passcode || '') },
+      timeoutMs
     });
     if (tokenData?.code !== 0 || !tokenData?.data?.stoken) {
       throw new QuarkApiError(tokenData?.message || '网盘分享链接已失效或需要提取码', {
         // Unknown provider failures (including throttling) must not trigger a
         // source change. Only explicit unavailability enters that policy.
-        code: /取消.*分享|分享.*(?:失效|过期|删除|不存在)|提取码|不存在.*分享/.test(tokenData?.message || '')
-          ? 'QUARK_SHARE_UNAVAILABLE' : 'QUARK_SHARE_ACCESS_FAILED',
+        code: shareFailureCode(tokenData?.message),
         statusCode: 422
       });
     }
@@ -1436,7 +1441,7 @@ export class QuarkGateway {
       const result = await this.#requestJson(url, { cookie, userAgent: QUARK_DESKTOP_USER_AGENT });
       if (result?.code !== 0) {
         throw new QuarkApiError(result?.message || '读取网盘分享目录失败', {
-          code: 'QUARK_SHARE_LIST_FAILED',
+          code: shareFailureCode(result?.message) === 'QUARK_SHARE_UNAVAILABLE' ? 'QUARK_SHARE_UNAVAILABLE' : 'QUARK_SHARE_LIST_FAILED',
           statusCode: 502
         });
       }
@@ -1562,7 +1567,7 @@ export class QuarkGateway {
         const result = await this.#requestJson(url, { cookie, userAgent: QUARK_DESKTOP_USER_AGENT });
         if (result?.code !== 0) {
           throw new QuarkApiError(result?.message || '读取网盘分享目录失败', {
-            code: 'QUARK_SHARE_LIST_FAILED',
+            code: shareFailureCode(result?.message) === 'QUARK_SHARE_UNAVAILABLE' ? 'QUARK_SHARE_UNAVAILABLE' : 'QUARK_SHARE_LIST_FAILED',
             statusCode: 502
           });
         }
@@ -2339,7 +2344,7 @@ export class QuarkGateway {
           'Cookie': cookie
         },
         ...(options.body ? { body: JSON.stringify(options.body) } : {}),
-        signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS)
+        signal: AbortSignal.timeout(options.timeoutMs || API_REQUEST_TIMEOUT_MS)
       });
     } catch (error) {
       throw new QuarkApiError(`连接播放服务失败：${error.message}`, {
@@ -2384,8 +2389,9 @@ export class QuarkGateway {
       });
     }
     if (!options.acceptErrorCodes && !response.ok) {
+      const shareCode = /\/share\//.test(new URL(url).pathname) ? shareFailureCode(result?.message) : 'QUARK_SHARE_ACCESS_FAILED';
       throw new QuarkApiError(result?.message || `播放服务请求失败（HTTP ${response.status}）`, {
-        code: 'QUARK_HTTP_ERROR',
+        code: shareCode === 'QUARK_SHARE_ACCESS_FAILED' ? 'QUARK_HTTP_ERROR' : shareCode,
         statusCode: response.status >= 400 && response.status < 500 ? 422 : 502,
         details: { upstreamStatus: response.status, upstreamCode: code }
       });

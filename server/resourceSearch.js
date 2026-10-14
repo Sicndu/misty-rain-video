@@ -134,8 +134,9 @@ const mergePayloads = payloads => {
 export class ResourceSearchService {
   constructor({ fetchImpl = globalThis.fetch, urls = configuredSearchUrls(), timeoutMs = requestTimeoutMs(),
     source = configuredSearchSource(), aggregationMs = RESULT_AGGREGATION_WINDOW_MS, dataDir, now = Date.now,
-    maxConcurrent = 4, completionTimeoutMs = COMPLETION_TIMEOUT_MS, followUpDelaysMs = FOLLOW_UP_DELAYS_MS } = {}) {
+    exclude = () => false, maxConcurrent = 4, completionTimeoutMs = COMPLETION_TIMEOUT_MS, followUpDelaysMs = FOLLOW_UP_DELAYS_MS } = {}) {
     this.fetchImpl = fetchImpl;
+    this.exclude = exclude;
     this.urls = urls;
     this.timeoutMs = timeoutMs;
     this.source = source;
@@ -361,7 +362,8 @@ export class ResourceSearchService {
   }
 
   #publicResult(entry, stale = false, refreshing = false) {
-    return { ...entry.data, stale, refreshing, partial: Boolean(entry.partial), cachedAt: new Date(entry.createdAt).toISOString(),
+    const items = entry.data.merged_by_type.quark.filter(item => !this.exclude(item));
+    return { ...entry.data, total: items.length, merged_by_type: { quark: items }, stale, refreshing, partial: Boolean(entry.partial), cachedAt: new Date(entry.createdAt).toISOString(),
       ...(refreshing ? { message: entry.isEmpty ? '检索引擎仍在搜索，结果会自动出现…' : '先展示已找到的候选，正在补充其余来源…' }
         : stale ? { message: '暂用最近检索结果；添加时会验证链接' }
           : entry.partial ? { message: '部分来源暂不可用，已展示找到的候选；添加时会验证链接' } : {}) };

@@ -68,7 +68,8 @@ const {
   openTransferModal,
   closeTransferModal,
   retrySearch,
-  refreshResources
+  refreshResources,
+  rejectResource
 } = useQuarkTransfer();
 
 const navbarRef = ref<InstanceType<typeof Navbar> | null>(null);
@@ -298,6 +299,7 @@ const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRe
     if (isTransferOpen.value) requestLayerClose('transfer', closeTransferModal);
     return true;
   } catch (error) {
+    if (bestRes && error && typeof error === 'object' && 'code' in error && error.code === 'QUARK_SHARE_UNAVAILABLE') rejectResource(bestRes.url);
     saveError.value = getLibrarySaveFeedback(error);
     failedResourceId.value = bestRes?.id || 'direct';
     return false;
@@ -616,6 +618,7 @@ const navigateMobileTab = (tab: MobileDockTab) => {
     @close="closeTransferPanel"
     @retry-search="retrySearch"
     @search="refreshResources"
+    @resource-unavailable="rejectResource"
     @save-to-cards="handleSaveCard"
     />
 

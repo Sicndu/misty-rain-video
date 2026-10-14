@@ -9,6 +9,7 @@ import { LibraryMaintenance } from './libraryMaintenance.js';
 import { QUARK_LIBRARY_FOLDERS, QuarkGateway } from './quarkGateway.js';
 import { isGenericPoster, LEGACY_DEFAULT_POSTER, PosterService } from './posterService.js';
 import { ResourceSearchService } from './resourceSearch.js';
+import { ShareAvailability } from './shareAvailability.js';
 import { TvPlaybackClient } from './tvPlaybackClient.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -40,15 +41,18 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
     userContexts.set(key, value);
     return value;
   };
+  const quarkGateway = new QuarkGateway({ credentialStore, libraryConfigStore, tvPlaybackClient });
+  const shareAvailability = new ShareAvailability({ dataDir, probe: input => quarkGateway.probeShare(input) });
   const context = {
     authService,
     userContext,
     credentialStore,
     posterService: new PosterService(dataDir),
-    resourceSearch: new ResourceSearchService({ dataDir }),
+    resourceSearch: new ResourceSearchService({ dataDir, exclude: item => shareAvailability.isUnavailable(item.url) }),
+    shareAvailability,
     danmaku: new DanmakuService(dataDir),
     tvPlaybackClient,
-    quarkGateway: new QuarkGateway({ credentialStore, libraryConfigStore, tvPlaybackClient })
+    quarkGateway
   };
   context.libraryMaintenance = new LibraryMaintenance(context);
   return context;
@@ -122,6 +126,14 @@ const readLibrarySources = async (context, user, userData) => {
       quarkSelectionFids: saved.quarkSelectionFids
     };
   });
+};
+
+const importLibraryShare = async (context, card, user) => {
+  try { return await context.quarkGateway.importShare(card, user); }
+  catch (error) {
+    if (error?.code === 'QUARK_SHARE_UNAVAILABLE' && card.quarkShareUrl) context.shareAvailability?.markUnavailable(card.quarkShareUrl);
+    throw error;
+  }
 };
 
 const persistablePoster = value => isGenericPoster(value) || /\/api\/media-posters\//.test(value) ? '' : value;
@@ -312,6 +324,12 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
+    if (pathname === '/api/resource-search/validate' && request.method === 'POST') {
+      const input = await readRequestBody(request, 64 * 1024);
+      sendSuccess(response, await context.shareAvailability.inspect(input.items, { force: input.force === true }));
+      return true;
+    }
+
     const posterMatch = pathname.match(/^\/api\/media-posters\/([^/]+)$/);
     if (posterMatch && (request.method === 'GET' || request.method === 'HEAD')) {
       const asset = context.posterService.getAsset(decodeURIComponent(posterMatch[1]));
@@ -330,7 +348,11 @@ export const handleApiRequest = async (request, response, context) => {
 
     if (pathname === '/api/quark/share-details' && request.method === 'POST') {
       const input = await readRequestBody(request);
-      sendSuccess(response, await context.quarkGateway.getShareDetails(input));
+      try { sendSuccess(response, await context.quarkGateway.getShareDetails(input)); }
+      catch (error) {
+        if (error?.code === 'QUARK_SHARE_UNAVAILABLE') context.shareAvailability?.markUnavailable(input.shareUrl);
+        throw error;
+      }
       return true;
     }
 
@@ -347,7 +369,7 @@ export const handleApiRequest = async (request, response, context) => {
           throw error;
         }
         if (/pan\.quark\.cn\/s\/[a-zA-Z0-9]+/i.test(item.quarkShareUrl || '')) {
-          const imported = await context.quarkGateway.importShare(item, user);
+          const imported = await importLibraryShare(context, item, user);
           if (imported.replacedFid) {
             userData.mediaRepository.removeFid(imported.replacedFid);
             userData.playbackHistory.removeByMediaFid(imported.replacedFid);
@@ -515,7 +537,7 @@ export const handleApiRequest = async (request, response, context) => {
 
     if (pathname === '/api/library/import' && request.method === 'POST') {
       const item = await readRequestBody(request);
-      const imported = await context.quarkGateway.importShare(item, user);
+      const imported = await importLibraryShare(context, item, user);
       if (imported.replacedFid) {
         userData.mediaRepository.removeFid(imported.replacedFid);
         userData.playbackHistory.removeByMediaFid(imported.replacedFid);

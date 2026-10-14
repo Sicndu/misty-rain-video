@@ -26,6 +26,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void;
+  (e: 'resource-unavailable', url: string): void;
   (e: 'open-auth-settings'): void;
   (e: 'transfer', res: ResourceItem): void;
   (e: 'retry-search'): void;
@@ -264,7 +265,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
         <QuarkResourceDetails v-if="detailResource"
           :resource="detailResource" :is-saving="isSaving" :replacing-source="replacingSource"
           :save-error="failedResourceId === detailResource.id ? saveError : null"
-          @back="detailResource = null" @open-auth-settings="emit('open-auth-settings')"
+          @back="detailResource = null" @unavailable="emit('resource-unavailable', $event.url); detailResource = null" @open-auth-settings="emit('open-auth-settings')"
           @save="saveDetails"
         />
         <template v-else-if="isAnalyzing">
@@ -297,6 +298,8 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
                   </div>
                   <div class="row-tags">
                     <span class="tag-badge">{{ res.quality }}</span>
+                    <span v-if="res.linkStatus === 'unknown'" class="tag-meta">链接待确认</span>
+                    <span v-else-if="res.linkStatus === 'restricted'" class="tag-meta">需要提取码</span>
                     <span v-if="res.size" class="tag-meta">{{ res.size }}</span>
                     <span v-if="res.password" class="tag-meta">提取码已自动识别</span>
                     <span class="tag-meta">{{ res.datetime }}</span>

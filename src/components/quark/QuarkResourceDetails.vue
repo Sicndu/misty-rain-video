@@ -14,6 +14,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   (e: 'back'): void;
+  (e: 'unavailable', resource: ResourceItem): void;
   (e: 'save', selectedFids?: string[]): void;
   (e: 'open-auth-settings'): void;
 }>();
@@ -59,7 +60,10 @@ const load = async () => {
     const result = await QuarkStreamService.getShareDetails(props.resource.url, props.resource.password);
     if (requestSequence === sequence) details.value = result;
   } catch (error) {
-    if (requestSequence === sequence) loadError.value = error instanceof Error ? error.message : '读取资源详情失败';
+    if (requestSequence === sequence) {
+      loadError.value = error instanceof Error ? error.message : '读取资源详情失败';
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'QUARK_SHARE_UNAVAILABLE') emit('unavailable', props.resource);
+    }
   } finally {
     if (requestSequence === sequence) isLoading.value = false;
   }
