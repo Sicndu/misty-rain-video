@@ -108,7 +108,11 @@ Compose 使用唯一命名卷 `misty-rain-video-data` 持久化 `/app/data`，�
 
 搜索默认并行请求内置引擎的插件和频道通道，先展示已返回的候选，再自动补充其余结果。首批结果/进度默认最多等待 8 秒（`RESOURCE_SEARCH_TIMEOUT_MS`），后台任务最多运行 30 秒，慢来源不会因为首屏已返回而被取消。内置引擎正常响应后，在约 5 秒、15 秒各读取一次其已补齐的缓存（受整轮 30 秒限制），新增候选会自动出现在页面。公共备用服务每个关键词只请求一次，浏览器不再重复调用它；异常渠道不会密集重试。
 
-内置插件增加现有镜像已包含的 `wanou`，补充旧有 9 个来源的剧集覆盖；未增加新的公共检索服务器。公共来源的 `erxiaopan` 结果仍参与聚合，但现有 `search-amd64` 镜像尚未包含此插件，不能仅靠配置启用。显式配置 `RESOURCE_SEARCH_PLUGINS` 时以管理员配置为准，需要自行将 `wanou` 加入列表。“重新搜索”会在首轮向内置引擎传递 `refresh=true`，后续补查不强制刷新，以便读取异步完成的结果。新版不会继续把旧版本的单条快照视为完整缓存。后台自动维护等待本轮检索结束后再选择来源。
+内置引擎固定为官方 2026-10-12 的 amd64 镜像，源码版本 `221665fb2c9279f22af4684ea2d8c0c331eac1cc`，使用不可变镜像摘要（见 `Dockerfile`）。不再使用停留在 5 月的 `search-amd64` 镜像。默认启用 `erxiaopan`、`wanou`、`quarktv`、`quark4k`、`quarksoo`、`pansearch`、`hunhepan`；移除新引擎已不注册的 `qupanshe`、`qupansou`、`hdr4k`、`jikepan`，防止配置存在但实际未加载。显式配置 `RESOURCE_SEARCH_PLUGINS` 时以管理员配置为准，需要将 `erxiaopan` 加入列表。
+
+镜像构建会在生产运行环境中执行 `scripts/verify-search-runtime.mjs`，只验证启动和插件注册，不搜索或操作网盘；未加载 `erxiaopan` 或配置中的插件时不发布镜像。启动日志也会列出实际加载的插件及缺失项。新引擎使用 `data/search-cache-v2`，保留旧缓存目录方便回滚；应用的旧搜索缓存会重新核对，不需要删除整个数据卷。新来源是否能从生产服务器访问仍取决于站点和网络。
+
+“重新搜索”会在首轮向内置引擎传递 `refresh=true`，后续补查不强制刷新，以便读取异步完成的结果。后台自动维护等待本轮检索结束后再选择来源。
 
 内置引擎只通过容器内回环地址通信，禁用其响应压缩，并发送 `Accept-Encoding: identity`，避开部分 PanSou 版本压缩中间件重复写正文导致的 JSON 解析错误（如 `Unexpected non-whitespace character after JSON`）。外部来源和网站对外压缩不受影响；不会截取损坏响应中的第一段 JSON 冒充完整结果。
 
