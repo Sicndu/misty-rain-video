@@ -43,6 +43,7 @@ async function compile(entry, name) {
   return import(pathToFileURL(outfile));
 }
 const Account = (await compile('src/components/auth/AccountPage.vue', 'account')).default;
+const TitleEditor = (await compile('src/components/media/MediaTitleEditor.vue', 'title-editor')).default;
 const Sidebar = (await compile('src/components/layout/DesktopSidebar.vue', 'sidebar')).default;
 const Subtitles = (await compile('src/components/player/SubtitleControls.vue', 'subtitles')).default;
 const Player = (await compile('src/components/player/QuarkEmbedPlayerModal.vue', 'player')).default;
@@ -70,6 +71,45 @@ function mockApi(t) {
     return Response.json({ code: 0, data });
   });
 }
+
+test('观看记录只展示一次，带进度、继续播放与删除；展开不会复制未看完记录', async () => {
+  const entries = Array.from({ length: 7 }, (_, index) => ({ id: `history-${index}`, media: { ...media, title: `影片${index}` }, episodeFid: 'ep1', episodeNumber: 1, position: 120, duration: 600, completed: index === 0, updatedAt: '2026-10-14' }));
+  let played, deleted;
+  const app = mount(Account, { user: user('admin'), history: entries, onPlayHistory: entry => { played = entry; }, onDeleteHistory: id => { deleted = id; } });
+  try {
+    assert.equal(document.querySelector('.continue-history-section'), null);
+    assert.equal(document.querySelectorAll('.history-row').length, 5);
+    assert.equal(document.querySelector('.history-play').textContent, '再看');
+    assert.equal(document.querySelector('.history-progress i').style.width, '20%');
+    document.querySelector('.history-toggle').click(); await nextTick();
+    assert.equal(document.querySelectorAll('.history-row').length, 7);
+    assert.equal(new Set([...document.querySelectorAll('.history-copy strong')].map(item => item.textContent)).size, 7);
+    document.querySelectorAll('.history-main')[1].click(); assert.equal(played.id, 'history-1');
+    document.querySelectorAll('.history-delete')[1].click(); assert.equal(deleted, 'history-1');
+  } finally { app.unmount(); }
+});
+
+test('名称编辑保留原值，空名称不能提交，失败可重试，提交时阻止关闭', async () => {
+  const state = reactive({ open: false, media, saving: false, error: '' });
+  let saved, cancels = 0;
+  const app = createApp({ render: () => h(TitleEditor, { ...state, onSave: value => { saved = value; }, onCancel: () => { cancels++; } }) });
+  document.body.innerHTML = '<div id="mount"></div>'; app.mount('#mount');
+  try {
+    state.open = true; await nextTick();
+    const input = document.querySelector('#media-title-input');
+    assert.equal(input.value, media.title);
+    input.value = '  正确名称  '; input.dispatchEvent(new window.Event('input', { bubbles: true })); await nextTick();
+    document.querySelector('.title-sheet').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+    assert.equal(saved, '正确名称');
+    state.error = '网络错误'; await nextTick(); assert.equal(document.querySelector('#media-title-error').textContent, '网络错误');
+    assert.equal(input.value, '  正确名称  ');
+    state.saving = true; await nextTick();
+    document.querySelector('.title-backdrop').click(); assert.equal(cancels, 0);
+    assert.equal(input.disabled, true);
+    state.saving = false; input.value = '  '; input.dispatchEvent(new window.Event('input', { bubbles: true })); await nextTick();
+    assert.equal(document.querySelector('.save-title').disabled, true);
+  } finally { app.unmount(); }
+});
 
 test('settings show no read-only identity; advanced configuration is an admin-only inner page', async t => {
   mockApi(t);

@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { getLibraryUpdateFeedback } from '../../services/libraryUpdateFeedback';
 import { useDialog } from '../../composables/useDialog';
-import { ChevronRight, Download, ListFilter, RefreshCw, Trash2, X } from '@lucide/vue';
+import { ChevronRight, Download, ListFilter, Pencil, RefreshCw, Trash2, X } from '@lucide/vue';
 import MediaPoster from '../common/MediaPoster.vue';
 import type { MediaItem } from '../../types/media';
 
@@ -14,6 +14,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'cancel'): void;
   (e: 'edit-category'): void;
+  (e: 'edit-title'): void;
   (e: 're-search'): void;
   (e: 'update-library'): void;
   (e: 'delete'): void;
@@ -56,6 +57,11 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
         </div>
 
         <div class="action-list">
+          <button v-if="media.quarkFid" type="button" class="action-item" @click="emit('edit-title')">
+            <span class="action-icon" aria-hidden="true"><Pencil /></span>
+            <span class="action-copy"><strong>修改名称</strong></span>
+            <ChevronRight class="chevron" aria-hidden="true" />
+          </button>
           <button v-if="(media.newEpisodeCount || 0) > 0" type="button" class="action-item update" @click="emit('update-library')">
             <span class="action-icon" aria-hidden="true">
               <Download />

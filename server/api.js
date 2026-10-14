@@ -7,7 +7,7 @@ import { DanmakuService } from './danmaku/service.js';
 import { LibraryConfigStore, LibraryViewRepository, MediaRepository, PlaybackCacheRepository, PlaybackHistoryRepository, PlayerPreferencesStore, QuarkCredentialStore, LibraryMaintenanceRepository } from './storage.js';
 import { LibraryMaintenance } from './libraryMaintenance.js';
 import { QUARK_LIBRARY_FOLDERS, QuarkGateway } from './quarkGateway.js';
-import { isGenericPoster, LEGACY_DEFAULT_POSTER, PosterService } from './posterService.js';
+import { isGenericPoster, PosterService } from './posterService.js';
 import { ResourceSearchService } from './resourceSearch.js';
 import { ShareAvailability } from './shareAvailability.js';
 import { TvPlaybackClient } from './tvPlaybackClient.js';
@@ -47,7 +47,10 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
     authService,
     userContext,
     credentialStore,
-    posterService: new PosterService(dataDir),
+    posterService: new PosterService(dataDir, {
+      resolveThumbnail: (item, user) => quarkGateway.getLibraryThumbnail(item.quarkFid, user),
+      fetchThumbnail: (url, signal) => quarkGateway.fetchMedia(url, undefined, 'web', '', { signal })
+    }),
     resourceSearch: new ResourceSearchService({ dataDir, exclude: item => shareAvailability.isUnavailable(item.url) }),
     shareAvailability,
     danmaku: new DanmakuService(dataDir),
@@ -74,12 +77,13 @@ const readLibrary = async (context, user, userData) => {
     return {
       ...saved,
       ...item,
+      title: userData.libraryViewRepository.titleFor?.(item.quarkFid) || item.title,
       poster: saved.poster || item.poster || '',
       desc: saved.desc || item.desc,
       quarkShareUrl: saved.quarkShareUrl || item.quarkShareUrl
     };
   });
-  const enriched = await context.posterService.enrich(cards);
+  const enriched = await context.posterService.enrich(cards, user);
   const grouped = new Map();
   const normalizeTitle = value => String(value || '')
     .normalize('NFKC')
@@ -107,7 +111,7 @@ const readLibrary = async (context, user, userData) => {
     };
   }).map(item => ({
     ...item,
-    poster: item.poster || LEGACY_DEFAULT_POSTER,
+    poster: isGenericPoster(item.poster) ? '' : item.poster,
     desc: String(item.desc || '').replace(/夸克\s*(?:网盘)?/gi, '云端网盘').replace(/\bSVIP\b/gi, '高清播放')
   }));
 };
@@ -121,6 +125,7 @@ const readLibrarySources = async (context, user, userData) => {
       || {};
     return {
       ...item,
+      title: userData.libraryViewRepository.titleFor?.(item.quarkFid) || item.title,
       quarkShareUrl: saved.quarkShareUrl || item.quarkShareUrl || '',
       quarkPasscode: saved.quarkPasscode || item.quarkPasscode || '',
       quarkSelectionFids: saved.quarkSelectionFids
@@ -137,6 +142,19 @@ const importLibraryShare = async (context, card, user) => {
 };
 
 const persistablePoster = value => isGenericPoster(value) || /\/api\/media-posters\//.test(value) ? '' : value;
+
+const historyMedia = (media, userData) => {
+  const fid = media.quarkFid || (String(media.id || '').startsWith('quark:') ? media.id.slice(6) : '');
+  const title = userData.libraryViewRepository?.titleFor?.(fid) || media.title;
+  return { ...media, title, poster: isGenericPoster(media.poster) || title !== media.title ? '' : media.poster };
+};
+
+const readHistory = async (context, user, userData) => {
+  const entries = userData.playbackHistory.all();
+  // History is a snapshot of progress; title and cover use current library metadata.
+  const media = await context.posterService.enrich(entries.map(entry => historyMedia(entry.media, userData)), user);
+  return entries.map((entry, index) => ({ ...entry, media: media[index] }));
+};
 
 const publicPlaybackStatus = status => ({
   isConfigured: Boolean(status?.isConfigured),
@@ -417,6 +435,28 @@ export const handleApiRequest = async (request, response, context) => {
       }
     }
 
+    if (pathname === '/api/media-cards/title' && request.method === 'PATCH') {
+      const body = await readRequestBody(request, 4096);
+      const title = typeof body.title === 'string' ? body.title.trim() : '';
+      const fid = typeof body.quarkFid === 'string' ? body.quarkFid.trim() : '';
+      if (!fid || fid.length > 240 || !title || title.length > 120 || /[\u0000-\u001f\u007f]/.test(title)) {
+        throw Object.assign(new Error('名称不能为空，最多 120 个字符'), { statusCode: 400, code: 'INVALID_MEDIA_TITLE' });
+      }
+      const library = await context.quarkGateway.listLibrary(user);
+      const item = library.find(card => card.quarkFid === fid);
+      if (!item) throw Object.assign(new Error('影片不在当前账号的片库中'), { statusCode: 403, code: 'MEDIA_FOLDER_FORBIDDEN' });
+      const previousTitle = userData.libraryViewRepository.titleFor(fid) || item.title;
+      const category = userData.libraryViewRepository.categoryFor(previousTitle);
+      const saved = userData.mediaRepository.all().find(card => card.quarkFid === fid) || {};
+      const [renamed] = await context.posterService.enrich([{
+        ...saved, ...item, title, category: category || item.category, poster: persistablePoster(saved.poster || item.poster || '')
+      }], user);
+      userData.libraryViewRepository.setTitle(fid, title);
+      if (category) userData.libraryViewRepository.setCategory(title, category);
+      sendSuccess(response, renamed, '名称已修改');
+      return true;
+    }
+
     if (pathname === '/api/media-cards/category' && request.method === 'PATCH') {
       const body = await readRequestBody(request);
       if (!body?.title || !Object.hasOwn(QUARK_LIBRARY_FOLDERS, body.category)) {
@@ -482,7 +522,7 @@ export const handleApiRequest = async (request, response, context) => {
 
     if (pathname === '/api/playback-history') {
       if (request.method === 'GET') {
-        sendSuccess(response, userData.playbackHistory.all());
+        sendSuccess(response, await readHistory(context, user, userData));
         return true;
       }
       if (request.method === 'PUT') {
@@ -515,7 +555,7 @@ export const handleApiRequest = async (request, response, context) => {
         const duration = Math.max(0, Math.min(Number(body.duration) || 0, 60 * 60 * 48));
         const position = Math.max(0, Math.min(Number(body.position) || 0, duration || 60 * 60 * 48));
         const entry = userData.playbackHistory.save({
-          media: safeMedia,
+          media: historyMedia(safeMedia, userData),
           episodeFid: String(body.episodeFid).slice(0, 240),
           episodeNumber: Math.max(0, Number(body.episodeNumber) || 0),
           episodeTitle: String(body.episodeTitle || '').slice(0, 240),
@@ -531,7 +571,8 @@ export const handleApiRequest = async (request, response, context) => {
     const historyMatch = pathname.match(/^\/api\/playback-history\/([^/]+)$/);
     if (historyMatch && request.method === 'DELETE') {
       const id = decodeURIComponent(historyMatch[1]);
-      sendSuccess(response, userData.playbackHistory.remove(id), '播放记录已删除');
+      userData.playbackHistory.remove(id);
+      sendSuccess(response, await readHistory(context, user, userData), '播放记录已删除');
       return true;
     }
 

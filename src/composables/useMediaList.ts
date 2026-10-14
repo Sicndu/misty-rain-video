@@ -3,6 +3,7 @@ import type { MediaItem, CategoryType, LibraryUpdateStatus } from '../types/medi
 import { MediaStore } from '../services/mediaStore';
 import { useToast } from './useToast';
 import { getLibrarySaveFeedback } from '../services/libraryFeedback';
+import { sameMediaIdentity } from '../services/historyIdentity';
 
 export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
   const toast = useToast();
@@ -117,6 +118,13 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
     libraryUpdates.value = Object.fromEntries(items.map(item => [item.quarkFid, item]));
   };
 
+  const updateMediaTitle = async (media: MediaItem, title: string) => {
+    const updated = await MediaStore.updateTitle(media, title);
+    allMediaList.value = allMediaList.value.map(item => sameMediaIdentity(item, media) ? updated : item);
+    toast.show('名称已修改', '✓');
+    return updated;
+  };
+
   // 窗口激活时静默同步；后台不保留 15 秒高频轮询，避免移动端
   // 无意义的网络与渲染唤醒。进入前台仍会立即拉取最新片库。
   const onFocus = () => {
@@ -194,6 +202,7 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
     setLibraryUpdates,
     saveMedia,
     removeMedia,
-    updateMediaCategory
+    updateMediaCategory,
+    updateMediaTitle
   };
 }

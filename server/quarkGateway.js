@@ -667,6 +667,34 @@ export class QuarkGateway {
     }
   }
 
+  async getLibraryThumbnail(quarkFid, user = SYSTEM_USER) {
+    const principal = normalizeUser(user);
+    await this.#assertLibraryAccess(quarkFid, principal);
+    const cookie = this.#requireCookie();
+    // Cover discovery needs only one playable file, not a full episode scan.
+    const queue = [quarkFid];
+    const visited = new Set();
+    const deadline = Date.now() + 5_000;
+    while (queue.length && visited.size < 20 && Date.now() < deadline) {
+      const fid = queue.shift();
+      if (visited.has(fid)) continue;
+      visited.add(fid);
+      const files = await this.#listDriveFolder(fid, cookie, { maxPages: 1, timeoutMs: Math.max(1, deadline - Date.now()) });
+      const videos = files.filter(item => isVideoFile(item) && !ancillaryVideoPattern.test(item.file_name || ''))
+        .sort((left, right) => collator.compare(left.file_name || '', right.file_name || ''));
+      for (const video of videos) {
+        for (const imageUrl of [video.big_thumbnail, video.thumbnail]) {
+          if (typeof imageUrl !== 'string' || !imageUrl.startsWith('https://')) continue;
+          return { imageUrl, title: video.file_name || '' };
+        }
+      }
+      for (const item of files) {
+        if ((item.file_type === 0 || item.dir) && !isAncillaryVideoPath(item.file_name || '')) queue.push(item.fid);
+      }
+    }
+    return null;
+  }
+
   async importShare({
     shareUrl,
     quarkShareUrl,
@@ -1946,9 +1974,9 @@ export class QuarkGateway {
     }
   }
 
-  async #listDriveFolder(parentFid, cookie) {
+  async #listDriveFolder(parentFid, cookie, { maxPages = 50, timeoutMs } = {}) {
     const all = [];
-    for (let page = 1; page <= 50; page += 1) {
+    for (let page = 1; page <= maxPages; page += 1) {
       const url = new URL(`${API_HOST}/file/sort`);
       url.searchParams.set('pr', 'ucpro');
       url.searchParams.set('fr', 'pc');
@@ -1958,7 +1986,7 @@ export class QuarkGateway {
       url.searchParams.set('_fetch_total', '1');
       url.searchParams.set('_fetch_sub_dirs', '0');
       url.searchParams.set('_sort', 'file_type:asc,updated_at:desc');
-      const result = await this.#requestJson(url, { cookie });
+      const result = await this.#requestJson(url, { cookie, timeoutMs });
       if (result?.code !== 0) {
         throw new QuarkApiError(result?.message || '读取个人网盘目录失败', {
           code: 'QUARK_DRIVE_LIST_FAILED',

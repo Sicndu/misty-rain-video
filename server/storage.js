@@ -119,14 +119,28 @@ export class LibraryViewRepository {
 
   categoryFor(title) {
     const value = readJson(this.filePath, { version: 1, categories: {} });
-    return value?.categories?.[normalizeLibraryTitle(title)] || '';
+    const key = normalizeLibraryTitle(title);
+    const category = value?.categories && Object.hasOwn(value.categories, key) ? value.categories[key] : '';
+    return ['tv', 'movie', 'variety', 'anime'].includes(category) ? category : '';
   }
 
   setCategory(title, category) {
     const value = readJson(this.filePath, { version: 1, categories: {} });
     const categories = value?.categories && typeof value.categories === 'object' ? value.categories : {};
     categories[normalizeLibraryTitle(title)] = category;
-    writeJson(this.filePath, { version: 1, categories }, 0o644);
+    writeJson(this.filePath, { ...value, version: 1, categories }, 0o644);
+  }
+
+  titleFor(quarkFid) {
+    const value = readJson(this.filePath, {});
+    const key = String(quarkFid || '');
+    const title = value?.titles && Object.hasOwn(value.titles, key) ? value.titles[key] : '';
+    return typeof title === 'string' ? title : '';
+  }
+
+  setTitle(quarkFid, title) {
+    const value = readJson(this.filePath, { version: 1, categories: {} });
+    writeJson(this.filePath, { ...value, titles: { ...value.titles, [quarkFid]: title } }, 0o600);
   }
 }
 

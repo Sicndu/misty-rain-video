@@ -94,6 +94,16 @@ export class MediaStore {
     }
   }
 
+  static async updateTitle(media: MediaItem, title: string): Promise<MediaItem> {
+    const resp = await authFetch(`${API_URL}/title`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quarkFid: media.quarkFid, title })
+    });
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok || json.code !== 0 || !json.data) throw new Error(json.message || '名称修改失败');
+    return hydrateMedia([json.data])[0]!;
+  }
+
   static async checkLibraryUpdates(force = false): Promise<LibraryUpdateSummary> {
     const suffix = force ? '?force=1' : '';
     const resp = await authFetch(`${apiUrl('/api/library-updates')}${suffix}`, { cache: 'no-store' });

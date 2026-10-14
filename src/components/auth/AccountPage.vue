@@ -36,15 +36,8 @@ const showCredentialForm = ref(false);
 const advancedConfiguration = ref(false);
 const historyExpanded = ref(false);
 const authSection = ref<HTMLElement | null>(null);
-const continueHistory = computed(() => props.history
-  .filter(entry => !entry.completed && entry.position >= 5 && entry.duration > 0)
-  .slice(0, 8));
-const visibleHistory = computed(() => {
-  if (historyExpanded.value) return props.history;
-  const continuingIds = new Set(continueHistory.value.map(entry => entry.id));
-  return props.history.filter(entry => !continuingIds.has(entry.id)).slice(0, 3);
-});
-const historyProgress = (entry: PlaybackHistoryEntry) => Math.max(2, Math.min(100, entry.position / entry.duration * 100));
+const visibleHistory = computed(() => historyExpanded.value ? props.history : props.history.slice(0, 5));
+const historyProgress = (entry: PlaybackHistoryEntry) => entry.duration > 0 ? Math.max(0, Math.min(100, entry.position / entry.duration * 100)) : 0;
 const formatHistoryMeta = (entry: PlaybackHistoryEntry) => {
   const episode = entry.episodeNumber > 0 ? `第 ${entry.episodeNumber} 集` : entry.episodeTitle;
   const minutes = Math.max(1, Math.floor(entry.position / 60));
@@ -126,35 +119,10 @@ defineExpose({ focusAuth, refreshStatus });
         <button v-if="user.role === 'admin'" class="settings-row" type="button" @click="openAdvanced"><Settings2 aria-hidden="true" /><span>高级配置</span><ChevronRight class="chevron" aria-hidden="true" /></button>
         <a class="settings-row ios-install-link" :href="installUrl"><Download aria-hidden="true" /><span>安装到桌面</span><ChevronRight class="chevron" aria-hidden="true" /></a>
       </section>
-    <section v-if="continueHistory.length" class="continue-history-section" aria-labelledby="continue-history-title">
-      <div class="section-title-row compact">
-        <div>
-          <h2 id="continue-history-title">继续观看</h2>
-        </div>
-      </div>
-      <div class="continue-history-scroll">
-        <button
-          v-for="entry in continueHistory"
-          :key="entry.id"
-          type="button"
-          class="continue-history-card"
-          @click="emit('play-history', entry)"
-        >
-<MediaPoster :src="entry.media.poster" :alt="`${entry.media.title}封面`" loading="lazy" decoding="async" />
-          <span class="continue-history-shade" aria-hidden="true"></span>
-          <span class="continue-history-copy">
-            <strong>{{ entry.media.title }}</strong>
-            <small>{{ entry.episodeNumber > 0 ? `第 ${entry.episodeNumber} 集` : (entry.episodeTitle || '继续播放') }}</small>
-          </span>
-          <span class="continue-history-progress" aria-hidden="true"><i :style="{ width: `${historyProgress(entry)}%` }"></i></span>
-        </button>
-      </div>
-    </section>
-
     <section class="settings-section history-section" aria-labelledby="history-title">
       <div class="section-title-row compact">
         <div>
-          <h2 id="history-title">播放历史</h2>
+          <h2 id="history-title">观看记录</h2>
         </div>
         <small v-if="!historyError && !loadingHistory" class="history-count">{{ history.length }} 条</small>
       </div>
@@ -168,8 +136,9 @@ defineExpose({ focusAuth, refreshStatus });
             <span class="history-copy">
               <strong>{{ entry.media.title }}</strong>
               <small>{{ formatHistoryMeta(entry) }}</small>
+              <span v-if="entry.duration > 0" class="history-progress" aria-hidden="true"><i :style="{ width: `${historyProgress(entry)}%` }"></i></span>
             </span>
-            <ChevronRight class="chevron" aria-hidden="true" />
+            <span class="history-play">{{ entry.completed ? '再看' : '继续' }}</span>
           </button>
           <button
             type="button"
@@ -189,7 +158,7 @@ defineExpose({ focusAuth, refreshStatus });
           :aria-expanded="historyExpanded"
           @click="historyExpanded = !historyExpanded"
         >
-          {{ historyExpanded ? '收起播放历史' : `查看全部 ${history.length} 条记录` }}
+          {{ historyExpanded ? '收起' : `查看全部 ${history.length} 条记录` }}
           <ChevronRight aria-hidden="true" />
         </button>
       </div>
@@ -285,16 +254,9 @@ defineExpose({ focusAuth, refreshStatus });
 .section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .section-title-row h2 { font-size: .95rem; font-weight: 600; }
 .history-count, .history-empty { color: var(--text-tertiary); font-size: .78rem; }
-.continue-history-section { margin-bottom: 24px; }
-.continue-history-scroll { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 6px; }
-.continue-history-card { position: relative; width: 180px; height: 120px; flex: 0 0 180px; overflow: hidden; border: 0; border-radius: 10px; text-align: left; background: #253b5a; }
-.continue-history-card img { width: 100%; height: 100%; object-fit: cover; object-position: center 28%; }
-.continue-history-shade { position: absolute; inset: 0; background: linear-gradient(transparent, rgb(8 21 44 / .88)); }
-.continue-history-copy { position: absolute; right: 12px; bottom: 17px; left: 12px; display: grid; gap: 3px; color: #fff; }
-.continue-history-copy strong { overflow: hidden; font-size: .82rem; text-overflow: ellipsis; white-space: nowrap; }
-.continue-history-copy small { color: #dde6f6; font-size: .68rem; }
-.continue-history-progress { position: absolute; right: 12px; bottom: 9px; left: 12px; height: 2px; background: rgb(255 255 255 / .25); }
-.continue-history-progress i { display: block; height: 100%; background: var(--liquid-accent); }
+ .history-progress { display: block; width: min(180px, 100%); height: 2px; margin-top: 3px; overflow: hidden; border-radius: 2px; background: var(--divider); }
+.history-progress i { display: block; height: 100%; background: var(--liquid-accent); }
+.history-play { flex-shrink: 0; color: var(--liquid-accent); font-size: .72rem; }
 .history-row { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--divider); }
 .history-row:first-child { border: 0; }
 .history-main { display: flex; align-items: center; min-width: 0; flex: 1; gap: 12px; padding: 12px 0; border: 0; color: var(--text-primary); background: transparent; text-align: left; }

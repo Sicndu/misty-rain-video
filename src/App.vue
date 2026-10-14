@@ -11,6 +11,7 @@ import MediaGrid from './components/media/MediaGrid.vue';
 import DeleteMediaConfirm from './components/media/DeleteMediaConfirm.vue';
 import CategoryPickerSheet from './components/media/CategoryPickerSheet.vue';
 import MediaActionSheet from './components/media/MediaActionSheet.vue';
+import MediaTitleEditor from './components/media/MediaTitleEditor.vue';
 import Toast from './components/common/Toast.vue';
 import { useMediaList } from './composables/useMediaList';
 import { useQuarkTransfer } from './composables/useQuarkTransfer';
@@ -18,6 +19,7 @@ import { useAuth } from './composables/useAuth';
 import { useToast } from './composables/useToast';
 import { usePlaybackHistory } from './composables/usePlaybackHistory';
 import { MediaStore } from './services/mediaStore';
+import { sameMediaIdentity } from './services/historyIdentity';
 import { getLibrarySaveFeedback, type LibrarySaveFeedback } from './services/libraryFeedback';
 import type { MediaItem, CategoryType, PlaybackHistoryEntry } from './types/media';
 import type { ResourceItem } from './types/search';
@@ -52,6 +54,7 @@ const {
   saveMedia,
   removeMedia,
   updateMediaCategory,
+  updateMediaTitle,
   refreshList,
   setLibraryUpdates
 } = useMediaList(authenticated, isEmbedPlayerOpen);
@@ -84,13 +87,20 @@ const savingResourceId = ref('');
 const saveError = ref<LibrarySaveFeedback | null>(null);
 const failedResourceId = ref('');
 const actionMedia = ref<MediaItem | null>(null);
+const titleMedia = ref<MediaItem | null>(null);
+const isSavingTitle = ref(false);
+const titleError = ref('');
+const displayHistory = computed(() => history.value.map(entry => {
+  const media = allMediaList.value.find(item => sameMediaIdentity(item, entry.media));
+  return media ? { ...entry, media: { ...entry.media, ...media } } : entry;
+}));
 type MobileTab = MobileDockTab | 'search';
 const mobileTab = ref<MobileTab>('library');
 const selectedHistoryEntry = ref<PlaybackHistoryEntry | null>(null);
 const isCheckingUpdates = ref(false);
 const isApplyingUpdates = ref(false);
 let autoCheckedUsername = '';
-type MobileHistoryLayer = 'library' | 'search' | 'account' | 'player' | 'transfer' | 'delete' | 'category' | 'actions';
+type MobileHistoryLayer = 'library' | 'search' | 'account' | 'player' | 'transfer' | 'delete' | 'category' | 'actions' | 'title';
 let handlingPopState = false;
 
 const mobileHistoryEnabled = () => typeof window !== 'undefined' && (window.matchMedia('(max-width: 640px)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
@@ -112,18 +122,19 @@ const requestLayerClose = (layer: MobileHistoryLayer, closeDirectly: () => void)
 };
 
 const closeCurrentMobileLayer = () => {
-  if (isSavingTransfer.value || isDeletingMedia.value || isSavingCategory.value) return;
+  if (isSavingTransfer.value || isDeletingMedia.value || isSavingCategory.value || isSavingTitle.value) return;
   if (isEmbedPlayerOpen.value) isEmbedPlayerOpen.value = false;
   else if (isTransferOpen.value) closeTransferModal();
   else if (deletingMedia.value) deletingMedia.value = null;
   else if (categoryMedia.value) categoryMedia.value = null;
+  else if (titleMedia.value) titleMedia.value = null;
   else if (actionMedia.value) actionMedia.value = null;
   else if (mobileTab.value !== 'library') mobileTab.value = 'library';
 };
 
 const handleMobilePopState = () => {
-  if (isSavingTransfer.value || isDeletingMedia.value || isSavingCategory.value) {
-    setMobileHistoryLayer(isSavingTransfer.value && isTransferOpen.value ? 'transfer' : isDeletingMedia.value ? 'delete' : isSavingCategory.value ? 'category' : 'library');
+  if (isSavingTransfer.value || isDeletingMedia.value || isSavingCategory.value || isSavingTitle.value) {
+    setMobileHistoryLayer(isSavingTitle.value ? 'title' : isSavingTransfer.value && isTransferOpen.value ? 'transfer' : isDeletingMedia.value ? 'delete' : isSavingCategory.value ? 'category' : 'library');
     return;
   }
   handlingPopState = true;
@@ -149,6 +160,7 @@ watch(user, () => {
   deletingMedia.value = null;
   categoryMedia.value = null;
   actionMedia.value = null;
+  titleMedia.value = null;
   selectedHistoryEntry.value = null;
   isSavingTransfer.value = false;
   savingResourceId.value = '';
@@ -345,6 +357,29 @@ const editActionMediaCategory = () => {
     categoryMedia.value = media;
     setMobileHistoryLayer('category', true);
   }
+};
+
+const editActionMediaTitle = () => {
+  titleMedia.value = actionMedia.value;
+  actionMedia.value = null;
+  titleError.value = '';
+  setMobileHistoryLayer('title', true);
+};
+const closeTitleEditor = () => {
+  if (!isSavingTitle.value) requestLayerClose('title', () => { titleMedia.value = null; });
+};
+const saveMediaTitle = async (title: string) => {
+  if (!titleMedia.value || isSavingTitle.value) return;
+  if (title === titleMedia.value.title) { closeTitleEditor(); return; }
+  isSavingTitle.value = true;
+  titleError.value = '';
+  try {
+    await updateMediaTitle(titleMedia.value, title);
+    requestLayerClose('title', () => { titleMedia.value = null; });
+    void refreshHistory(true);
+  } catch (error) {
+    titleError.value = error instanceof Error ? error.message : '名称修改失败';
+  } finally { isSavingTitle.value = false; }
 };
 
 const reSearchActionMedia = () => {
@@ -566,7 +601,7 @@ const navigateMobileTab = (tab: MobileDockTab) => {
       v-else
       ref="accountPageRef"
       :user="user"
-      :history="history"
+      :history="displayHistory"
       :history-error="historyError"
       :loading-history="loadingHistory"
       :deleting-history-id="deletingHistoryId"
@@ -643,10 +678,13 @@ const navigateMobileTab = (tab: MobileDockTab) => {
       :media="actionMedia"
       @cancel="closeMediaActions"
       @edit-category="editActionMediaCategory"
+      @edit-title="editActionMediaTitle"
       @re-search="reSearchActionMedia"
       @update-library="updateActionMedia"
       @delete="deleteActionMedia"
     />
+
+    <MediaTitleEditor :open="!!titleMedia" :media="titleMedia" :saving="isSavingTitle" :error="titleError" @cancel="closeTitleEditor" @save="saveMediaTitle" />
 
   </template>
 

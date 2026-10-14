@@ -108,7 +108,7 @@ export const isGenericPoster = value => {
 };
 
 export class PosterService {
-  constructor(dataDir) {
+  constructor(dataDir, { resolveThumbnail, fetchThumbnail } = {}) {
     this.posterDirectory = path.resolve(dataDir, 'posters');
     this.cachePath = path.resolve(dataDir, 'media_posters.json');
     this.cache = readJson(this.cachePath, { version: CACHE_VERSION, entries: {} });
@@ -116,10 +116,12 @@ export class PosterService {
       this.cache = { version: CACHE_VERSION, entries: {} };
     }
     this.inFlight = new Map();
+    this.resolveThumbnail = resolveThumbnail;
+    this.fetchThumbnail = fetchThumbnail;
     ensureDirectory(this.posterDirectory);
   }
 
-  async enrich(items) {
+  async enrich(items, user) {
     const cards = items.map(item => ({ ...item }));
     const unresolved = [];
 
@@ -131,28 +133,50 @@ export class PosterService {
         Object.assign(card, cached);
         continue;
       }
-      if (!this.#hasRecentMiss(key)) unresolved.push(card);
+      // A title miss must not prevent discovery of this user's video cover.
+      const thumbnail = this.#cachedPoster(this.#thumbnailKey(card, user));
+      if (thumbnail) Object.assign(card, thumbnail);
+      if (!this.#hasRecentMiss(key) || (!thumbnail && this.resolveThumbnail && card.quarkFid)) unresolved.push(card);
     }
 
     await mapWithConcurrency(unresolved.slice(0, RESOLVE_BATCH_SIZE), RESOLVE_CONCURRENCY, async card => {
-      const resolved = await this.resolve(card);
+      const resolved = await this.resolve(card, user);
       if (resolved) Object.assign(card, resolved);
     });
 
     return cards;
   }
 
-  async resolve(item) {
+  async resolve(item, user) {
     const key = this.#cacheKey(item);
     const cached = this.#cachedPoster(key);
     if (cached) return cached;
-    if (this.#hasRecentMiss(key)) return null;
-    if (this.inFlight.has(key)) return this.inFlight.get(key);
+    const thumbnailKey = this.#thumbnailKey(item, user);
+    const taskKey = `${key}:${thumbnailKey}`;
+    if (this.inFlight.has(taskKey)) return this.inFlight.get(taskKey);
 
-    const task = this.#resolveAndCache(item, key).finally(() => {
-      this.inFlight.delete(key);
+    const task = (async () => {
+      const poster = this.#hasRecentMiss(key) ? null : await this.#resolveAndCache(item, key);
+      if (poster) return poster;
+      const thumbnail = this.#cachedPoster(thumbnailKey);
+      if (thumbnail) return thumbnail;
+      if (!this.resolveThumbnail || !item.quarkFid || this.#hasRecentMiss(thumbnailKey)) return null;
+      try {
+        const candidate = await this.resolveThumbnail(item, user);
+        if (!candidate) { this.#rememberMiss(thumbnailKey); return null; }
+        const asset = await this.#downloadPoster({ ...candidate, provider: 'video' }, thumbnailKey, true);
+        const entry = { status: 'ready', fileName: asset.fileName, provider: 'video', matchedTitle: item.title, updatedAt: new Date().toISOString() };
+        this.cache.entries[thumbnailKey] = entry;
+        this.#persistCache();
+        return this.#serializePoster(entry);
+      } catch {
+        this.#rememberMiss(thumbnailKey, '', 60_000);
+        return null;
+      }
+    })().finally(() => {
+      this.inFlight.delete(taskKey);
     });
-    this.inFlight.set(key, task);
+    this.inFlight.set(taskKey, task);
     return task;
   }
 
@@ -253,20 +277,26 @@ export class PosterService {
       .sort((left, right) => right.score - left.score)[0] || null;
   }
 
-  async #downloadPoster(candidate, key) {
-    const response = await withTimeout(candidate.imageUrl, {
+  async #downloadPoster(candidate, key, thumbnail = false) {
+    const signal = AbortSignal.timeout(IMAGE_TIMEOUT_MS);
+    const response = thumbnail && this.fetchThumbnail
+      ? await this.fetchThumbnail(candidate.imageUrl, signal)
+      : await fetch(candidate.imageUrl, {
       redirect: 'follow',
+      signal,
       headers: {
         Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
         Referer: candidate.referer,
         'User-Agent': USER_AGENT
       }
-    }, IMAGE_TIMEOUT_MS);
-    if (!response.ok || !response.body) throw new Error(`海报下载失败 (${response.status})`);
+    });
+    if (!response.ok || !response.body) { await response.body?.cancel(); throw new Error(`海报下载失败 (${response.status})`); }
 
     const declaredSize = Number(response.headers.get('content-length')) || 0;
-    if (declaredSize > MAX_IMAGE_BYTES) throw new Error('海报文件过大');
-    const type = mimeExtension(response.headers.get('content-type'));
+    if (declaredSize > MAX_IMAGE_BYTES) { await response.body.cancel(); throw new Error('海报文件过大'); }
+    const contentType = String(response.headers.get('content-type') || '');
+    if (!/^image\/(?:jpeg|png|webp|gif)(?:;|$)/i.test(contentType)) { await response.body.cancel(); throw new Error('封面不是有效图片'); }
+    const type = mimeExtension(contentType);
     const reader = response.body.getReader();
     const chunks = [];
     let size = 0;
@@ -298,6 +328,10 @@ export class PosterService {
       .slice(0, 24);
   }
 
+  #thumbnailKey(item, user) {
+    return crypto.createHash('sha256').update(`video\0${user?.username || ''}\0${item.quarkFid || ''}`).digest('hex').slice(0, 24);
+  }
+
   #cachedPoster(key) {
     const entry = this.cache.entries[key];
     if (!entry || entry.status !== 'ready' || !entry.fileName) return null;
@@ -318,13 +352,14 @@ export class PosterService {
     const entry = this.cache.entries[key];
     if (!entry || entry.status !== 'miss') return false;
     const updatedAt = Date.parse(entry.updatedAt || '') || 0;
-    return Date.now() - updatedAt < MISS_RETRY_MS;
+    return Date.now() - updatedAt < (entry.retryMs || MISS_RETRY_MS);
   }
 
-  #rememberMiss(key, error = '') {
+  #rememberMiss(key, error = '', retryMs = MISS_RETRY_MS) {
     this.cache.entries[key] = {
       status: 'miss',
       error,
+      retryMs,
       updatedAt: new Date().toISOString()
     };
     this.#persistCache();
