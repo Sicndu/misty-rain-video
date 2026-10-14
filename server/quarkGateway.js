@@ -188,11 +188,13 @@ const isCredentialAuthFailure = error => {
     || [401, 31001, 32003].includes(upstreamCode);
 };
 
+const isShareUnavailableMessage = message => /(?:取消|删除|撤销).*分享|分享.*(?:失效|过期|删除|不存在|取消|撤销)|不存在.*分享/.test(String(message || ''));
+
 const libraryUpdateFailureStatus = (card, error) => {
   const code = String(error?.code || '');
   const rawMessage = String(error instanceof Error ? error.message : '暂时无法检查更新');
   let message = rawMessage;
-  if (code === 'QUARK_SHARE_UNAVAILABLE' || /取消了分享|分享链接已失效|需要提取码/i.test(rawMessage)) {
+  if (code === 'QUARK_SHARE_UNAVAILABLE') {
     message = '原片源暂不可用；已保存的剧集不受影响，可在“我的”查看自动追更状态';
   } else if (code === 'QUARK_AUTH_REQUIRED') {
     message = '片源访问暂时受限，请稍后重试';
@@ -1409,11 +1411,11 @@ export class QuarkGateway {
       body: { pwd_id: pwdId, passcode: String(passcode || '') }
     });
     if (tokenData?.code !== 0 || !tokenData?.data?.stoken) {
-      throw new QuarkApiError(tokenData?.message || '网盘分享链接已失效或需要提取码', {
+      const message = tokenData?.message || tokenData?.message_desc || '';
+      throw new QuarkApiError(message || '暂时无法访问网盘分享，请稍后重试或核对提取码', {
         // Unknown provider failures (including throttling) must not trigger a
         // source change. Only explicit unavailability enters that policy.
-        code: /取消.*分享|分享.*(?:失效|过期|删除|不存在)|提取码|不存在.*分享/.test(tokenData?.message || '')
-          ? 'QUARK_SHARE_UNAVAILABLE' : 'QUARK_SHARE_ACCESS_FAILED',
+        code: isShareUnavailableMessage(message) ? 'QUARK_SHARE_UNAVAILABLE' : 'QUARK_SHARE_ACCESS_FAILED',
         statusCode: 422
       });
     }
@@ -1435,8 +1437,9 @@ export class QuarkGateway {
       url.searchParams.set('size', '100');
       const result = await this.#requestJson(url, { cookie, userAgent: QUARK_DESKTOP_USER_AGENT });
       if (result?.code !== 0) {
-        throw new QuarkApiError(result?.message || '读取网盘分享目录失败', {
-          code: 'QUARK_SHARE_LIST_FAILED',
+        const message = result?.message || result?.message_desc || '';
+        throw new QuarkApiError(message || '读取网盘分享目录失败', {
+          code: isShareUnavailableMessage(message) ? 'QUARK_SHARE_UNAVAILABLE' : 'QUARK_SHARE_LIST_FAILED',
           statusCode: 502
         });
       }
@@ -1561,8 +1564,9 @@ export class QuarkGateway {
         url.searchParams.set('size', '100');
         const result = await this.#requestJson(url, { cookie, userAgent: QUARK_DESKTOP_USER_AGENT });
         if (result?.code !== 0) {
-          throw new QuarkApiError(result?.message || '读取网盘分享目录失败', {
-            code: 'QUARK_SHARE_LIST_FAILED',
+          const message = result?.message || result?.message_desc || '';
+          throw new QuarkApiError(message || '读取网盘分享目录失败', {
+            code: isShareUnavailableMessage(message) ? 'QUARK_SHARE_UNAVAILABLE' : 'QUARK_SHARE_LIST_FAILED',
             statusCode: 502
           });
         }
@@ -2384,8 +2388,12 @@ export class QuarkGateway {
       });
     }
     if (!options.acceptErrorCodes && !response.ok) {
-      throw new QuarkApiError(result?.message || `播放服务请求失败（HTTP ${response.status}）`, {
-        code: 'QUARK_HTTP_ERROR',
+      const message = result?.message || result?.message_desc || '';
+      const unavailableShare = [400, 404, 410, 422].includes(response.status)
+        && /\/share\/sharepage\/(?:token|detail)$/.test(new URL(url).pathname)
+        && isShareUnavailableMessage(message);
+      throw new QuarkApiError(message || `播放服务请求失败（HTTP ${response.status}）`, {
+        code: unavailableShare ? 'QUARK_SHARE_UNAVAILABLE' : 'QUARK_HTTP_ERROR',
         statusCode: response.status >= 400 && response.status < 500 ? 422 : 502,
         details: { upstreamStatus: response.status, upstreamCode: code }
       });
