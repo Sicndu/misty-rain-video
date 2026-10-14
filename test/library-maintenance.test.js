@@ -112,6 +112,18 @@ test('来源连续三次失效才检索关联，保持原文件目录；网络�
   assert.equal(f.calls.length, 0);
 });
 
+test('改名后的后台片源检索和维护状态都使用用户修正的名称', async t => {
+  const f = fixture(t);
+  f.data.get('one').libraryViewRepository = { titleFor: fid => fid === 'show' ? '正确片名' : '' };
+  const searched = [];
+  f.context.resourceSearch.search = async title => { searched.push(title); return { merged_by_type: { quark: [] } }; };
+  f.setStatus({ updateCheckAvailable: false, code: 'QUARK_SHARE_UNAVAILABLE' });
+  await f.service.runOnce(); f.tick(); await f.service.runOnce(); f.tick(); await f.service.runOnce();
+  assert.deepEqual(searched, ['正确片名']);
+  assert.equal(f.service.status(f.users[0]).items[0].title, '正确片名');
+  assert.equal(f.data.get('one').mediaRepository.all()[0].quarkFid, 'show');
+});
+
 test('失败退避、来源人工变更重置失败计数；重叠运行和停止不会再调度写操作', async t => {
   const f = fixture(t);
   f.setStatus({ updateCheckAvailable: false, code: 'QUARK_NETWORK_ERROR' });
