@@ -64,6 +64,40 @@ test('空通道不会掩盖另一通道故障，不缓存成“未收录”；�
   assert.equal(calls, before + 2);
 });
 
+test('生产 tg 的成功空结果省略 merged_by_type 时，不误报异常或触发渠道退避', async t => {
+  const warnings = [];
+  t.mock.method(console, 'warn', (...args) => warnings.push(args));
+  const service = create({ fetchImpl: async url => url.searchParams.get('src') === 'tg'
+    ? Response.json({ code: 0, message: 'success', data: { total: 0 } })
+    : reply('series', 'movie') });
+  await service.search('仙逆'); await flush();
+  const result = service.peek('仙逆');
+  assert.equal(result.total, 2);
+  assert.equal(result.partial, false);
+  assert.equal(service.endpointHealth.size, 0);
+  assert.deepEqual(warnings, []);
+});
+
+test('合法零结果与错误、缺字段响应分开，公共源失败不能被空 tg 结果掩盖', async t => {
+  t.mock.method(console, 'warn', () => {});
+  for (const response of [{ total: 0 }, { total: 0, merged_by_type: null }]) {
+    const service = create({ source: 'tg', fetchImpl: async () => Response.json({ code: 0, data: response }) });
+    const result = await service.search('未收录');
+    assert.equal(result.total, 0);
+    assert.equal(result.partial, false);
+  }
+  for (const response of [{ code: 500, data: { total: 0 } }, { code: 0, data: {} },
+    { code: 0, data: { total: 1 } }, { code: 0, data: { total: 0, merged_by_type: [] } }]) {
+    const service = create({ source: 'tg', fetchImpl: async () => Response.json(response) });
+    await assert.rejects(service.search('仙逆'), { code: 'RESOURCE_SEARCH_UNAVAILABLE' });
+  }
+  const service = create({ urls: ['http://127.0.0.1:8888/api/search', 'https://public.example/api/search'], source: 'tg',
+    fetchImpl: async url => url.hostname === 'public.example' ? new Response('', { status: 400 })
+      : Response.json({ code: 0, message: 'success', data: { total: 0 } }) });
+  await assert.rejects(service.search('仙逆'), { code: 'RESOURCE_SEARCH_UNAVAILABLE' });
+  assert.equal(service.cache.size, 0);
+});
+
 test('正文阻塞也受截止时间限制，没有逐级重试；失败渠道冷却时不重新轰炸', async t => {
   t.mock.method(console, 'warn', () => {});
   let clock = 1_000_000;

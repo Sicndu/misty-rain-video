@@ -73,10 +73,14 @@ const normalizePayload = payload => {
     );
   }
   const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
-  if (!data?.merged_by_type || typeof data.merged_by_type !== 'object') {
+  const merged = data?.merged_by_type;
+  // PanSou declares merged_by_type with omitempty: a successful empty search
+  // legitimately returns only { total: 0 }. Do not penalize that channel.
+  const empty = data?.total === 0 && merged == null;
+  if (!empty && (!merged || typeof merged !== 'object' || Array.isArray(merged))) {
     throw createSearchError('检索来源响应格式异常', 'RESOURCE_SEARCH_UPSTREAM_ERROR', 502);
   }
-  const rawItems = Array.isArray(data.merged_by_type.quark) ? data.merged_by_type.quark : [];
+  const rawItems = Array.isArray(merged?.quark) ? merged.quark : [];
   const seen = new Set();
   const items = [];
   for (const item of rawItems) {
