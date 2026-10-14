@@ -23,6 +23,7 @@ export interface SearchResult {
   stale?: boolean;
   partial?: boolean;
   refreshing?: boolean;
+  allowPublicFallback?: boolean;
   message?: string;
 }
 

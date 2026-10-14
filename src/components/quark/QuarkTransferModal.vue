@@ -78,13 +78,15 @@ const episodeNumber = (title: string) => {
 };
 
 /**
- * 聚合结果没有稳定的文件 MIME 信息，不能仅凭清晰度给资源排序。先剔除
- * 明确不是视频的条目，避免有声书、电子书被误选为剧集来源。
+ * 聚合结果没有稳定的文件 MIME 信息，不能仅凭清晰度给资源排序。剔除
+ * 非视频、解说混剪以及与保存分类明确不符的内容，避免误选为正片来源。
  */
-const isNonVideoResource = (resource: ResourceItem) => {
+const isExcludedResource = (resource: ResourceItem) => {
   const title = cleanTitle(resource.title);
   return /有声(?:小说|书)?|播讲|演播|朗读|听书|音频|原声带|广播剧|相声|评书|电子书|小说|漫画|kindle/i.test(title)
-    || /(?:^|[.\s_\-\[\]()（）])(?:mp3|flac|aac|m4a|wav|ape|ogg|epub|mobi|azw3|pdf|txt|docx?)(?:$|[.\s_\-\]\]()（）])/i.test(title);
+    || /(?:^|[.\s_\-\[\]()（）])(?:mp3|flac|aac|m4a|wav|ape|ogg|epub|mobi|azw3|pdf|txt|docx?)(?:$|[.\s_\-\]\]()（）])/i.test(title)
+    || /沙雕版|解说(?:版|视频)|混剪(?:版|视频)/i.test(title)
+    || (targetCategory.value === 'anime' && /(?:^|[\s.·|【\[])(?:微)?短剧(?:$|[\s.·|:：】\]])/u.test(title));
 };
 
 const resourceScore = (resource: ResourceItem) => {
@@ -114,7 +116,7 @@ const resourceScore = (resource: ResourceItem) => {
 };
 
 const rankAndDedupe = (resources: ResourceItem[]) => {
-  const sorted = resources.filter(resource => !isNonVideoResource(resource)).sort((left, right) => {
+  const sorted = resources.filter(resource => !isExcludedResource(resource)).sort((left, right) => {
     const scoreDelta = resourceScore(right) - resourceScore(left);
     if (scoreDelta) return scoreDelta;
     return Date.parse(right.datetime) - Date.parse(left.datetime);

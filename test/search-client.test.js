@@ -9,9 +9,33 @@ const { SilentSearchEngine } = await import(`data:text/javascript;base64,${Buffe
 const transferCompiled = await build({ entryPoints: ['src/composables/useQuarkTransfer.ts'], bundle: true, write: false,
   format: 'esm', platform: 'browser', define: { 'import.meta.env.BASE_URL': '"/misty-rain/"', 'process.env.NODE_ENV': '"test"' }, logLevel: 'silent' });
 const { useQuarkTransfer } = await import(`data:text/javascript;base64,${Buffer.from(transferCompiled.outputFiles[0].text).toString('base64')}`);
-const data = (extra = {}) => ({ total: 1, merged_by_type: { quark: [{ url: 'https://pan.quark.cn/s/abc', note: '测试剧 4K' }] }, ...extra });
+const data = (extra = {}, note = '测试剧 4K') => ({ total: 1, merged_by_type: { quark: [{ url: 'https://pan.quark.cn/s/abc', note }] }, ...extra });
 
-test('失败及空结果仅请求本站，浏览器不再重复访问同一公共备用源', async t => {
+test('首批、缓存补齐和公共补充均按片名边界匹配，剔除剑仙逆世并保留年番与剧场版', async t => {
+  const titles = [
+    '剑仙归来：谁让这剑仙逆世重修的？ 第七季（89集）',
+    '剑仙归来：谁让这剑仙逆世重修的？ 第六季（200集）',
+    '修仙逆袭记（79集）',
+    '仙逆世界（2026）',
+    '剑\u200b仙逆\u200b世',
+    '仙逆 更新162集',
+    '仙逆年番3 更新至162集',
+    '《仙逆剧场版 神临之战》夸克网盘下载链接',
+    '2025最新动画.仙逆剧场版.神临之战.4k.国语中字',
+    '【国漫】仙\u200b逆 (2024) 更新162集',
+    '仙 逆 第三季 全162集'
+  ];
+  const rows = titles.map((note, index) => ({ note, url: `https://pan.quark.cn/s/item${index}` }));
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 0, data: { total: rows.length, merged_by_type: { quark: rows } } }));
+  const service = new SilentSearchEngine();
+  for (const result of [await service.search('《仙逆》'), await service.readCached('仙逆'), await service.supplement('仙逆')]) {
+    assert.equal(result.total, 6);
+    assert.deepEqual(result.items.map(item => item.title), titles.slice(5));
+    assert.deepEqual(result.quarkItems, result.items);
+  }
+});
+
+test('首次查询只读取本站，公共源补充由页面单独发起', async t => {
   const calls = [];
   let mode = 'failed';
   t.mock.method(globalThis, 'fetch', async url => {
@@ -68,6 +92,7 @@ test('登录失效直接返回，不绕过本站认证发起公共检索', async
   const result = await new SilentSearchEngine().search('测试剧');
   assert.equal(result.success, false);
   assert.equal(result.message, '请先登录');
+  assert.equal(result.allowPublicFallback, false);
   assert.equal(calls, 1);
 });
 
@@ -77,36 +102,114 @@ test('首批结果立即可用，慢通道候选自动补齐；关闭面板后�
   t.mock.method(globalThis, 'fetch', async url => {
     calls.push(String(url));
     const cached = String(url).includes('cached=1');
-    const result = data({ partial: !cached, refreshing: !cached, message: cached ? '' : '正在补充' });
-    if (cached) result.merged_by_type.quark.push({ url: 'https://pan.quark.cn/s/second', note: '补充来源' });
+    const keyword = new URL(String(url), 'https://local.invalid').searchParams.get('kw');
+    const result = data({ partial: !cached, refreshing: !cached, message: cached ? '' : '正在补充' }, `${keyword} 4K`);
+    if (cached) result.merged_by_type.quark.push({ url: 'https://pan.quark.cn/s/second', note: `${keyword} 补充来源` });
     return Response.json({ code: 0, data: result });
   });
   const view = useQuarkTransfer();
   await view.openTransferModal({ title: '仙逆渐进测试', category: 'anime' });
   assert.equal(view.isAnalyzing.value, false);
   assert.equal(view.quarkResources.value.length, 1);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.filter(url => url.startsWith('/')).length, 1);
   t.mock.timers.tick(1_000);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(view.quarkResources.value.length, 2);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.filter(url => url.startsWith('/')).length, 2);
   assert.equal(view.searchNotice.value, '');
   await view.openTransferModal({ title: '仙逆关闭测试', category: 'anime' });
   view.closeTransferModal();
   t.mock.timers.tick(10_000);
   await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.filter(url => url.startsWith('/')).length, 3);
+});
+
+test('公共补充合并重复请求，不发送站内 Cookie、Referer 或认证头，失败后退避', async t => {
+  let count = 0;
+  let fail = false;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    count += 1;
+    assert.equal(new URL(url).host, 'so.252035.xyz');
+    assert.equal(options.credentials, 'omit');
+    assert.equal(options.referrerPolicy, 'no-referrer');
+    assert.deepEqual(options.headers, { Accept: 'application/json' });
+    return fail ? new Response('', { status: 429 }) : Response.json({ code: 0, data: data() });
+  });
+  const service = new SilentSearchEngine();
+  const [a, b] = await Promise.all([service.supplement('测试剧'), service.supplement('测试剧')]);
+  assert.equal(count, 1);
+  assert.equal(a.items.length, 1);
+  assert.deepEqual(a, b);
+  await service.supplement('测试剧');
+  assert.equal(count, 1);
+  fail = true;
+  assert.equal((await service.supplement('测试剧', { force: true })).success, false);
+  assert.equal((await service.supplement('另一个关键词')).success, false);
+  assert.equal(count, 2);
+});
+
+test('生产只返回部分候选时立即显示，同时合并浏览器补充；后续服务器缓存不能覆盖补充结果', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 2_000_000 });
+  let resolvePublic;
+  const pending = new Promise(resolve => { resolvePublic = resolve; });
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (String(url).startsWith('https:')) return pending;
+    const cached = String(url).includes('cached=1');
+    return Response.json({ code: 0, data: data({ partial: true, refreshing: !cached }, '恢复浏览器补充测试 4K') });
+  });
+  const view = useQuarkTransfer();
+  await view.openTransferModal({ title: '恢复浏览器补充测试', category: 'anime' });
+  assert.equal(view.isAnalyzing.value, false);
+  assert.equal(view.quarkResources.value.length, 1);
+  resolvePublic(Response.json({ code: 0, data: { merged_by_type: { quark: [
+    ...data({}, '恢复浏览器补充测试 4K').merged_by_type.quark,
+    { url: 'https://pan.quark.cn/s/series162', note: '恢复浏览器补充测试 更新162集' },
+    { url: 'https://pan.quark.cn/s/irrelevant', note: '其他剧集 更新200集' }
+  ] } } }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(view.quarkResources.value.length, 2);
+  assert.equal(view.searchPending.value, true);
+  t.mock.timers.tick(1_000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(view.quarkResources.value.length, 2);
+  assert.equal(view.searchPending.value, false);
+  assert.match(view.searchNotice.value, /备用来源补充/);
+  view.closeTransferModal();
+});
+
+test('恢复旧版本服务器失败时的浏览器兜底，但登录失效不发起公共查询', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 3_000_000 });
+  let authFailed = false;
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    calls.push(String(url));
+    if (String(url).startsWith('https:')) return Response.json({ code: 0, data: data({}, '服务器失败兜底测试 4K') });
+    return Response.json({ code: authFailed ? 'APP_AUTH_REQUIRED' : 'RESOURCE_SEARCH_UNAVAILABLE', message: authFailed ? '请先登录' : '服务端来源不可用' },
+      { status: authFailed ? 401 : 503 });
+  });
+  const view = useQuarkTransfer();
+  await view.openTransferModal({ title: '服务器失败兜底测试', category: 'anime' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(view.quarkResources.value.length, 1);
+  assert.equal(view.searchError.value, '');
+  assert.equal(calls.length, 2);
+  authFailed = true;
+  t.mock.timers.tick(1_000);
+  await view.openTransferModal({ title: '登录失效兜底测试', category: 'anime' });
   assert.equal(calls.length, 3);
+  assert.equal(view.searchError.value, '请先登录');
+  view.closeTransferModal();
 });
 
 test('页面等待真正后台完成，超过旧的 8 秒轮询窗口仍接收补齐的正篇候选', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 4_000_000 });
   let polls = 0;
   t.mock.method(globalThis, 'fetch', async url => {
     const cached = String(url).includes('cached=1');
     if (cached) polls += 1;
     const complete = polls >= 12;
-    const result = data({ partial: !complete, refreshing: !complete, message: complete ? '' : '继续补查' });
-    if (complete) result.merged_by_type.quark.push({ url: 'https://pan.quark.cn/s/mainseries', note: '仙逆正篇' });
+    const result = data({ partial: !complete, refreshing: !complete, message: complete ? '' : '继续补查' }, '仙逆长窗口测试 4K');
+    if (complete) result.merged_by_type.quark.push({ url: 'https://pan.quark.cn/s/mainseries', note: '仙逆长窗口测试 正篇' });
     return Response.json({ code: 0, data: result });
   });
   const view = useQuarkTransfer();

@@ -19,26 +19,58 @@ export function useQuarkTransfer() {
   const searchKeyword = ref('');
   let searchSequence = 0;
 
-  const followSearch = async (keyword: string, sequence: number) => {
+  interface SearchProgress { server: boolean; public: boolean; supplemented: boolean; notice: string; error: string }
+  const isCurrent = (sequence: number) => sequence === searchSequence && isOpen.value;
+  const append = (items: ResourceItem[]) => {
+    const combined = new Map(quarkResources.value.map(item => [item.url, item]));
+    for (const item of items) combined.set(item.url, item);
+    quarkResources.value = [...combined.values()];
+  };
+  const showProgress = (progress: SearchProgress) => {
+    searchPending.value = progress.server || progress.public;
+    searchError.value = !quarkResources.value.length && !searchPending.value ? progress.error : '';
+    searchNotice.value = searchPending.value
+      ? quarkResources.value.length ? '已显示当前候选，正在补充其他来源…' : '正在继续搜索，找到结果后会自动显示…'
+      : progress.supplemented ? '已通过备用来源补充候选；添加时会验证链接' : progress.notice;
+  };
+  const supplementSearch = async (keyword: string, sequence: number, progress: SearchProgress, force: boolean) => {
+    try {
+      const result = await engine.supplement(keyword, { force });
+      if (!isCurrent(sequence)) return;
+      if (result.success) {
+        const before = quarkResources.value.length;
+        append(result.quarkItems);
+        progress.supplemented = quarkResources.value.length > before;
+      }
+    } finally {
+      if (isCurrent(sequence)) {
+        progress.public = false;
+        showProgress(progress);
+      }
+    }
+  };
+  const followSearch = async (keyword: string, sequence: number, progress: SearchProgress) => {
     const deadline = Date.now() + 35_000;
     for (let attempt = 0; attempt < 35 && Date.now() < deadline; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 1_000));
-      if (sequence !== searchSequence || !isOpen.value) return;
+      if (!isCurrent(sequence)) return;
       try {
         const result = await engine.readCached(keyword);
-        if (sequence !== searchSequence || !isOpen.value) return;
+        if (!isCurrent(sequence)) return;
         if (!result) break;
-        quarkResources.value = result.quarkItems;
-        searchNotice.value = result.message || '';
-        searchPending.value = Boolean(result.refreshing);
+        append(result.quarkItems);
+        progress.notice = result.message || '';
+        progress.server = Boolean(result.refreshing);
+        showProgress(progress);
         if (!result.refreshing) return;
       } catch { break; }
     }
-    if (sequence === searchSequence && isOpen.value) {
-      searchPending.value = false;
-      searchNotice.value = quarkResources.value.length
+    if (isCurrent(sequence)) {
+      progress.server = false;
+      progress.notice = quarkResources.value.length
         ? '已展示当前候选；其余来源暂未返回，可稍后重新搜索'
         : '本轮未取得可用候选，来源可能超时；可稍后重新搜索';
+      showProgress(progress);
     }
   };
 
@@ -61,17 +93,18 @@ export function useQuarkTransfer() {
     try {
       const res = await engine.search(normalizedKeyword, { force });
       if (sequence !== searchSequence || !isOpen.value) return;
-      if (!res.success) {
-        searchError.value = res.message || '资源检索服务暂时不可用，请稍后重试';
-        toast.show(searchError.value, '!', 3800);
-        return;
-      }
-      quarkResources.value = res.quarkItems && res.quarkItems.length > 0
-        ? res.quarkItems
-        : res.items.filter(i => i.driveType === 'quark');
-      searchNotice.value = res.message || '';
-      searchPending.value = Boolean(res.refreshing);
-      if (res.refreshing) void followSearch(normalizedKeyword, sequence);
+      const progress: SearchProgress = {
+        server: Boolean(res.refreshing),
+        public: res.allowPublicFallback !== false && (!res.success || !res.total || Boolean(res.partial || res.stale)),
+        supplemented: false,
+        notice: res.message || '',
+        error: res.success ? '' : res.message || '资源检索服务暂时不可用，请稍后重试'
+      };
+      if (res.success) append(res.quarkItems.length ? res.quarkItems : res.items.filter(i => i.driveType === 'quark'));
+      showProgress(progress);
+      if (progress.server) void followSearch(normalizedKeyword, sequence, progress);
+      if (progress.public) void supplementSearch(normalizedKeyword, sequence, progress, force);
+      if (!res.success && !progress.public) toast.show(progress.error, '!', 3800);
     } catch (error) {
       if (sequence !== searchSequence || !isOpen.value) return;
       searchError.value = error instanceof Error ? error.message : '资源检索失败，请稍后重试';

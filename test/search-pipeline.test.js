@@ -61,3 +61,32 @@ test('生产四条原始结果经服务端、客户端、实际 Vue 列表后保
     assert.equal(document.querySelector('.result-summary strong').textContent, '3');
   } finally { app.unmount(); }
 });
+
+test('动漫结果在推荐、最新、4K 和完整列表均不混入同名短剧、沙雕解说与混剪', async t => {
+  const notes = [
+    '仙逆 4K 更新162集',
+    '仙逆 全162集 4K',
+    '【短剧】仙逆（115集）谢蕊伊&王镱深',
+    '【仙逆】更245集，1080P，B站沙雕版 免充电看，奇遇王富贵，小作坊解说视频【40+GB】',
+    '仙逆 4K 混剪视频 全162集',
+    '剑仙归来：谁让这剑仙逆世重修的？ 第七季（89集）'
+  ];
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 0, data: { merged_by_type: { quark:
+    notes.map((note, index) => ({ note, url: `https://pan.quark.cn/s/content${index}` })) } } }));
+  const client = await new SilentSearchEngine().search('仙逆');
+  assert.equal(client.items.length, 5);
+  document.body.innerHTML = '<div id="app"></div>';
+  const props = reactive({ isOpen: true, isAnalyzing: false, currentCategory: 'anime', searchKeyword: '仙逆',
+    media: { id: 'anime-content-test', title: '仙逆', category: 'anime', poster: '' }, quarkResources: client.items });
+  const app = createApp({ render: () => h(Modal, props) });
+  app.mount('#app');
+  try {
+    for (const [label, count] of [['推荐', 2], ['最新', 2], ['4K', 2], ['完整', 1]]) {
+      [...document.querySelectorAll('[role="radio"]')].find(button => button.textContent.trim() === label).click();
+      await nextTick();
+      assert.equal(document.querySelectorAll('.liquid-resource-row').length, count);
+      assert.doesNotMatch(document.querySelector('.resource-rows').textContent, /短剧|沙雕|解说|混剪|剑仙归来/);
+      assert.equal(document.querySelector('.result-summary strong').textContent, '2');
+    }
+  } finally { app.unmount(); }
+});
