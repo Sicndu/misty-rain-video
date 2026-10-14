@@ -9,6 +9,7 @@ import { build } from 'esbuild';
 
 const dom = new JSDOM('<html><body></body></html>', { url: 'http://localhost/', pretendToBeVisual: true });
 for (const key of ['window', 'document', 'Element', 'HTMLElement', 'SVGElement', 'Node']) globalThis[key] = dom.window[key];
+globalThis.localStorage = dom.window.localStorage;
 const { createApp, nextTick, reactive, markRaw, h } = await import('vue');
 fs.mkdirSync('.local-runtime/tests', { recursive: true });
 const folder = fs.mkdtempSync('.local-runtime/tests/mobile-player-');
@@ -68,10 +69,10 @@ test('subtitle selection leaves metadata tracks alone; mute can restore zero vol
   const view = mount();
   try {
     const select = document.querySelector('select');
-    select.value = '-1'; select.dispatchEvent(event('change')); await nextTick();
+    select.value = 'off'; select.dispatchEvent(event('change')); await nextTick();
     assert.equal(view.media.textTracks[0].mode, 'disabled');
     assert.equal(view.media.textTracks[1].mode, 'hidden');
-    select.value = '0'; select.dispatchEvent(event('change')); await nextTick();
+    select.value = 'native:0'; select.dispatchEvent(event('change')); await nextTick();
     assert.equal(view.media.textTracks[0].mode, 'showing');
     view.media.volume = 0; view.media.dispatchEvent(event('volumechange')); await nextTick();
     button('取消静音').click(); await nextTick();

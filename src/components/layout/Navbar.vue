@@ -227,7 +227,8 @@ defineExpose({ focusSearch, scrollToTop });
 </template>
 
 <style scoped>
-.liquid-navbar-wrapper { position: sticky; top: 0; z-index: 100; width: 100%; margin: 0 auto; padding: 0 max(40px, calc((100% - 1200px) / 2)); background: rgb(11 11 13 / .88); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border-bottom: 1px solid rgb(255 255 255 / .06); }
+@media (min-width: 1024px) { .brand-unit { display: none !important; } .liquid-navbar { gap: 24px; } .search-unit { max-width: 640px; margin-right: auto; margin-left: 0; } }
+.liquid-navbar-wrapper { position: sticky; top: 0; z-index: 100; width: 100%; margin: 0 auto; padding: 0 max(40px, calc((100% - 1200px) / 2)); background: var(--nav-background); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border-bottom: 1px solid var(--divider); }
 .liquid-navbar { display: flex; align-items: center; gap: 40px; min-height: 88px; padding: 16px 0; border: 0; background: transparent; }
 .brand-unit { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 0; border: 0; color: var(--text-primary); background: transparent; text-align: left; }
 .brand-logo-badge { width: 32px; height: 32px; overflow: hidden; border-radius: 10px; }
@@ -237,7 +238,7 @@ defineExpose({ focusSearch, scrollToTop });
 .brand-sub { font-size: .5rem; letter-spacing: .2em; color: var(--text-tertiary); }
 .mobile-title-group { display: none; }
 .search-unit { position: relative; flex: 1; max-width: 480px; min-width: 0; margin-left: auto; }
-.liquid-search-input { display: block; width: 100%; min-height: 46px; padding: 10px 48px 10px 43px; border: 1px solid transparent; border-radius: 12px; outline: none; color: var(--text-primary); background: rgb(255 255 255 / .055); font-size: 16px; transition: background .2s, box-shadow .2s; }
+.liquid-search-input { display: block; width: 100%; min-height: 46px; padding: 10px 48px 10px 43px; border: 1px solid transparent; border-radius: 12px; outline: none; color: var(--text-primary); background: var(--glass-bg); font-size: 16px; transition: background .2s, box-shadow .2s; }
 .liquid-search-input:focus { background: var(--glass-bg); box-shadow: 0 0 0 3px var(--liquid-accent-subtle); }
 .liquid-search-input::placeholder { color: var(--text-tertiary); }
 .search-lens-icon { position: absolute; top: 24px; left: 16px; display: flex; transform: translateY(-50%); color: var(--text-tertiary); pointer-events: none; }
@@ -256,7 +257,7 @@ defineExpose({ focusSearch, scrollToTop });
 .account-avatar { width: 36px; height: 36px; border-radius: 50%; color: var(--liquid-accent); background: var(--surface-2); }
 .account-name { display: none; }
 @media (max-width: 640px) {
-  .liquid-navbar-wrapper { top: 0; padding: calc(var(--safe-area-top) + 8px) calc(20px + var(--safe-area-right)) 10px calc(20px + var(--safe-area-left)); background: rgb(11 11 13 / .9); border: 0; }
+  .liquid-navbar-wrapper { top: 0; padding: calc(var(--safe-area-top) + 8px) calc(20px + var(--safe-area-right)) 10px calc(20px + var(--safe-area-left)); background: var(--nav-background); border: 0; }
   .liquid-navbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 12px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
   .liquid-navbar::after { display: none; }
   .brand-logo-badge, .brand-text-group { display: none; }
@@ -266,7 +267,7 @@ defineExpose({ focusSearch, scrollToTop });
   .mobile-brand-copy strong { color: var(--text-primary); font-size: 1.05rem; font-weight: 650; letter-spacing: .015em; }
   .mobile-brand-copy small { color: var(--text-tertiary); font-size: .67rem; }
   .search-unit { grid-column: 1 / -1; grid-row: 2; width: 100%; max-width: none; }
-  .liquid-search-input { background: rgb(255 255 255 / .065); box-shadow: none; }
+  .liquid-search-input { background: var(--glass-bg); box-shadow: none; }
   .trailing-unit { grid-column: 2; grid-row: 1; }
   .account-capsule-btn { min-width: 44px; padding: 4px; }
   .account-name { display: none; }

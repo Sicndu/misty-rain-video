@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import type Hls from 'hls.js';
+import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
 import { onBeforeUnmount, ref, watch } from 'vue';
 import { Maximize, Minimize, Pause, Play, Volume2, VolumeX } from '@lucide/vue';
 
-const props = defineProps<{ video: HTMLVideoElement; expanded: boolean }>();
+const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; hls?: Hls | null; username?: string }>();
 const emit = defineEmits<{ (e: 'fullscreen'): void }>();
 const visible = ref(true);
 const paused = ref(true);
@@ -11,8 +13,8 @@ const time = ref(0);
 const duration = ref(0);
 const scrubbing = ref(false);
 const notice = ref('');
-const subtitles = ref<{ index: number; label: string }[]>([]);
-const subtitle = ref('-1');
+const subtitles = ref<SubtitleTrackOption[]>([]);
+const subtitle = ref('off');
 let timer: ReturnType<typeof setTimeout> | undefined;
 let release = () => {};
 const clock = (value: number) => {
@@ -48,13 +50,14 @@ function toggleMute() {
   if (unmute && props.video.volume === 0) props.video.volume = 1;
 }
 function selectSubtitle(event: Event) {
-  const index = Number((event.target as HTMLSelectElement).value);
-  Array.from(props.video.textTracks).forEach((track, i) => {
-    if (track.kind === 'subtitles' || track.kind === 'captions') track.mode = i === index ? 'showing' : 'disabled';
-  });
+  const id = (event.target as HTMLSelectElement).value;
+  const option = subtitles.value.find(item => item.id === id);
+  try { localStorage.setItem(subtitlePreferenceKey(props.username), subtitlePreference(option)); } catch { /* Keep the selected track. */ }
+  selectSubtitleTrack(props.video, props.hls, id);
   reveal();
 }
-watch(() => props.video, video => {
+
+watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
   release();
   scrubbing.value = false; notice.value = '';
   const sync = () => {
@@ -63,10 +66,8 @@ watch(() => props.video, video => {
     if (!scrubbing.value) time.value = video.currentTime || 0;
   };
   const syncTracks = () => {
-    subtitles.value = Array.from(video.textTracks).flatMap((track, index) =>
-      track.kind === 'subtitles' || track.kind === 'captions' ? [{ index, label: track.label || track.language || `字幕 ${index + 1}` }] : []);
-    subtitle.value = String(Array.from(video.textTracks).findIndex(track =>
-      (track.kind === 'subtitles' || track.kind === 'captions') && track.mode === 'showing'));
+    subtitles.value = subtitleTrackOptions(video, hls);
+    subtitle.value = activeSubtitleTrack(video, hls);
   };
   const playback = () => { sync(); reveal(); };
   const tap = () => { if (visible.value && !video.paused) visible.value = false; else reveal(); };
@@ -75,12 +76,15 @@ watch(() => props.video, video => {
   ['play', 'pause', 'ended'].forEach(event => video.addEventListener(event, playback));
   ['addtrack', 'removetrack', 'change'].forEach(event => video.textTracks.addEventListener(event, syncTracks));
   video.addEventListener('click', tap);
+  const hlsEvents = hls ? subtitleEvents(hls) : [];
+  hlsEvents.forEach(event => hls?.on(event, syncTracks));
   sync(); syncTracks(); reveal();
   release = () => {
     events.forEach(event => video.removeEventListener(event, sync));
     ['play', 'pause', 'ended'].forEach(event => video.removeEventListener(event, playback));
     ['addtrack', 'removetrack', 'change'].forEach(event => video.textTracks.removeEventListener(event, syncTracks));
     video.removeEventListener('click', tap);
+    hlsEvents.forEach(event => hls?.off(event, syncTracks));
     clearTimeout(timer);
   };
 }, { immediate: true });
@@ -97,7 +101,7 @@ onBeforeUnmount(() => release());
       <input type="range" aria-label="播放进度" :aria-valuetext="`${clock(time)} / ${clock(duration)}`" min="0" :max="duration || 1" step="0.1" :value="time" :disabled="!duration" @input="preview" @change="seek" @pointercancel="scrubbing = false; time = video.currentTime; reveal()" />
       <span class="time">{{ clock(duration) }}</span>
       <button type="button" :aria-label="muted ? '取消静音' : '静音'" @click="toggleMute"><VolumeX v-if="muted" /><Volume2 v-else /></button>
-      <select v-if="subtitles.length" aria-label="影片字幕" :value="subtitle" @change="selectSubtitle"><option value="-1">字幕关</option><option v-for="track in subtitles" :key="track.index" :value="track.index">{{ track.label }}</option></select>
+      <select v-if="subtitles.length" aria-label="影片字幕" :value="subtitle" @change="selectSubtitle"><option value="off">字幕关</option><option v-for="track in subtitles" :key="track.id" :value="track.id">{{ track.label }}</option></select>
       <button type="button" :aria-label="expanded ? '退出横屏' : '横屏播放'" @click="emit('fullscreen')"><Minimize v-if="expanded" /><Maximize v-else /></button>
     </div>
   </div>

@@ -97,15 +97,15 @@ watch(() => props.resource, load, { immediate: true });
           <li v-for="entry in visibleEntries" :key="entry.fid" class="file-row">
             <input type="checkbox" :checked="selected.has(entry.fid)" :indeterminate="partial(entry)"
               :aria-label="`选择${entry.isDirectory ? '文件夹' : '文件'} ${entry.name}`"
-              :disabled="isSaving || (!entry.isDirectory && !entry.isVideo)" @change="toggle(entry)" />
+              :disabled="isSaving || (!entry.isDirectory && !entry.isVideo && !entry.isSubtitle)" @change="toggle(entry)" />
             <component :is="entry.isDirectory ? Folder : entry.isVideo ? Video : File" class="file-icon" aria-hidden="true" />
             <div class="file-info">
               <button v-if="entry.isDirectory" type="button" class="folder-name" :disabled="isSaving" @click="currentFolder = entry.fid">
                 {{ entry.name }}<ChevronRight aria-hidden="true" />
               </button>
-              <button v-else type="button" class="file-name" :disabled="isSaving || !entry.isVideo" @click="toggle(entry)">{{ entry.name }}</button>
-              <p v-if="entry.isDirectory">{{ entry.videoCount }} 个视频 · 正片将保存到影片目录，附件会跳过</p>
-              <p v-else><span v-if="entry.episodeNumber">{{ entry.episodeTitle }} · </span>{{ entry.sizeFormatted }}<span v-if="!entry.isVideo"> · 非视频文件</span></p>
+              <button v-else type="button" class="file-name" :disabled="isSaving" @click="toggle(entry)">{{ entry.name }}</button>
+              <p v-if="entry.isDirectory">{{ entry.videoCount }} 个视频 · 正片和字幕将保存到影片目录，其他附件跳过</p>
+              <p v-else><span v-if="entry.episodeNumber">{{ entry.episodeTitle }} · </span>{{ entry.sizeFormatted }}<span v-if="entry.isSubtitle"> · 字幕文件</span><span v-else-if="!entry.isVideo"> · 非视频文件</span></p>
             </div>
           </li>
         </ul>
@@ -118,6 +118,7 @@ watch(() => props.resource, load, { immediate: true });
     </div>
     <footer class="detail-footer">
       <p>已选 {{ selectedFids.length }} 项<span v-if="selected.size"> · 包含 {{ selectedVideoCount }} 个视频</span></p>
+      <p class="subtitle-save-hint">保存视频时会同时保留匹配的字幕文件。</p>
       <div class="detail-save-actions">
         <button type="button" class="save-all" :disabled="isSaving" @click="emit('save')">{{ replacingSource ? '用全部正片替换' : '保存全部正片' }}</button>
         <button type="button" class="save-selected" :disabled="isSaving || isLoading || !selectedVideoCount" @click="emit('save', selectedFids)">
@@ -138,13 +139,13 @@ button:disabled, input:disabled { opacity: .45; cursor: default; }
 .back-button svg, .breadcrumbs svg, .detail-notice svg { width: 17px; height: 17px; flex-shrink: 0; }
 h4 { margin: 0; font-size: 1rem; line-height: 1.6; overflow-wrap: anywhere; }
 .detail-summary, .detail-notice, .file-info p, .detail-footer p { color: var(--text-tertiary); font-size: .76rem; line-height: 1.7; margin: 0; }
-.breadcrumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid rgb(255 255 255 / .08); }
+.breadcrumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--divider); }
 .breadcrumbs button { padding: 0 8px; max-width: 100%; overflow-wrap: anywhere; }
 .selection-tools { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: .74rem; color: var(--text-tertiary); }
 .selection-tools span { flex: 1; min-width: 120px; }
 .selection-tools button { padding: 0 8px; color: var(--liquid-accent); }
 .file-list { list-style: none; padding: 0; margin: 0; }
-.file-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgb(255 255 255 / .07); }
+.file-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--divider); }
 .file-row input { width: 20px; height: 20px; margin: 12px 0; flex-shrink: 0; accent-color: var(--liquid-accent); }
 .file-icon { width: 22px; height: 22px; color: var(--liquid-accent); flex-shrink: 0; }
 .file-info { min-width: 0; flex: 1; }
