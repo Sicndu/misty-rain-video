@@ -378,7 +378,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
 .liquid-dialog { display: flex; width: min(820px, 100%); max-height: calc(100dvh - 48px); min-height: 0; flex-direction: column; overflow: hidden; border: var(--glass-border); border-radius: 32px; color: var(--text-primary); background: var(--glass-sheet-material); backdrop-filter: var(--glass-blur-heavy); -webkit-backdrop-filter: var(--glass-blur-heavy); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-lg); }
 .dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 24px 24px 16px; flex-shrink: 0; }
 .media-meta-row { display: flex; min-width: 0; align-items: center; gap: 14px; flex: 1; }
-.dialog-poster { width: 54px; height: 74px; flex-shrink: 0; object-fit: cover; border: 1px solid rgb(255 255 255 / .09); border-radius: 14px; box-shadow: var(--glass-shadow-sm); }
+.dialog-poster { width: 54px; height: 74px; flex-shrink: 0; object-fit: cover; border: 1px solid var(--divider); border-radius: 14px; box-shadow: var(--glass-shadow-sm); }
 .dialog-meta-info { display: grid; min-width: 0; flex: 1; gap: 7px; }
 .dialog-title { overflow: hidden; color: var(--text-primary); font-size: 1.22rem; font-weight: 750; letter-spacing: -.03em; text-overflow: ellipsis; white-space: nowrap; }
 .cat-selector-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
@@ -392,7 +392,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
 .dialog-top-actions { flex-shrink: 0; }
 .btn-close-dialog { display: grid; width: 44px; height: 44px; place-items: center; border: var(--glass-border); border-radius: 50%; color: var(--text-secondary); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
 .btn-close-dialog svg { width: 20px; height: 20px; }
-.result-search { display: flex; align-items: center; gap: 6px; margin: 0 24px; min-height: 52px; padding: 3px 4px 3px 15px; border: 1px solid rgb(255 255 255 / .09); border-radius: 12px; background: var(--glass-bg); flex-shrink: 0; }
+.result-search { display: flex; align-items: center; gap: 6px; margin: 0 24px; min-height: 52px; padding: 3px 4px 3px 15px; border: 1px solid var(--divider); border-radius: 12px; background: var(--glass-bg); flex-shrink: 0; }
 .result-search-icon { width: 19px; height: 19px; color: var(--text-tertiary); flex-shrink: 0; }
 .result-search input { width: 100%; min-width: 0; flex: 1; min-height: 44px; padding: 6px; border: 0; color: var(--text-primary); background: transparent; font-size: 16px; outline: none; }
 .result-search:focus-within { box-shadow: 0 0 0 3px var(--liquid-accent-subtle); }
@@ -409,7 +409,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
 .dialog-body { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 24px; }
 .dialog-body.showing-details { display: flex; overflow: hidden; }
 .resource-rows { display: grid; gap: 0; }
-.liquid-resource-row { display: flex; align-items: center; gap: 20px; padding: 20px 0; border-bottom: 1px solid rgb(255 255 255 / .08); background: transparent; }
+.liquid-resource-row { display: flex; align-items: center; gap: 20px; padding: 20px 0; border-bottom: 1px solid var(--divider); background: transparent; }
 .row-left { min-width: 0; flex: 1; }
 .row-info { min-width: 0; }
 .row-title { overflow-wrap: anywhere; color: var(--text-primary); font-size: .94rem; font-weight: 650; line-height: 1.5; }

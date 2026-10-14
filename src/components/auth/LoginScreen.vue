@@ -3,6 +3,7 @@ import { nextTick, ref, watch } from 'vue';
 import { Download, Eye, EyeOff } from '@lucide/vue';
 import { apiUrl } from '../../services/appUrl';
 import BrandMark from '../common/BrandMark.vue';
+import ThemeSwitch from '../common/ThemeSwitch.vue';
 
 const props = defineProps<{
   checking: boolean;
@@ -36,6 +37,7 @@ const submit = () => {
 
 <template>
   <main class="login-shell" :class="{ 'is-checking': checking }">
+    <ThemeSwitch class="login-theme-switch" />
     <section class="login-card" :aria-busy="checking || submitting">
       <header class="login-hero">
         <div class="brand-lockup">
@@ -125,10 +127,11 @@ const submit = () => {
 </template>
 
 <style scoped>
+.login-theme-switch { position: absolute; top: calc(20px + var(--safe-area-top)); right: calc(20px + var(--safe-area-right)); z-index: 2; }
 .login-shell { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; min-height: var(--app-viewport-height); padding: calc(30px + var(--safe-area-top)) 24px calc(30px + var(--safe-area-bottom)); }
 .login-card { position: relative; width: min(420px, 100%); padding: 40px 24px 26px; }
 .brand-lockup { display: flex; align-items: center; gap: 12px; }
-.brand-mark { width: 54px; height: 54px; overflow: hidden; border: 1px solid rgb(255 255 255 / .09); border-radius: 19px; box-shadow: 0 7px 18px rgb(44 81 157 / .15); }
+.brand-mark { width: 54px; height: 54px; overflow: hidden; border: 1px solid var(--divider); border-radius: 19px; box-shadow: 0 7px 18px rgb(44 81 157 / .15); }
 .brand-mark :deep(.brand-mark-image) { border-radius: inherit; }
 .brand-copy { display: grid; gap: 3px; }
 .brand-copy strong { font-size: 1.15rem; font-weight: 740; letter-spacing: -.04em; }
@@ -137,7 +140,7 @@ const submit = () => {
 .login-heading > span { color: var(--liquid-accent); font-size: .76rem; font-weight: 600; }
 .login-heading h1 { margin: 8px 0 14px; color: var(--text-primary); font-size: 2.65rem; font-weight: 650; letter-spacing: -.04em; line-height: 1.15; }
 .login-heading p { color: var(--text-secondary); font-size: .87rem; line-height: 1.7; }
-.credential-group { padding: 0 16px; border: 1px solid rgb(255 255 255 / .07); border-radius: 14px; background: var(--surface-1); }
+.credential-group { padding: 0 16px; border: 1px solid var(--divider); border-radius: 14px; background: var(--surface-1); }
 .input-shell { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 74px; align-content: center; gap: 3px; padding: 10px 0; border-bottom: 1px solid rgb(100 122 161 / .12); }
 .input-shell:last-child { border-bottom: 0; }
 .field-name { grid-column: 1; font-size: .73rem; color: var(--text-tertiary); }
@@ -157,7 +160,7 @@ const submit = () => {
 .login-loader span { width: 7px; height: 7px; border-radius: 50%; background: var(--liquid-accent); animation: pulse 1s ease-in-out infinite; }
 .login-loader span:nth-child(2) { animation-delay: .15s; }
 .login-loader span:nth-child(3) { animation-delay: .3s; }
-.button-spinner { width: 17px; height: 17px; border: 1px solid rgb(255 255 255 / .09); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
+.button-spinner { width: 17px; height: 17px; border: 1px solid var(--divider); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: .25; transform: translateY(-3px); } }
 :global(html.ios-standalone .login-footer) { display: none; }

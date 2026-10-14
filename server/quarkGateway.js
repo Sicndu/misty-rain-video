@@ -1,6 +1,7 @@
 import dns from 'node:dns';
 import { createOpaqueId } from './http.js';
 import { resolveShareSelection, entriesInSelection } from './shareSelection.js';
+import { includeSubtitleCompanions, isSubtitleFile, isTextSubtitleFile, subtitleMatchesVideo, subtitleLanguage, decodeSubtitle, subtitleToVtt } from './subtitles.js';
 import { episodeKey, isAncillaryVideoPath, libraryVideoName, missingLibraryEpisodes, seasonNumber, validateSourceCandidate } from './libraryPolicy.js';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -701,7 +702,17 @@ export class QuarkGateway {
     const selectionTree = quarkSelectionFids === undefined
       ? null : await this.#readShareTree(share, cookie);
     const selectedItems = selectionTree
-      ? resolveShareSelection(selectionTree, quarkSelectionFids) : null;
+      ? includeSubtitleCompanions(selectionTree, resolveShareSelection(selectionTree, quarkSelectionFids)) : null;
+    const subtitleTree = selectionTree || await this.#readShareTree(share, cookie);
+    const subtitleScope = selectedItems ? entriesInSelection(subtitleTree, selectedItems) : subtitleTree;
+    share.extraSubtitles = subtitleScope.filter(isSubtitleFile);
+    share.subtitleTree = subtitleTree;
+    share.subtitleFolders = new Map();
+    for (const item of subtitleTree) {
+      const parent = item.parentFid || '0';
+      if (!share.subtitleFolders.has(parent)) share.subtitleFolders.set(parent, []);
+      share.subtitleFolders.get(parent).push(item);
+    }
     const mediaTitle = resolveMediaTitle(title, share.title);
     const replacementFid = String(replaceQuarkFid || '').trim();
     if (replacementFid.length > 240) {
@@ -907,7 +918,7 @@ export class QuarkGateway {
         return {
           fid: item.fid, parentFid: item.parentFid, ancestorFids: item.ancestorFids,
           name: item.file_name, isDirectory: item.file_type === 0 || Boolean(item.dir),
-          isVideo: video, size: Number(item.size) || 0, sizeFormatted: formatBytes(item.size),
+          isVideo: video, isSubtitle: isSubtitleFile(item), size: Number(item.size) || 0, sizeFormatted: formatBytes(item.size),
           episodeNumber: episode?.episodeNumber || 0, episodeTitle: episode?.episodeTitle || '',
           videoCount: videoCounts.get(item.fid) || 0
         };
@@ -946,7 +957,7 @@ export class QuarkGateway {
   }
 
   #selectedLibraryEpisodes(tree, selected, category) {
-    const episodes = normalizePlaybackEpisodes(entriesInSelection(tree, selected));
+    const episodes = normalizePlaybackEpisodes(entriesInSelection(tree, selected).map(item => ({ ...item, pdir_fid: item.parentFid })));
     const numbered = episodes.filter(episode => episode.episodeNumber > 0);
     return category !== 'movie' && numbered.length ? numbered : episodes;
   }
@@ -1112,19 +1123,21 @@ export class QuarkGateway {
       };
     });
 
-    const subtitles = normalized.subtitles.map(({ requestCookie, requestProfile, ...subtitle }) => {
-      const assetId = this.registerAsset(session, subtitle.url, requestProfile, requestCookie);
-      return {
-        ...subtitle,
-        url: `/api/player/sessions/${encodeURIComponent(sessionId)}/assets/${encodeURIComponent(assetId)}`
-      };
+    let subtitleNotice = '';
+    const sidecars = await this.#episodeSidecars(session, episode, cookie, principal, playbackCache).catch(error => {
+      subtitleNotice = '同目录字幕暂时读取失败，可重新连接影片后重试';
+      console.warn('[subtitles] directory discovery failed', { code: error?.code || 'SUBTITLE_DISCOVERY_FAILED' });
+      return [];
     });
+    const subtitles = [...normalized.subtitles.map(item => ({ ...item, origin: 'source' })), ...sidecars]
+      .map(subtitle => this.#registerSubtitle(session, episode.fid, subtitle));
 
     return {
       episode: (({ shareFidToken, parentFid, previewUrl, ...publicEpisode }) => publicEpisode)(episode),
       sources,
       audioTracks: normalized.audioTracks,
       subtitles,
+      subtitleNotice,
       transferred,
       expiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString()
     };
@@ -1141,6 +1154,105 @@ export class QuarkGateway {
     }
     source.touchedAt = Date.now();
     return { session, source };
+  }
+
+  #registerSubtitle(session, episodeFid, subtitle) {
+    session.subtitleSources ||= new Map();
+    session.subtitleIndex ||= new Map();
+    const key = `${episodeFid}:${subtitle.origin}:${subtitle.fid || subtitle.url}`;
+    let id = session.subtitleIndex.get(key);
+    if (!id) { id = createOpaqueId(); session.subtitleIndex.set(key, id); }
+    session.subtitleSources.set(id, subtitle);
+    return { id, label: subtitle.label, language: subtitle.language || '', origin: subtitle.origin,
+      url: `/api/player/sessions/${encodeURIComponent(session.id)}/subtitles/${encodeURIComponent(id)}` };
+  }
+
+  async #episodeSidecars(session, episode, cookie, user, playbackCache) {
+    if (!episode.fileName || !episode.parentFid) return [];
+    session.subtitleFolders ||= new Map();
+    const listFolder = async parentFid => {
+      const cached = session.subtitleFolders.get(parentFid);
+      if (cached && Date.now() - cached.checkedAt < 60_000) return cached.items;
+      const items = session.kind === 'share'
+        ? await this.#listShareFolder({ pwdId: session.pwdId, stoken: session.stoken, parentFid, cookie })
+        : await this.#listDriveFolder(parentFid, cookie);
+      session.subtitleFolders.set(parentFid, { checkedAt: Date.now(), items });
+      return items;
+    };
+    const siblings = await listFolder(episode.parentFid);
+    let candidates = siblings.filter(isTextSubtitleFile);
+    for (const folder of siblings.filter(item => (item.file_type === 0 || item.dir)
+      && /^(?:subs?|subtitles?|.*字幕.*)$/i.test(item.file_name || '')).slice(0, 6)) {
+      const items = await listFolder(folder.fid);
+      candidates.push(...items.filter(isTextSubtitleFile));
+      const nested = items.filter(item => item.file_type === 0 || item.dir).slice(0, 4);
+      const children = await Promise.all(nested.map(item => listFolder(item.fid)));
+      candidates.push(...children.flat().filter(isTextSubtitleFile));
+    }
+    const onlyVideo = siblings.filter(isVideoFile).length === 1;
+    candidates = candidates.filter(item => subtitleMatchesVideo(episode.fileName, item.file_name, onlyVideo)).slice(0, 32);
+    const subtitles = [];
+    for (const item of candidates) {
+      let fid = item.fid;
+      if (session.kind === 'share') {
+        const key = `subtitle:${session.pwdId}:${item.fid}`;
+        fid = playbackCache?.get(key)?.savedFid;
+        if (!fid) {
+          const folder = await this.#ensurePlaybackFolder(cookie, user);
+          const saved = await this.#saveSharedItems({ pwdId: session.pwdId, stoken: session.stoken, items: [item],
+            targetFolderFid: folder.fid, cookie: this.#requireCookie(), passcode: session.passcode });
+          fid = saved[0];
+          playbackCache?.set(key, { savedFid: fid, fileName: item.file_name, folderFid: folder.fid });
+        }
+      }
+      subtitles.push({ fid, label: item.file_name, fileName: item.file_name, origin: 'sidecar', language: subtitleLanguage(item.file_name) });
+    }
+    return subtitles;
+  }
+
+  validateHistorySession(sessionId, mediaFid, user = SYSTEM_USER) {
+    const session = this.#getSession(sessionId, normalizeUser(user));
+    if ((session.kind === 'drive' && session.driveFid !== mediaFid)
+      || (session.kind === 'share' && mediaFid)) {
+      throw new QuarkApiError('播放记录与当前影片会话不一致', { code: 'HISTORY_MEDIA_MISMATCH', statusCode: 403 });
+    }
+  }
+
+  async getSubtitleContent(sessionId, subtitleId, user = SYSTEM_USER, { signal } = {}) {
+    const session = this.#getSession(sessionId, normalizeUser(user));
+    const subtitle = session.subtitleSources?.get(subtitleId);
+    if (!subtitle) throw new QuarkApiError('字幕不存在或会话已过期', { code: 'SUBTITLE_NOT_FOUND', statusCode: 404 });
+    let url = subtitle.url;
+    let profile = subtitle.requestProfile || 'web';
+    let cookie = subtitle.requestCookie || '';
+    if (subtitle.fid) {
+      if (this.tvPlaybackClient && this.credentialStore.getTvAuth?.()?.refreshToken) {
+        const data = await this.tvPlaybackClient.getDownload(subtitle.fid);
+        url = data.download_url; profile = 'tv';
+      } else {
+        const result = await this.#requestJson(`${API_HOST}/file/download?pr=ucpro&fr=pc`, {
+          method: 'POST', cookie: this.#requireCookie(), body: { fids: [subtitle.fid] },
+          userAgent: QUARK_DESKTOP_USER_AGENT
+        });
+        const data = Array.isArray(result?.data) ? result.data[0] : result?.data?.list?.[0] || result?.data;
+        url = data?.download_url || data?.url;
+        cookie = this.#requireCookie();
+      }
+    }
+    if (!url) throw new QuarkApiError('暂时无法获取字幕文件', { code: 'SUBTITLE_DOWNLOAD_UNAVAILABLE', statusCode: 502 });
+    const timeout = AbortSignal.timeout(15_000);
+    const upstream = await this.fetchMedia(url, undefined, profile, cookie, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+    if (!upstream.ok || !upstream.body) throw new QuarkApiError('字幕文件读取失败', { code: 'SUBTITLE_DOWNLOAD_FAILED', statusCode: 502 });
+    const reader = upstream.body.getReader(); const chunks = []; let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        size += value.byteLength;
+        if (size > 2 * 1024 * 1024) throw new QuarkApiError('字幕文件超过2MB，暂时无法加载', { code: 'SUBTITLE_TOO_LARGE', statusCode: 413 });
+        chunks.push(Buffer.from(value));
+      }
+    } finally { await reader.cancel().catch(() => {}); }
+    return subtitleToVtt(decodeSubtitle(Buffer.concat(chunks, size)), subtitle.fileName || subtitle.label || '');
   }
 
   async refreshStreamSource(sessionId, sourceId, user = SYSTEM_USER) {
@@ -1351,7 +1463,7 @@ export class QuarkGateway {
       for (const [index, list] of lists.entries()) {
         for (const item of list) {
           if (item.file_type === 0 || item.dir) queue.push({ fid: item.fid, path: `${batch[index].path}/${item.file_name}` });
-          else if (isVideoFile(item)) files.push({ ...item, source_path: batch[index].path });
+          else if (isVideoFile(item)) files.push({ ...item, source_path: batch[index].path, pdir_fid: batch[index].fid });
         }
       }
     }
@@ -1457,7 +1569,7 @@ export class QuarkGateway {
         const list = arrayFrom(result?.data?.list);
         for (const item of list) {
           if (item.file_type === 0 || item.dir) queue.push({ fid: item.fid, path: [sourcePath, item.file_name].filter(Boolean).join('/') });
-          else if (isVideoFile(item)) files.push({ ...item, source_path: sourcePath });
+          else if (isVideoFile(item)) files.push({ ...item, source_path: sourcePath, pdir_fid: parentFid });
         }
         if (list.length < 100) break;
       }
@@ -1608,8 +1720,67 @@ export class QuarkGateway {
         saved.file_name = name;
       }
       savedFids.push(...batch);
+      for (const episode of source) await this.#transferEpisodeSubtitles({ share, episode, targetFolderFid, category, cookie, passcode });
     }
+    await this.#transferExtraSubtitles(share, targetFolderFid, passcode);
     return savedFids;
+  }
+
+  async #transferEpisodeSubtitles({ share, episode, targetFolderFid, category, cookie, passcode }) {
+    if (!episode.parentFid || !episode.fileName) return;
+    share.subtitleFolders ||= new Map();
+    const listFolder = async fid => {
+      if (!share.subtitleFolders.has(fid)) {
+        share.subtitleFolders.set(fid, await this.#listShareFolder({ pwdId: share.pwdId, stoken: share.stoken, parentFid: fid, cookie }));
+      }
+      return share.subtitleFolders.get(fid);
+    };
+    const siblings = await listFolder(episode.parentFid);
+    let files = siblings.filter(isSubtitleFile);
+    for (const folder of siblings.filter(item => (item.file_type === 0 || item.dir)
+      && /^(?:subs?|subtitles?|.*字幕.*)$/i.test(item.file_name || '')).slice(0, 6)) {
+      const children = await listFolder(folder.fid);
+      files.push(...children.filter(isSubtitleFile));
+      for (const nested of children.filter(item => item.file_type === 0 || item.dir).slice(0, 4)) files.push(...(await listFolder(nested.fid)).filter(isSubtitleFile));
+    }
+    const onlyVideo = siblings.filter(isVideoFile).length === 1;
+    const candidates = files.filter(item => subtitleMatchesVideo(episode.fileName, item.file_name, onlyVideo));
+    const targetStem = libraryVideoName(episode, category).replace(/\.[^.]+$/, '');
+    const originalStem = episode.fileName.replace(/\.[^.]+$/, '');
+    for (const item of candidates) {
+      const extension = item.file_name.match(/\.[^.]+$/)?.[0] || '';
+      const subtitleStem = item.file_name.slice(0, -extension.length);
+      const suffix = subtitleStem.startsWith(originalStem) ? subtitleStem.slice(originalStem.length) : `.${subtitleStem}`;
+      const targetName = `${targetStem}${suffix}${extension}`;
+      const before = await this.#listDriveFolder(targetFolderFid, this.#requireCookie());
+      share.copiedSubtitleFids ||= new Set();
+      if (before.some(file => file.file_name === targetName)) { share.copiedSubtitleFids.add(item.fid); continue; }
+      const saved = await this.#saveSharedItems({ pwdId: share.pwdId, stoken: share.stoken, items: [item], targetFolderFid, cookie: this.#requireCookie(), passcode });
+      const listing = await this.#listDriveFolder(targetFolderFid, this.#requireCookie());
+      const match = listing.find(file => saved.includes(file.fid) && file.file_name === item.file_name);
+      if (!match) throw new QuarkApiError('字幕已提交转存，暂未确认结果', { code: 'SUBTITLE_TRANSFER_UNCONFIRMED', statusCode: 502 });
+      if (match.file_name !== targetName) await this.#renameDriveItem(match.fid, targetName, this.#requireCookie());
+      share.copiedSubtitleFids.add(item.fid);
+    }
+  }
+
+  async #transferExtraSubtitles(share, targetFolderFid, passcode) {
+    const extra = (share.extraSubtitles || []).filter(item => !share.copiedSubtitleFids?.has(item.fid));
+    if (!extra.length) return;
+    const folder = await this.#ensureDriveFolder(targetFolderFid, '字幕', this.#requireCookie());
+    const byId = new Map((share.subtitleTree || []).map(item => [item.fid, item]));
+    for (const item of extra) {
+      const prefix = (item.ancestorFids || []).map(fid => byId.get(fid)?.file_name).filter(Boolean).join('_');
+      const targetName = sanitizeFolderName(`${prefix ? `${prefix}_` : ''}${item.file_name}`);
+      const existing = await this.#listDriveFolder(folder.fid, this.#requireCookie());
+      if (existing.some(file => file.file_name === targetName)) continue;
+      const saved = await this.#saveSharedItems({ pwdId: share.pwdId, stoken: share.stoken, items: [item],
+        targetFolderFid: folder.fid, cookie: this.#requireCookie(), passcode });
+      const listing = await this.#listDriveFolder(folder.fid, this.#requireCookie());
+      const file = listing.find(entry => saved.includes(entry.fid) && entry.file_name === item.file_name);
+      if (!file) throw new QuarkApiError('字幕已提交转存，暂未确认结果', { code: 'SUBTITLE_TRANSFER_UNCONFIRMED', statusCode: 502 });
+      if (file.file_name !== targetName) await this.#renameDriveItem(file.fid, targetName, this.#requireCookie());
+    }
   }
 
   async #replaceLibrarySource({

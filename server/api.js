@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { readRequestBody, readWebResponseText, sendError, sendJson, sendSuccess, pipeWebResponse } from './http.js';
 import { AuthService } from './auth.js';
 import { DanmakuService } from './danmaku/service.js';
-import { LibraryConfigStore, LibraryViewRepository, MediaRepository, PlaybackCacheRepository, PlaybackHistoryRepository, QuarkCredentialStore, LibraryMaintenanceRepository } from './storage.js';
+import { LibraryConfigStore, LibraryViewRepository, MediaRepository, PlaybackCacheRepository, PlaybackHistoryRepository, PlayerPreferencesStore, QuarkCredentialStore, LibraryMaintenanceRepository } from './storage.js';
 import { LibraryMaintenance } from './libraryMaintenance.js';
 import { QUARK_LIBRARY_FOLDERS, QuarkGateway } from './quarkGateway.js';
 import { isGenericPoster, LEGACY_DEFAULT_POSTER, PosterService } from './posterService.js';
@@ -33,8 +33,9 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
         legacyFilePath: isAdmin ? path.resolve(dataDir, 'library_view.json') : ''
       }),
       playbackCache: new PlaybackCacheRepository(userDataDir),
-      maintenanceRepository: new LibraryMaintenanceRepository(userDataDir),
-      playbackHistory: new PlaybackHistoryRepository(userDataDir)
+      playbackHistory: new PlaybackHistoryRepository(userDataDir),
+      playerPreferences: new PlayerPreferencesStore(userDataDir),
+      maintenanceRepository: new LibraryMaintenanceRepository(userDataDir)
     };
     userContexts.set(key, value);
     return value;
@@ -387,6 +388,7 @@ export const handleApiRequest = async (request, response, context) => {
           sendSuccess(response, result, '当前影片目录已移入回收站');
         } else {
           userData.mediaRepository.remove(id);
+          userData.playbackHistory.removeByMediaId(id);
           sendSuccess(response, { deletedCount: 1 }, '已从片单移除');
         }
         return true;
@@ -448,6 +450,14 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
+    if (pathname === '/api/player/preferences') {
+      if (request.method === 'GET') { sendSuccess(response, userData.playerPreferences.get()); return true; }
+      if (request.method === 'PUT') {
+        sendSuccess(response, userData.playerPreferences.save(await readRequestBody(request, 4096)), '播放偏好已保存');
+        return true;
+      }
+    }
+
     if (pathname === '/api/playback-history') {
       if (request.method === 'GET') {
         sendSuccess(response, userData.playbackHistory.all());
@@ -474,6 +484,12 @@ export const handleApiRequest = async (request, response, context) => {
           quarkFid: String(media.quarkFid || '').slice(0, 240),
           quarkQuality: String(media.quarkQuality || '').slice(0, 120)
         };
+        if (body.playbackSessionId !== undefined) {
+          if (typeof body.playbackSessionId !== 'string' || !body.playbackSessionId || body.playbackSessionId.length > 240) {
+            throw Object.assign(new Error('播放会话标识无效'), { code: 'INVALID_HISTORY_SESSION', statusCode: 400 });
+          }
+          context.quarkGateway.validateHistorySession(body.playbackSessionId, safeMedia.quarkFid, user);
+        }
         const duration = Math.max(0, Math.min(Number(body.duration) || 0, 60 * 60 * 48));
         const position = Math.max(0, Math.min(Number(body.position) || 0, duration || 60 * 60 * 48));
         const entry = userData.playbackHistory.save({
@@ -632,6 +648,19 @@ export const handleApiRequest = async (request, response, context) => {
       } finally {
         proxyRequest.cleanup();
       }
+      return true;
+    }
+
+    const subtitleMatch = pathname.match(/^\/api\/player\/sessions\/([^/]+)\/subtitles\/([^/]+)$/);
+    if (subtitleMatch && request.method === 'GET') {
+      const controller = createProxyRequestController(request, response);
+      try {
+        const content = await context.quarkGateway.getSubtitleContent(decodeURIComponent(subtitleMatch[1]), decodeURIComponent(subtitleMatch[2]), user, { signal: controller.signal });
+        response.statusCode = 200;
+        response.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+        response.setHeader('Cache-Control', 'private, no-store');
+        response.end(content);
+      } finally { controller.cleanup(); }
       return true;
     }
 

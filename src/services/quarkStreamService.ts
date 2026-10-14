@@ -29,6 +29,7 @@ export interface QuarkShareEntry {
   episodeNumber: number;
   episodeTitle: string;
   videoCount: number;
+  isSubtitle?: boolean;
 }
 
 export interface QuarkShareDetails {
@@ -63,6 +64,7 @@ export interface PlaybackAudioTrack {
 }
 
 export interface PlaybackSubtitle {
+  origin?: 'source' | 'sidecar';
   id: string;
   label: string;
   language: string;
@@ -80,6 +82,7 @@ export interface PreparedPlayback {
   sources: PlaybackSource[];
   audioTracks: PlaybackAudioTrack[];
   subtitles: PlaybackSubtitle[];
+  subtitleNotice?: string;
   transferred: boolean;
   expiresAt: string;
 }

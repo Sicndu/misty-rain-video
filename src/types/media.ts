@@ -65,4 +65,4 @@ export interface PlaybackHistoryEntry {
   updatedAt: string;
 }
 
-export type PlaybackHistoryUpdate = Omit<PlaybackHistoryEntry, 'id' | 'updatedAt'>;
+export type PlaybackHistoryUpdate = Omit<PlaybackHistoryEntry, 'id' | 'updatedAt'> & { playbackSessionId?: string };

@@ -4,6 +4,8 @@ import DanmakuControls from './DanmakuControls.vue';
 import MobilePlaybackControls from './MobilePlaybackControls.vue';
 import { playbackHealth } from '../../services/playbackHealth';
 import { configureVideoRequest, playbackSourceLabel, selectInitialPlaybackSource } from '../../services/playbackSource';
+import SubtitleControls from './SubtitleControls.vue';
+import { PlayerPreferencesService } from '../../services/playerPreferencesService';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { Check, ChevronDown, CircleAlert, ListVideo, LoaderCircle, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
 import type { MediaItem, PlaybackHistoryEntry, PlaybackHistoryUpdate } from '../../types/media';
@@ -22,6 +24,7 @@ import { PlaybackHistoryService } from '../../services/playbackHistoryService';
 
 const props = defineProps<{
   isOpen: boolean;
+  username?: string;
   media: MediaItem | null;
   historyEntry?: PlaybackHistoryEntry | null;
 }>();
@@ -30,7 +33,7 @@ const emit = defineEmits<{
   (e: 'close'): void;
   (e: 're-search', media: MediaItem): void;
   (e: 'open-auth-settings'): void;
-  (e: 'history-updated', entry: PlaybackHistoryEntry): void;
+  (e: 'history-updated', entry: PlaybackHistoryEntry, username?: string): void;
 }>();
 
 type PlayerPhase = 'idle' | 'resolving' | 'preparing' | 'ready' | 'error' | 'auth-required';
@@ -74,7 +77,10 @@ const manualPlayRequired = ref(false);
 const playbackHasStarted = ref(false);
 const detectedAudioTracks = ref<PlaybackAudioTrack[]>([]);
 const selectedAudioIndex = ref(-1);
-const playbackAutomationStorageKey = 'misty_rain_playback_automation';
+const playbackAutomationStorageKey = `misty_rain_playback_automation:${encodeURIComponent(props.username || 'guest')}`;
+const savingPreferences = ref(false);
+const preferencesError = ref('');
+const preferencesSaved = ref(false);
 const defaultPlaybackAutomation: PlaybackAutomationSettings = {
   skipIntroOutro: false,
   autoNext: true,
@@ -87,8 +93,8 @@ const loadPlaybackAutomation = (): PlaybackAutomationSettings => {
     return {
       skipIntroOutro: saved.skipIntroOutro === true,
       autoNext: saved.autoNext !== false,
-      introSeconds: Number.isFinite(saved.introSeconds) ? Math.max(15, Math.min(300, Number(saved.introSeconds))) : 90,
-      outroSeconds: Number.isFinite(saved.outroSeconds) ? Math.max(15, Math.min(300, Number(saved.outroSeconds))) : 90
+      introSeconds: Number.isFinite(saved.introSeconds) ? Math.max(0, Math.min(600, Math.trunc(Number(saved.introSeconds)))) : 90,
+      outroSeconds: Number.isFinite(saved.outroSeconds) ? Math.max(0, Math.min(600, Math.trunc(Number(saved.outroSeconds)))) : 90
     };
   } catch {
     return { ...defaultPlaybackAutomation };
@@ -667,6 +673,7 @@ const progressPayload = (completed = false): PlaybackHistoryUpdate | null => {
   if (!duration || (!isCompleted && position < 3)) return null;
   return {
     media,
+    playbackSessionId: session.value?.sessionId,
     episodeFid: episode.fid,
     episodeNumber: episode.episodeNumber,
     episodeTitle: episode.episodeTitle || episode.fileName,
@@ -688,7 +695,7 @@ const persistProgress = async (force = false, completed = false, keepalive = fal
   let request: Promise<PlaybackHistoryEntry | null>;
   const save = () => PlaybackHistoryService.save(payload, keepalive)
     .then(entry => {
-      emit('history-updated', entry);
+      emit('history-updated', entry, props.username);
       return entry;
     })
     .catch(error => {
@@ -997,8 +1004,27 @@ const prepareEpisode = async (index: number, resumeAt = 0) => {
   }
 };
 
+const savePreferences = async () => {
+  savingPreferences.value = true;
+  preferencesError.value = '';
+  preferencesSaved.value = false;
+  try { await PlayerPreferencesService.save({ ...playbackAutomation.value }); preferencesSaved.value = true; }
+  catch (error) { preferencesError.value = error instanceof Error ? error.message : '播放偏好保存失败'; }
+  finally { savingPreferences.value = false; }
+};
+const updateSkipDuration = (field: 'introSeconds' | 'outroSeconds', event: Event) => {
+  const seconds = (event.target as HTMLInputElement).valueAsNumber;
+  if (!Number.isInteger(seconds) || seconds < 0 || seconds > 600) {
+    preferencesError.value = '请输入0～600之间的整数秒数'; return;
+  }
+  playbackAutomation.value[field] = seconds;
+  introSkipped = (videoRef.value?.currentTime || 0) >= playbackAutomation.value.introSeconds;
+  void savePreferences();
+};
+
 const toggleSkipIntroOutro = () => {
   playbackAutomation.value.skipIntroOutro = !playbackAutomation.value.skipIntroOutro;
+  void savePreferences();
   const video = videoRef.value;
   const automation = playbackAutomation.value;
   introSkipped = (video?.currentTime || 0) >= automation.introSeconds;
@@ -1011,12 +1037,13 @@ const toggleSkipIntroOutro = () => {
     introSkipped = true;
   }
   announce(playbackAutomation.value.skipIntroOutro
-    ? `已开启跳过片头片尾，片头与片尾各 ${playbackAutomation.value.introSeconds} 秒`
+    ? `已开启跳过片头片尾，片头 ${playbackAutomation.value.introSeconds} 秒、片尾 ${playbackAutomation.value.outroSeconds} 秒`
     : '已关闭跳过片头片尾');
 };
 
 const toggleAutoNext = () => {
   playbackAutomation.value.autoNext = !playbackAutomation.value.autoNext;
+  void savePreferences();
   if (!playbackAutomation.value.autoNext && autoNextTimer !== null) {
     window.clearTimeout(autoNextTimer);
     autoNextTimer = null;
@@ -1046,6 +1073,12 @@ const loadSession = async () => {
   }
 
   try {
+    const preferences = await PlayerPreferencesService.get().catch(() => {
+      preferencesError.value = '播放偏好读取失败，当前使用本机已保存的设置';
+      return playbackAutomation.value;
+    });
+    if (sequence !== requestSequence) return;
+    playbackAutomation.value = preferences;
     const result = await QuarkStreamService.createPlaybackSession({
       quarkFid: media.quarkFid,
       shareUrl,
@@ -1183,7 +1216,7 @@ watch(
 );
 
 watch(playbackAutomation, value => {
-  localStorage.setItem(playbackAutomationStorageKey, JSON.stringify(value));
+  try { localStorage.setItem(playbackAutomationStorageKey, JSON.stringify(value)); } catch { /* Server preferences remain available. */ }
 }, { deep: true });
 
 onBeforeUnmount(() => {
@@ -1270,14 +1303,15 @@ defineExpose({ retry });
                 :key="subtitle.id"
                 kind="subtitles"
                 :label="subtitle.label"
-                :srclang="subtitle.language || 'zh'"
+                :srclang="subtitle.language || 'und'"
+                :data-subtitle-origin="subtitle.origin || 'source'"
                 :src="subtitle.url"
               />
             </video>
 
             <MobilePlaybackControls
               v-if="isMobilePlaybackDevice && videoRef && phase === 'ready' && !manualPlayRequired"
-              :video="videoRef" :expanded="immersive" @fullscreen="toggleWebFullscreen"
+              :video="videoRef" :hls="hlsRef" :username="username" :expanded="immersive" @fullscreen="toggleWebFullscreen"
             />
 
             <div v-if="phase === 'resolving' || phase === 'preparing'" class="stage-state loading-state" role="status" aria-live="polite">
@@ -1448,6 +1482,11 @@ defineExpose({ retry });
               </div>
             </div>
 
+            <div v-if="videoRef" class="setting-group subtitle-setting-group">
+              <div class="setting-heading"><span>字幕</span><small>内嵌轨道 / 资源自带字幕</small></div>
+              <SubtitleControls :video="videoRef" :hls="hlsRef" :username="username" :notice="playback?.subtitleNotice" />
+            </div>
+
             <div class="setting-group automation-setting-group">
               <div class="setting-heading">
                 <span>播放偏好</span>
@@ -1465,12 +1504,20 @@ defineExpose({ retry });
                     role="switch"
                     :aria-checked="playbackAutomation.skipIntroOutro"
                     aria-label="跳过片头片尾"
+                    :disabled="savingPreferences"
                     @click="toggleSkipIntroOutro"
                   >
                     <span aria-hidden="true"></span>
                   </button>
                 </div>
 
+                <div class="skip-durations">
+                  <label>片头时长（秒）<input type="number" min="0" max="600" step="1" :value="playbackAutomation.introSeconds" :disabled="savingPreferences" @change="updateSkipDuration('introSeconds', $event)" /></label>
+                  <label>片尾时长（秒）<input type="number" min="0" max="600" step="1" :value="playbackAutomation.outroSeconds" :disabled="savingPreferences" @change="updateSkipDuration('outroSeconds', $event)" /></label>
+                  <p>0表示不跳过该部分。设置随当前账户保存。</p>
+                  <p v-if="preferencesError" role="alert" class="preferences-error">{{ preferencesError }}</p>
+                  <p v-else-if="savingPreferences || preferencesSaved" role="status">{{ savingPreferences ? '正在保存…' : '播放偏好已保存' }}</p>
+                </div>
                 <div class="automation-row">
                   <span class="automation-copy">
                     <strong>连续播放</strong>
@@ -1482,6 +1529,7 @@ defineExpose({ retry });
                     role="switch"
                     :aria-checked="playbackAutomation.autoNext"
                     aria-label="连续播放下一集"
+                    :disabled="savingPreferences"
                     @click="toggleAutoNext"
                   >
                     <span aria-hidden="true"></span>
@@ -1552,12 +1600,18 @@ defineExpose({ retry });
 </template>
 
 <style scoped>
+.skip-durations { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; padding: 12px 0; }
+.skip-durations label { display: grid; gap: 7px; color: var(--text-secondary); font-size: .75rem; }
+.skip-durations input { width: 100%; min-height: 42px; padding: 8px 12px; border: var(--glass-border); border-radius: 8px; color: var(--text-primary); background: var(--surface-2); }
+.skip-durations p { grid-column: 1 / -1; color: var(--text-tertiary); font-size: .72rem; }
+.skip-durations .preferences-error { color: var(--danger); }
+
 .delivery-hint { margin-top: 9px; color: var(--text-tertiary); font-size: .73rem; line-height: 1.6; }
 .player-backdrop { position: fixed; inset: 0; z-index: 1400; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / .58); opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s; }
 .player-backdrop.active { opacity: 1; visibility: visible; }
 .player-backdrop:not(.active) { display: none; }
 .player-window { display: flex; flex-direction: column; width: min(1240px, 100%); height: min(850px, calc(100dvh - 48px)); min-height: 0; overflow: hidden; border: var(--glass-border); border-radius: 22px; color: var(--text-primary); background: var(--liquid-canvas); box-shadow: var(--glass-shadow-lg); }
-.player-header { display: flex; flex-shrink: 0; min-height: 80px; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 24px; border-bottom: 1px solid rgb(255 255 255 / .06); background: transparent; }
+.player-header { display: flex; flex-shrink: 0; min-height: 80px; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 24px; border-bottom: 1px solid var(--divider); background: transparent; }
 .title-block, .header-actions { display: flex; align-items: center; gap: 12px; }
 .title-block, .title-copy { min-width: 0; }
 .source-badge { flex: 0 0 auto; padding: 6px 10px; border: var(--glass-border); border-radius: 18px; color: var(--liquid-accent-strong); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner); font-size: .7rem; font-weight: 650; }
@@ -1583,7 +1637,7 @@ defineExpose({ retry });
 .stage-state p { max-width: 420px; color: var(--text-secondary); font-size: .8rem; line-height: 1.6; overflow-wrap: anywhere; }
 .state-icon { width: 28px; height: 28px; color: #f0c3cc; }
 .state-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 5px; }
-.primary-button, .secondary-button { min-height: 44px; padding: 0 17px; border: 1px solid rgb(255 255 255 / .16); border-radius: 24px; font-size: .8rem; font-weight: 600; box-shadow: none; }
+.primary-button, .secondary-button { min-height: 44px; padding: 0 17px; border: 1px solid var(--divider); border-radius: 24px; font-size: .8rem; font-weight: 600; box-shadow: none; }
 .primary-button { color: #eff3fa; background: rgb(255 255 255 / .12); }
 .secondary-button { color: #f1f5ff; background: rgb(255 255 255 / .045); }
 .reload-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
@@ -1591,13 +1645,13 @@ defineExpose({ retry });
 .play-prompt, .playback-starting { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; pointer-events: none; }
 .play-prompt { background: rgb(0 0 0 / .2); }
 .stage-play-button { display: grid; min-width: 140px; justify-items: center; gap: 7px; padding: 12px 16px; border: 0; border-radius: 26px; color: #fff; background: transparent; pointer-events: auto; }
-.stage-play-icon { display: grid; width: 68px; height: 68px; place-items: center; border: 1px solid rgb(255 255 255 / .09); border-radius: 50%; color: #fff; background: linear-gradient(145deg, rgb(255 255 255 / .4), rgb(255 255 255 / .1)); box-shadow: inset 0 2px 2px rgb(255 255 255 / .6), 0 9px 28px rgb(0 0 0 / .2); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); transition: transform .2s, background .2s; }
+.stage-play-icon { display: grid; width: 68px; height: 68px; place-items: center; border: 1px solid var(--divider); border-radius: 50%; color: #fff; background: linear-gradient(145deg, rgb(255 255 255 / .4), rgb(255 255 255 / .1)); box-shadow: inset 0 2px 2px rgb(255 255 255 / .6), 0 9px 28px rgb(0 0 0 / .2); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); transition: transform .2s, background .2s; }
 .stage-play-icon svg { width: 27px; height: 27px; margin-left: 3px; fill: currentColor; }
 .stage-play-button:active .stage-play-icon { transform: scale(.95); }
 .stage-play-label { font-size: .86rem; font-weight: 650; text-shadow: 0 2px 6px #000; }
 .stage-play-button small { color: #e1e9f8; font-size: .7rem; text-shadow: 0 2px 6px #000; }
 .buffer-retry { position: absolute; top: calc(50% + 30px); min-height: 44px; padding: 0 18px; border: var(--glass-border); border-radius: 22px; color: #fff; background: #252529; pointer-events: auto; }
-.playback-starting-pill { display: inline-flex; align-items: center; gap: 8px; padding: 10px 15px; border: 1px solid rgb(255 255 255 / .09); border-radius: 24px; color: #f4f7ff; background: rgb(29 40 59 / .8); box-shadow: inset 0 1px rgb(255 255 255 / .4); font-size: .77rem; }
+.playback-starting-pill { display: inline-flex; align-items: center; gap: 8px; padding: 10px 15px; border: 1px solid var(--divider); border-radius: 24px; color: #f4f7ff; background: rgb(29 40 59 / .8); box-shadow: inset 0 1px rgb(255 255 255 / .4); font-size: .77rem; }
 .playback-starting-pill svg { width: 17px; height: 17px; animation: spin 1s linear infinite; }
 .loading-wave { display: flex; height: 30px; align-items: center; gap: 4px; margin-bottom: 2px; }
 .loading-wave i { width: 3px; height: 20px; border-radius: 5px; background: #bad2ff; animation: loading-wave 1.2s ease-in-out infinite; }
@@ -1634,11 +1688,11 @@ defineExpose({ retry });
 .automation-copy small { color: var(--text-tertiary); font-size: .68rem; line-height: 1.5; }
 /* The switch has a 44px touch target around its 30px visual track. */
 .setting-switch { position: relative; width: 52px; height: 44px; flex-shrink: 0; border: 0; border-radius: 24px; background: transparent; }
-.setting-switch::before { content: ''; position: absolute; inset: 7px 0; border: 1px solid rgb(80 105 145 / .14); border-radius: 18px; background: #3b4450; box-shadow: inset 0 1px 3px rgb(36 54 86 / .12); transition: background .2s; }
-.setting-switch span { position: absolute; top: 10px; left: 3px; width: 24px; height: 24px; border: 1px solid rgb(255 255 255 / .18); border-radius: 50%; background: #d8dfe9; box-shadow: 0 2px 5px rgb(36 54 86 / .2); transition: transform .22s var(--spring-ease); }
+.setting-switch::before { content: ''; position: absolute; inset: 7px 0; border: 1px solid rgb(80 105 145 / .14); border-radius: 18px; background: var(--switch-track); box-shadow: inset 0 1px 3px rgb(36 54 86 / .12); transition: background .2s; }
+.setting-switch span { position: absolute; top: 10px; left: 3px; width: 24px; height: 24px; border: 1px solid var(--divider); border-radius: 50%; background: var(--switch-knob); box-shadow: 0 2px 5px rgb(36 54 86 / .2); transition: transform .22s var(--spring-ease); }
 .setting-switch[aria-checked='true']::before { background: var(--liquid-accent); }
 .setting-switch[aria-checked='true'] span { transform: translateX(22px); }
-.episode-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; margin: 0; overflow: hidden; border-left: 1px solid rgb(255 255 255 / .07); background: transparent; }
+.episode-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; margin: 0; overflow: hidden; border-left: 1px solid var(--divider); background: transparent; }
 .episode-heading { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 20px 16px 15px; }
 .episode-heading-title { display: grid; min-width: 0; gap: 5px; }
 .episode-heading-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px; }
@@ -1655,7 +1709,7 @@ defineExpose({ retry });
 .episode-item:hover { background: var(--glass-bg-hover); }
 .episode-number { position: relative; display: grid; width: 40px; height: 40px; place-items: center; border-radius: 8px; background: var(--glass-bg); font-size: .84rem; font-weight: 550; font-variant-numeric: tabular-nums; }
 .episode-item.active .episode-number { color: var(--liquid-accent-strong); border-color: rgb(var(--accent-rgb) / .2); background: var(--liquid-accent-subtle); box-shadow: none; }
-.episode-latest { position: absolute; top: -6px; right: -5px; display: grid; min-width: 16px; height: 16px; place-items: center; padding: 0 3px; border: 1px solid rgb(255 255 255 / .09); border-radius: 9px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .5rem; font-weight: 650; line-height: 1; }
+.episode-latest { position: absolute; top: -6px; right: -5px; display: grid; min-width: 16px; height: 16px; place-items: center; padding: 0 3px; border: 1px solid var(--divider); border-radius: 9px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .5rem; font-weight: 650; line-height: 1; }
 .episode-current-dot { position: absolute; bottom: 4px; left: calc(50% - 2px); width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
 .episode-copy { display: grid; min-width: 0; gap: 4px; }
 .episode-copy strong { overflow: hidden; font-size: .79rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
