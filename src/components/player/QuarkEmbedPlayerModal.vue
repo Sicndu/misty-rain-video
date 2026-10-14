@@ -1347,7 +1347,9 @@ defineExpose({ retry });
           </nav>
           <div class="panel-content">
           <div
-            v-if="activePanel === 'settings' && phase === 'ready' && sources.length"
+            v-if="phase === 'ready' && sources.length"
+            v-show="activePanel === 'settings'"
+            :aria-hidden="activePanel !== 'settings'"
             role="tabpanel" aria-labelledby="settings-tab"
             id="playback-settings"
             class="playback-settings"
@@ -1414,7 +1416,7 @@ defineExpose({ retry });
 
             <div v-if="videoRef" class="setting-group subtitle-setting-group">
               <div class="setting-heading"><span>字幕</span></div>
-              <SubtitleControls :video="videoRef" :hls="hlsRef" :username="username" :notice="playback?.subtitleNotice" />
+              <SubtitleControls :video="videoRef" :hls="hlsRef" :native-fullscreen="nativeFullscreen" :username="username" :notice="playback?.subtitleNotice" />
             </div>
 
             <div class="setting-group automation-setting-group">

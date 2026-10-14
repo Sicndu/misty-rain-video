@@ -3,7 +3,7 @@ import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type Hls from 'hls.js';
 import { ChevronDown } from '@lucide/vue';
 import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
-const props = defineProps<{ video: HTMLVideoElement; hls?: Hls | null; compact?: boolean; notice?: string; username?: string }>();
+const props = defineProps<{ video: HTMLVideoElement; hls?: Hls | null; compact?: boolean; notice?: string; username?: string; nativeFullscreen?: boolean }>();
 const options = ref<SubtitleTrackOption[]>([]);
 const selected = ref('off');
 const error = ref('');
@@ -13,10 +13,18 @@ try { preference = localStorage.getItem(preferenceKey) || 'off'; } catch { /* Cu
 let release = () => {};
 let applying = false;
 let generation = 0;
+const rememberNativeChoice = () => {
+  const id = activeSubtitleTrack(props.video, props.hls);
+  selected.value = id;
+  if (!options.value.length) return;
+  preference = subtitlePreference(options.value.find(option => option.id === id));
+  try { localStorage.setItem(preferenceKey, preference); } catch { /* Native playback remains usable. */ }
+};
 const sync = () => {
   if (applying) return;
   try { preference = localStorage.getItem(preferenceKey) || 'off'; } catch { /* Keep this session's preference. */ }
   options.value = subtitleTrackOptions(props.video, props.hls);
+  if (props.nativeFullscreen) { rememberNativeChoice(); return; }
   const desired = preference === 'off' ? 'off' : options.value.find(option =>
     subtitlePreference(option) === preference)?.id;
   if (desired && desired !== activeSubtitleTrack(props.video, props.hls)) {
@@ -26,6 +34,13 @@ const sync = () => {
   }
   selected.value = activeSubtitleTrack(props.video, props.hls);
 };
+watch(() => props.nativeFullscreen, (fullscreen, wasFullscreen) => {
+  if (wasFullscreen && !fullscreen) {
+    options.value = subtitleTrackOptions(props.video, props.hls);
+    rememberNativeChoice();
+  }
+  sync();
+});
 const choose = (event: Event) => {
   const id = (event.target as HTMLSelectElement).value;
   const option = options.value.find(item => item.id === id);

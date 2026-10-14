@@ -22,11 +22,12 @@ Object.defineProperty(window.HTMLMediaElement.prototype, 'textTracks', { configu
     const list = [], events = new window.EventTarget();
     list.addEventListener = events.addEventListener.bind(events);
     list.removeEventListener = events.removeEventListener.bind(events);
+    list.dispatchEvent = events.dispatchEvent.bind(events);
     trackLists.set(this, list);
   }
   return trackLists.get(this);
 } });
-const { createApp, h, nextTick } = await import('vue');
+const { createApp, h, nextTick, reactive } = await import('vue');
 fs.mkdirSync('.local-runtime/tests', { recursive: true });
 const folder = fs.mkdtempSync('.local-runtime/tests/simplified-ui-');
 async function compile(entry, name) {
@@ -43,6 +44,7 @@ async function compile(entry, name) {
 }
 const Account = (await compile('src/components/auth/AccountPage.vue', 'account')).default;
 const Sidebar = (await compile('src/components/layout/DesktopSidebar.vue', 'sidebar')).default;
+const Subtitles = (await compile('src/components/player/SubtitleControls.vue', 'subtitles')).default;
 const Player = (await compile('src/components/player/QuarkEmbedPlayerModal.vue', 'player')).default;
 const { useQuarkTransfer } = await compile('src/composables/useQuarkTransfer.ts', 'transfer');
 const user = role => ({ username: 'private_name', folder: role, role });
@@ -119,19 +121,47 @@ test('player tabs are mutually exclusive; settings contain one subtitle and two 
   try {
     await flush();
     assert.ok(document.querySelector('#episode-panel'));
-    assert.equal(document.querySelector('#playback-settings'), null);
+    assert.equal(document.querySelector('#playback-settings').style.display, 'none');
+    assert.equal(document.querySelector('#playback-settings').getAttribute('aria-hidden'), 'true');
     document.querySelector('#settings-tab').click(); await nextTick();
     assert.equal(document.querySelector('#episode-panel'), null);
     assert.ok(document.querySelector('#playback-settings'));
+    assert.notEqual(document.querySelector('#playback-settings').style.display, 'none');
+    assert.equal(document.querySelector('#playback-settings').getAttribute('aria-hidden'), 'false');
     assert.equal(document.querySelectorAll('select[aria-label="选择影片字幕"]').length, 1);
     assert.equal(document.querySelectorAll('.duration-input input').length, 2);
     assert.equal(document.querySelector('[aria-label="片头时长（秒）"]').value, '30');
     assert.equal(document.querySelector('[aria-label="片尾时长（秒）"]').value, '45');
     document.querySelector('#episodes-tab').click(); await nextTick();
     assert.ok(document.querySelector('#episode-panel'));
-    assert.equal(document.querySelector('#playback-settings'), null);
+    assert.equal(document.querySelector('#playback-settings').style.display, 'none');
+    assert.equal(document.querySelector('#playback-settings').getAttribute('aria-hidden'), 'true');
     assert.equal(document.querySelectorAll('[role="option"][aria-selected="true"]').length, 1);
     assert.equal(document.querySelector('.rotated-player'), null);
+  } finally { app.unmount(); }
+});
+
+test('native fullscreen subtitle choices are respected and retained after exiting', async () => {
+  const video = document.createElement('video');
+  video.textTracks.push({ kind: 'subtitles', label: '中文', language: 'zh', mode: 'disabled' });
+  const props = reactive({ video, username: 'native-caption-fixture', nativeFullscreen: true });
+  const app = mount(Subtitles, props);
+  try {
+    await flush();
+    video.textTracks[0].mode = 'showing';
+    video.textTracks.dispatchEvent(new window.Event('change'));
+    await nextTick();
+    assert.equal(video.textTracks[0].mode, 'showing', 'page preferences must not override the native picker');
+    props.nativeFullscreen = false; await nextTick();
+    assert.equal(video.textTracks[0].mode, 'showing');
+    assert.equal(document.querySelector('select').value, 'native:0');
+    const key = Object.keys(localStorage).find(key => key.includes('native-caption-fixture'));
+    const choice = localStorage.getItem(key);
+    props.nativeFullscreen = true; await nextTick();
+    video.textTracks.splice(0);
+    video.textTracks.dispatchEvent(new window.Event('removetrack'));
+    await nextTick();
+    assert.equal(localStorage.getItem(key), choice, 'an unavailable track list is not a user choice to disable subtitles');
   } finally { app.unmount(); }
 });
 
