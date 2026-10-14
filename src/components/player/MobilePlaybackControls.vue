@@ -102,7 +102,7 @@ onBeforeUnmount(() => release());
       <span class="time">{{ clock(duration) }}</span>
       <button type="button" :aria-label="muted ? '取消静音' : '静音'" @click="toggleMute"><VolumeX v-if="muted" /><Volume2 v-else /></button>
       <select v-if="subtitles.length" aria-label="影片字幕" :value="subtitle" @change="selectSubtitle"><option value="off">字幕关</option><option v-for="track in subtitles" :key="track.id" :value="track.id">{{ track.label }}</option></select>
-      <button type="button" :aria-label="expanded ? '退出横屏' : '横屏播放'" @click="emit('fullscreen')"><Minimize v-if="expanded" /><Maximize v-else /></button>
+      <button type="button" :aria-label="expanded ? '退出全屏' : '全屏播放'" @click="emit('fullscreen')"><Minimize v-if="expanded" /><Maximize v-else /></button>
     </div>
   </div>
 </template>

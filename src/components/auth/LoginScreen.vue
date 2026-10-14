@@ -3,7 +3,6 @@ import { nextTick, ref, watch } from 'vue';
 import { Download, Eye, EyeOff } from '@lucide/vue';
 import { apiUrl } from '../../services/appUrl';
 import BrandMark from '../common/BrandMark.vue';
-import ThemeSwitch from '../common/ThemeSwitch.vue';
 
 const props = defineProps<{
   checking: boolean;
@@ -37,7 +36,6 @@ const submit = () => {
 
 <template>
   <main class="login-shell" :class="{ 'is-checking': checking }">
-    <ThemeSwitch class="login-theme-switch" />
     <section class="login-card" :aria-busy="checking || submitting">
       <header class="login-hero">
         <div class="brand-lockup">
@@ -127,7 +125,6 @@ const submit = () => {
 </template>
 
 <style scoped>
-.login-theme-switch { position: absolute; top: calc(20px + var(--safe-area-top)); right: calc(20px + var(--safe-area-right)); z-index: 2; }
 .login-shell { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; min-height: var(--app-viewport-height); padding: calc(30px + var(--safe-area-top)) 24px calc(30px + var(--safe-area-bottom)); }
 .login-card { position: relative; width: min(420px, 100%); padding: 40px 24px 26px; }
 .brand-lockup { display: flex; align-items: center; gap: 12px; }

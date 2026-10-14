@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { Check, ChevronDown, RefreshCw, Search, SlidersHorizontal, X } from '@lucide/vue';
-import MediaPoster from '../common/MediaPoster.vue';
+import { Check, RefreshCw, Search, SlidersHorizontal, X } from '@lucide/vue';
 import QuarkResourceDetails from './QuarkResourceDetails.vue';
 import type { MediaItem, CategoryType } from '../../types/media';
 import type { ResourceItem } from '../../types/search';
@@ -36,12 +35,10 @@ const emit = defineEmits<{
 
 const detailResource = ref<ResourceItem | null>(null);
 const targetCategory = ref<CategoryType>('tv');
-const categoryExpanded = ref(false);
 const categories: Array<{ value: CategoryType; label: string }> = [
   { value: 'tv', label: '电视剧' }, { value: 'movie', label: '电影' },
   { value: 'variety', label: '综艺' }, { value: 'anime', label: '动漫' }
 ];
-const targetCategoryName = computed(() => categories.find(category => category.value === targetCategory.value)?.label || '电视剧');
 const replacingSource = computed(() => Boolean(props.media?.quarkFid));
 type ResultFilter = 'recommended' | 'latest' | '4k' | 'complete';
 const resultFilter = ref<ResultFilter>('recommended');
@@ -150,7 +147,6 @@ const bestQuarkResource = computed(() => rankedQuarkResources.value[0]);
 
 watch([() => props.media?.id, () => props.currentCategory], () => {
   targetCategory.value = props.media?.category || props.currentCategory;
-  categoryExpanded.value = false;
 }, { immediate: true });
 
 watch([() => props.isOpen, () => props.searchKeyword], ([isOpen, keyword]) => {
@@ -196,48 +192,16 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
     :class="{ active: isOpen }"
     role="dialog"
     aria-modal="true"
-    aria-labelledby="resource-dialog-title"
+    aria-label="选择网盘资源"
     @keydown.esc.stop="requestClose"
     @click.self="requestClose"
   >
     <div class="liquid-dialog glass-rim" v-if="media" :aria-busy="isSaving || isAnalyzing">
-      <!-- 弹窗顶栏 -->
       <div class="dialog-header">
-        <div class="media-meta-row">
-<MediaPoster :src="media.poster" :alt="media.title" class="dialog-poster" />
-          <div class="dialog-meta-info">
-            <div class="meta-title-line">
-              <h3 id="resource-dialog-title" class="dialog-title" :title="media.title">{{ media.title }}</h3>
-            </div>
-
-            <!-- 默认沿用当前分类，需要时再展开修改。 -->
-            <div class="cat-selector-row">
-              <button type="button" class="category-picker-trigger" :disabled="isSaving" :aria-expanded="categoryExpanded" aria-controls="resource-category-options" @click="categoryExpanded = !categoryExpanded">
-                分类 · {{ targetCategoryName }}<ChevronDown aria-hidden="true" />
-              </button>
-              <div v-if="categoryExpanded" id="resource-category-options" class="cat-pill-group" role="group" aria-label="选择保存分类">
-                <button
-                  v-for="category in categories"
-                  :key="category.value"
-                  type="button"
-                  class="cat-select-pill"
-                  :class="{ active: targetCategory === category.value }"
-                  :aria-pressed="targetCategory === category.value"
-                  :disabled="isSaving"
-                  @click="targetCategory = category.value; categoryExpanded = false"
-                >
-                  {{ category.label }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="dialog-top-actions">
-          <button class="btn-close-dialog" type="button" aria-label="关闭资源选择" :disabled="isSaving" @click="requestClose">
-            <X aria-hidden="true" />
-          </button>
-        </div>
+        <select v-model="targetCategory" class="category-picker" aria-label="保存分类" :disabled="isSaving">
+          <option v-for="category in categories" :key="category.value" :value="category.value">{{ category.label }}</option>
+        </select>
+        <button class="btn-close-dialog" type="button" aria-label="关闭资源选择" :disabled="isSaving" @click="requestClose"><X aria-hidden="true" /></button>
       </div>
 
       <form v-if="!detailResource" class="result-search" role="search" @submit.prevent="submitSearch">
@@ -249,7 +213,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
           enterkeyhint="search"
           autocomplete="off"
           aria-label="重新输入片名搜索资源"
-          placeholder="修改片名重新搜索"
+          placeholder="搜索片名"
           :disabled="isAnalyzing || isSaving"
         />
         <button
@@ -375,21 +339,9 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
 <style scoped>
 .liquid-dialog-backdrop { position: fixed; inset: 0; z-index: 1400; display: flex; align-items: center; justify-content: center; padding: 24px; opacity: 0; visibility: hidden; }
 .liquid-dialog-backdrop.active { opacity: 1; visibility: visible; }
-.liquid-dialog { display: flex; width: min(820px, 100%); max-height: calc(100dvh - 48px); min-height: 0; flex-direction: column; overflow: hidden; border: var(--glass-border); border-radius: 32px; color: var(--text-primary); background: var(--glass-sheet-material); backdrop-filter: var(--glass-blur-heavy); -webkit-backdrop-filter: var(--glass-blur-heavy); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-lg); }
-.dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 24px 24px 16px; flex-shrink: 0; }
-.media-meta-row { display: flex; min-width: 0; align-items: center; gap: 14px; flex: 1; }
-.dialog-poster { width: 54px; height: 74px; flex-shrink: 0; object-fit: cover; border: 1px solid var(--divider); border-radius: 14px; box-shadow: var(--glass-shadow-sm); }
-.dialog-meta-info { display: grid; min-width: 0; flex: 1; gap: 7px; }
-.dialog-title { overflow: hidden; color: var(--text-primary); font-size: 1.22rem; font-weight: 750; letter-spacing: -.03em; text-overflow: ellipsis; white-space: nowrap; }
-.cat-selector-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
-.category-picker-trigger { display: inline-flex; min-height: 44px; align-items: center; gap: 6px; padding: 0 10px; margin-left: -10px; border: 0; border-radius: 16px; color: var(--text-secondary); background: transparent; font-size: .78rem; }
-.category-picker-trigger:hover { background: var(--liquid-accent-subtle); }
-.category-picker-trigger svg { width: 15px; height: 15px; transition: transform .2s; }
-.category-picker-trigger[aria-expanded='true'] svg { transform: rotate(180deg); }
-.cat-pill-group { display: flex; flex-wrap: wrap; gap: 4px; }
-.cat-select-pill { min-height: 44px; padding: 0 12px; border: 1px solid transparent; border-radius: 22px; color: var(--text-secondary); background: transparent; font-size: .77rem; white-space: nowrap; }
-.cat-select-pill.active { border-color: rgb(255 255 255 / .14); color: var(--liquid-accent); background: var(--surface-elevated); box-shadow: var(--glass-shadow-sm); font-weight: 700; }
-.dialog-top-actions { flex-shrink: 0; }
+.liquid-dialog { display: flex; width: min(820px, 100%); max-height: calc(100dvh - 48px); min-height: 0; flex-direction: column; overflow: hidden; border: var(--glass-border); border-radius: 20px; color: var(--text-primary); background: var(--glass-sheet-material); backdrop-filter: var(--glass-blur-heavy); -webkit-backdrop-filter: var(--glass-blur-heavy); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-lg); }
+.dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; flex-shrink: 0; }
+.category-picker { min-height: 44px; max-width: 160px; padding: 0 12px; border: 0; border-radius: 8px; color: var(--text-secondary); background: var(--surface-2); font-size: .88rem; }
 .btn-close-dialog { display: grid; width: 44px; height: 44px; place-items: center; border: var(--glass-border); border-radius: 50%; color: var(--text-secondary); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
 .btn-close-dialog svg { width: 20px; height: 20px; }
 .result-search { display: flex; align-items: center; gap: 6px; margin: 0 24px; min-height: 52px; padding: 3px 4px 3px 15px; border: 1px solid var(--divider); border-radius: 12px; background: var(--glass-bg); flex-shrink: 0; }
@@ -432,16 +384,9 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 640px) {
   .liquid-dialog-backdrop { align-items: flex-end; padding: calc(var(--safe-area-top) + 10px) 0 0; }
-  .liquid-dialog { width: 100%; height: calc(100dvh - var(--safe-area-top) - 10px); max-height: 100%; border-radius: 30px 30px 0 0; }
-  .dialog-header { position: relative; padding: 23px 20px 12px; }
-  .media-meta-row { align-items: flex-start; gap: 11px; }
-  .dialog-poster { width: 32px; height: 44px; }
-  .dialog-title { max-width: calc(100% - 40px); font-size: 1.08rem; line-height: 1.8; }
-  .dialog-meta-info { gap: 9px; }
-  .dialog-top-actions { position: absolute; top: 17px; right: 15px; }
-  .cat-selector-row { display: block; }
-  .cat-pill-group { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-left: -43px; }
-  .cat-select-pill { padding: 0 5px; }
+  .liquid-dialog { width: 100%; height: calc(100dvh - var(--safe-area-top) - 10px); max-height: 100%; border-radius: 20px 20px 0 0; }
+  .dialog-header { padding: 8px 16px; }
+  .category-picker { font-size: 16px; }
   .result-search { margin: 0 16px; }
   .result-summary { padding: 14px 20px 2px; }
   .result-filters { padding: 4px 16px 10px; gap: 2px; }
@@ -455,8 +400,6 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
 @media (max-height: 500px) and (orientation: landscape) {
   .liquid-dialog { max-height: calc(100dvh - 20px); }
   .dialog-header { padding-top: 10px; padding-bottom: 5px; }
-  .dialog-poster { display: none; }
-  .dialog-meta-info { display: flex; align-items: center; gap: 20px; }
   .result-summary { padding-top: 4px; }
   .result-filters { padding-bottom: 4px; }
 }

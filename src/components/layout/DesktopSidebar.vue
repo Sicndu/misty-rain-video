@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { Clapperboard, Film, Library, Sparkles, Tv, UserRound } from '@lucide/vue';
+import { Clapperboard, Film, Library, Sparkles, Tv, Settings } from '@lucide/vue';
 import BrandMark from '../common/BrandMark.vue';
-import ThemeSwitch from '../common/ThemeSwitch.vue';
-import UserAvatar from '../common/UserAvatar.vue';
 import type { AppUser } from '../../services/authService';
 import type { CategoryType } from '../../types/media';
 defineProps<{ activePage: 'library' | 'account'; category: CategoryType; counts: Record<CategoryType, number>; user: AppUser; disabled?: boolean }>();
@@ -23,9 +21,8 @@ const categories = [
       <button v-for="item in categories" :key="item.value" type="button" :class="{ active: activePage === 'library' && category === item.value }" :disabled="disabled" @click="emit('library', item.value)">
         <component :is="item.icon" aria-hidden="true" /><span>{{ item.title }}</span><small>{{ counts[item.value] }}</small>
       </button>
-      <button type="button" class="nav-main account-link" :class="{ active: activePage === 'account' }" :disabled="disabled" @click="emit('account')"><UserRound aria-hidden="true" />我的</button>
     </nav>
-    <div class="sidebar-bottom"><ThemeSwitch /><button class="sidebar-user" type="button" :disabled="disabled" @click="emit('account')"><UserAvatar :username="user.username" /><span>{{ user.username }}<small>{{ user.role === 'admin' ? '管理员' : '片库账户' }}</small></span></button></div>
+    <div class="sidebar-bottom"><button class="sidebar-settings" type="button" :class="{ active: activePage === 'account' }" :aria-current="activePage === 'account' ? 'page' : undefined" :disabled="disabled" @click="emit('account')"><Settings aria-hidden="true" />设置</button></div>
   </aside>
 </template>
 <style scoped>
@@ -44,11 +41,9 @@ const categories = [
   nav button:hover, nav button.active { color: var(--text-primary); background: var(--glass-bg-active); }
   nav .nav-main { font-weight: 650; }
   .nav-label { padding: 16px 14px 5px; color: var(--text-tertiary); font-size: .68rem; }
-  .account-link { margin-top: 20px; }
-  .sidebar-bottom { display: grid; gap: 22px; margin-top: auto; padding-top: 24px; }
-  .sidebar-user { display: flex; gap: 11px; align-items: center; padding: 0 4px; }
-  .sidebar-user > :first-child { width: 34px; height: 34px; }
-  .sidebar-user span { font-size: .82rem; color: var(--text-primary); }
-  .sidebar-user small { display: block; margin-top: 3px; font-size: .68rem; color: var(--text-tertiary); }
+  .sidebar-bottom { margin-top: auto; padding-top: 24px; }
+  .sidebar-settings { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 46px; padding: 0 14px; border-radius: 10px; font-size: .88rem; }
+  .sidebar-settings svg { width: 18px; height: 18px; }
+  .sidebar-settings:hover, .sidebar-settings.active { color: var(--text-primary); background: var(--glass-bg-active); }
 }
 </style>

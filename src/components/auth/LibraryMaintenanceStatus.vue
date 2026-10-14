@@ -50,12 +50,11 @@ onUnmounted(() => { clearInterval(timer); controller.abort(); });
       <strong>自动追更</strong>
       <span>{{ error ? '待重试' : !status ? '读取中' : !status.enabled ? '未启用' : status.running ? '维护中' : '已开启' }}</span>
     </div>
-    <p>保留已有剧集，自动补充新集；来源持续失效后，验证并关联新的追更来源。</p>
     <p v-if="error" role="status">{{ error }}</p>
     <template v-else-if="status">
-      <small v-if="status.enabled">约每 {{ status.intervalMinutes }} 分钟检查，关闭页面后仍会运行。</small>
-      <small v-else>后台维护未运行，请由管理员检查服务配置。</small>
-      <small v-if="status.checkedAt">最近巡检：{{ timeLabel(status.checkedAt) }}</small>
+      <small v-if="status.enabled">每 {{ status.intervalMinutes }} 分钟检查</small>
+      <small v-else>未运行</small>
+      <small v-if="status.checkedAt">上次检查：{{ timeLabel(status.checkedAt) }}</small>
       <small v-else-if="status.enabled">等待首次检查</small>
       <p v-if="status.message" role="status">{{ status.message }}</p>
       <details v-if="status.items.length">

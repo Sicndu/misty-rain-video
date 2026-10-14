@@ -75,13 +75,13 @@ onBeforeUnmount(cancel);
 <template>
   <div class="tv-auth">
     <div class="tv-auth-heading"><strong>网盘直连</strong><span>{{ connected ? '已认证' : '未开启' }}</span></div>
-    <p>支持的影片可直接从网盘加载，减少服务器带宽限制。片库管理仍使用上方 Cookie。</p>
+    <p>支持的影片使用网盘直连播放。</p>
     <button v-if="!expanded" type="button" @click="expanded = true">{{ connected ? '重新扫码认证' : '扫码开启直连' }}</button>
     <div v-else class="tv-auth-editor">
       <p>认证服务 <strong>{{ exchangeOrigin }}</strong> 会接收本次授权码和后续刷新令牌，不会接收网页 Cookie。</p>
       <template v-if="qr">
         <img :src="qr.qrCode" alt="使用夸克 App 扫描此二维码并确认登录" width="230" height="230" />
-        <p role="status">请用夸克 App 扫码并确认，二维码有效期约 5 分钟。</p>
+        <p role="status">使用夸克 App 扫码确认，5 分钟内有效。</p>
       </template>
       <p v-if="message" class="tv-auth-error" role="alert">{{ message }}</p>
       <div class="tv-auth-actions">
@@ -97,7 +97,7 @@ onBeforeUnmount(cancel);
 .tv-auth-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: .88rem; }
 .tv-auth-heading span { color: var(--text-tertiary); font-size: .73rem; }
 .tv-auth p { margin: 9px 0 14px; color: var(--text-tertiary); font-size: .76rem; line-height: 1.7; overflow-wrap: anywhere; }
-.tv-auth button { min-height: 44px; padding: 0 17px; border: var(--glass-border); border-radius: 23px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .83rem; font-weight: 600; }
+.tv-auth button { min-height: 44px; padding: 0 17px; border: var(--glass-border); border-radius: 8px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .83rem; font-weight: 600; }
 .tv-auth button:disabled { opacity: .6; }
 .tv-auth-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .tv-auth .secondary { color: var(--text-secondary); background: var(--surface-elevated); }

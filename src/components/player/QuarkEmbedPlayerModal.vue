@@ -7,7 +7,7 @@ import { configureVideoRequest, playbackSourceLabel, selectInitialPlaybackSource
 import SubtitleControls from './SubtitleControls.vue';
 import { PlayerPreferencesService } from '../../services/playerPreferencesService';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { Check, ChevronDown, CircleAlert, ListVideo, LoaderCircle, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
+import { CircleAlert, ListVideo, LoaderCircle, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
 import type { MediaItem, PlaybackHistoryEntry, PlaybackHistoryUpdate } from '../../types/media';
 import {
   QuarkServiceError,
@@ -19,7 +19,7 @@ import {
 } from '../../services/quarkStreamService';
 import { useToast } from '../../composables/useToast';
 import { useDialog } from '../../composables/useDialog';
-import { useMobileLandscape } from '../../composables/useMobileLandscape';
+import { useVideoFullscreen } from '../../composables/useVideoFullscreen';
 import { PlaybackHistoryService } from '../../services/playbackHistoryService';
 
 const props = defineProps<{
@@ -60,9 +60,7 @@ const session = ref<QuarkPlaybackSession | null>(null);
 const playback = ref<PreparedPlayback | null>(null);
 const currentEpisodeIndex = ref(0);
 const episodeGroupIndex = ref(0);
-const settingsExpanded = ref(false);
-const settingsToggleRef = ref<HTMLButtonElement | null>(null);
-const episodePanelRef = ref<HTMLElement | null>(null);
+const activePanel = ref<'episodes' | 'settings'>('episodes');
 const selectedSourceId = ref('');
 const errorMessage = ref('');
 const statusMessage = ref('');
@@ -146,7 +144,8 @@ let episodeCompletionHandled = false;
 const videoInstanceKey = ref(0);
 const isMobilePlaybackDevice = typeof window !== 'undefined'
   && (window.matchMedia('(max-width: 820px)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
-const { immersive, rotated, immersiveStyle, toggleWebFullscreen, resetLandscape } = useMobileLandscape(isMobilePlaybackDevice, () => props.isOpen);
+const { fullscreen: nativeFullscreen, error: fullscreenError, toggle: toggleFullscreen, exit: exitFullscreen } = useVideoFullscreen(videoRef);
+watch(fullscreenError, message => { if (message) { toast.show(message, '!'); announce(message); } });
 
 const soundEffectOptions: SoundEffectOption[] = [
   { value: 'original', label: '原声', hint: '不做处理' },
@@ -246,19 +245,7 @@ const playActionLabel = computed(() => {
     ? `播放第 ${episode.episodeNumber} 集`
     : `播放${episode.episodeTitle}`;
 });
-const playbackAutomationSummary = computed(() => {
-  const enabled = [playbackAutomation.value.skipIntroOutro, playbackAutomation.value.autoNext]
-    .filter(Boolean).length;
-  return enabled ? `已开启 ${enabled} 项` : '均已关闭';
-});
-
-const sourceDetail = (source: PlaybackSource) => {
-  const parts = [playbackSourceLabel(source)];
-  if (source.width && source.height) parts.push(`${source.width}×${source.height}`);
-  if (source.fps) parts.push(`${Math.round(source.fps)} FPS`);
-  if (source.codec) parts.push(source.codec.toUpperCase());
-  return parts.join(' · ');
-};
+const sourceDetail = (source: PlaybackSource) => source.width && source.height ? `${source.width}×${source.height}` : '';
 
 const resetSoundEffectGraph = (replaceVideo = false) => {
   for (const node of [mediaAudioSource, dryGain, wetGain, lowShelf, presenceFilter, highShelf, dynamicsCompressor]) {
@@ -889,13 +876,7 @@ const handleSeeking = () => {
 };
 
 const revealPlaybackNotice = async () => {
-  const video = videoRef.value as NativeFullscreenVideo | null;
-  try {
-    if (video?.webkitDisplayingFullscreen) video.webkitExitFullscreen?.();
-    else if (document.fullscreenElement) await document.exitFullscreen();
-  } catch {
-    // The user can still exit with the native fullscreen control.
-  }
+  try { await exitFullscreen(); } catch { /* Native playback controls still allow exiting fullscreen. */ }
 };
 
 const interruptPlayback = (message: string) => {
@@ -1061,7 +1042,7 @@ const loadSession = async () => {
   playback.value = null;
   currentEpisodeIndex.value = 0;
   episodeGroupIndex.value = 0;
-  settingsExpanded.value = false;
+  activePanel.value = 'episodes';
   mobileQualityManuallySelected = false;
   errorMessage.value = '';
   announce(`正在读取《${media.title}》的云端目录`);
@@ -1143,24 +1124,7 @@ const selectAudioTrack = (index: number) => {
   }
 };
 
-const selectEpisodeGroup = (index: number) => {
-  episodeGroupIndex.value = index;
-  nextTick(() => episodePanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-};
-
-const scrollToEpisodes = async () => {
-  episodeGroupIndex.value = Math.floor(currentEpisodeIndex.value / episodeGroupSize);
-  settingsExpanded.value = false;
-  await nextTick();
-  episodePanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-};
-
-const collapseSettings = async () => {
-  settingsExpanded.value = false;
-  await nextTick();
-  settingsToggleRef.value?.focus({ preventScroll: true });
-};
-
+const selectEpisodeGroup = (index: number) => { episodeGroupIndex.value = index; };
 const selectEpisode = async (index: number) => {
   await prepareEpisode(index);
   if (phase.value !== 'ready') return;
@@ -1180,13 +1144,8 @@ const retry = () => {
   else loadSession();
 };
 
-type NativeFullscreenVideo = HTMLVideoElement & {
-  webkitExitFullscreen?: () => void;
-  webkitDisplayingFullscreen?: boolean;
-};
-
 const close = () => {
-  resetLandscape();
+  void exitFullscreen().catch(() => {});
   void persistProgress(true, false, true);
   phase.value = 'idle';
   requestSequence += 1;
@@ -1197,8 +1156,7 @@ const close = () => {
 
 const dialogRef = ref<HTMLElement | null>(null);
 useDialog(dialogRef, () => props.isOpen, () => {
-  if (immersive.value) { toggleWebFullscreen(); return; }
-  if (document.fullscreenElement || (videoRef.value as NativeFullscreenVideo | null)?.webkitDisplayingFullscreen) return;
+  if (nativeFullscreen.value) return;
   close();
 });
 
@@ -1244,8 +1202,7 @@ defineExpose({ retry });
   <div
     class="player-backdrop"
     ref="dialogRef"
-    :class="{ active: isOpen, 'landscape-inline': immersive, 'rotated-player': rotated }"
-    :style="immersiveStyle"
+    :class="{ active: isOpen }"
     role="dialog"
     aria-modal="true"
     :aria-label="media ? `播放《${media.title}》` : '视频播放器'"
@@ -1270,7 +1227,7 @@ defineExpose({ retry });
         </div>
       </header>
 
-      <div class="player-layout" :class="{ 'single-column': !episodes.length }">
+      <div class="player-layout" :class="{ 'single-column': !episodes.length && !sources.length }">
         <main class="video-column">
           <div class="video-stage" :style="{ '--video-ratio': videoAspectRatio }">
             <video
@@ -1278,7 +1235,7 @@ defineExpose({ retry });
               ref="videoRef"
               class="video-element"
               :style="{ objectFit: pictureFit }"
-              :controls="!isMobilePlaybackDevice"
+              :controls="!isMobilePlaybackDevice || nativeFullscreen"
               controlslist="nodownload noremoteplayback"
               playsinline
               :preload="isIOSPlaybackDevice ? 'auto' : 'metadata'"
@@ -1310,8 +1267,8 @@ defineExpose({ retry });
             </video>
 
             <MobilePlaybackControls
-              v-if="isMobilePlaybackDevice && videoRef && phase === 'ready' && !manualPlayRequired"
-              :video="videoRef" :hls="hlsRef" :username="username" :expanded="immersive" @fullscreen="toggleWebFullscreen"
+              v-if="isMobilePlaybackDevice && !nativeFullscreen && videoRef && phase === 'ready' && !manualPlayRequired"
+              :video="videoRef" :hls="hlsRef" :username="username" :expanded="nativeFullscreen" @fullscreen="toggleFullscreen"
             />
 
             <div v-if="phase === 'resolving' || phase === 'preparing'" class="stage-state loading-state" role="status" aria-live="polite">
@@ -1382,39 +1339,24 @@ defineExpose({ retry });
             :input="{ mediaKey: media.id, title: media.title, category: media.category, episodeNumber: currentEpisode.episodeNumber, episodeTitle: currentEpisode.episodeTitle }"
           />
 
-          <div v-if="phase === 'ready' && sources.length" class="player-toolbar" aria-label="播放操作">
-            <button
-              ref="settingsToggleRef"
-              type="button"
-              :aria-expanded="settingsExpanded"
-              aria-controls="playback-settings"
-              @click="settingsExpanded = !settingsExpanded"
-            >
-              <SlidersHorizontal aria-hidden="true" />
-              <span><strong>播放设置</strong><small>{{ selectedSource?.label || '自动' }} · {{ selectedSoundEffect?.label || '原声' }}</small></span>
-              <ChevronDown class="toolbar-chevron" aria-hidden="true" />
-            </button>
-            <button type="button" @click="scrollToEpisodes">
-              <ListVideo aria-hidden="true" />
-              <span><strong>选集</strong><small>{{ episodeStatus }}</small></span>
-            </button>
-          </div>
-
+        </main>
+        <aside v-if="episodes.length || sources.length" class="player-panel">
+          <nav class="player-toolbar" role="tablist" aria-label="播放器面板">
+            <button id="episodes-tab" type="button" role="tab" :aria-selected="activePanel === 'episodes'" aria-controls="episode-panel" @click="activePanel = 'episodes'"><ListVideo aria-hidden="true" />选集 <small>{{ episodes.length }}</small></button>
+            <button id="settings-tab" type="button" role="tab" :aria-selected="activePanel === 'settings'" aria-controls="playback-settings" :disabled="!sources.length" @click="activePanel = 'settings'"><SlidersHorizontal aria-hidden="true" />设置</button>
+          </nav>
+          <div class="panel-content">
           <div
-            v-if="phase === 'ready' && sources.length"
-            v-show="settingsExpanded"
+            v-if="activePanel === 'settings' && phase === 'ready' && sources.length"
+            role="tabpanel" aria-labelledby="settings-tab"
             id="playback-settings"
             class="playback-settings"
           >
-            <div class="settings-panel-heading">
-              <strong>播放设置</strong>
-              <button class="icon-button" type="button" aria-label="收起播放设置" @click="collapseSettings"><X aria-hidden="true" /></button>
-            </div>
             <div class="setting-group">
-              <div class="setting-heading"><span>画面比例</span><small>默认完整显示，不拉伸</small></div>
+              <div class="setting-heading"><span>画面比例</span><small></small></div>
               <div class="option-scroll" role="group" aria-label="画面显示方式">
-                <button type="button" class="option-chip" :class="{ active: pictureFit === 'contain' }" :aria-pressed="pictureFit === 'contain'" @click="pictureFit = 'contain'">适应画面</button>
-                <button type="button" class="option-chip" :class="{ active: pictureFit === 'cover' }" :aria-pressed="pictureFit === 'cover'" @click="pictureFit = 'cover'">铺满（裁切边缘）</button>
+                <button type="button" class="option-chip" :class="{ active: pictureFit === 'contain' }" :aria-pressed="pictureFit === 'contain'" @click="pictureFit = 'contain'">适应</button>
+                <button type="button" class="option-chip" :class="{ active: pictureFit === 'cover' }" :aria-pressed="pictureFit === 'cover'" @click="pictureFit = 'cover'">铺满</button>
               </div>
             </div>
             <div class="setting-group">
@@ -1422,21 +1364,9 @@ defineExpose({ retry });
                 <span>画质</span>
                 <small>{{ selectedSource ? sourceDetail(selectedSource) : '' }}</small>
               </div>
-              <div class="option-scroll" role="radiogroup" aria-label="画质选择">
-                <button
-                  v-for="source in sources"
-                  :key="source.id"
-                  type="button"
-                  class="option-chip"
-                  :class="{ active: selectedSourceId === source.id }"
-                  role="radio"
-                  :aria-checked="selectedSourceId === source.id"
-                  @click="changeQuality(source)"
-                >
-                  <Check v-if="selectedSourceId === source.id" aria-hidden="true" />
-                  {{ playbackSourceLabel(source) }}
-                </button>
-              </div>
+              <select class="setting-select" aria-label="画质选择" :value="selectedSourceId" @change="changeQuality(sources.find(source => source.id === ($event.target as HTMLSelectElement).value)!)">
+                <option v-for="source in sources" :key="source.id" :value="source.id">{{ playbackSourceLabel(source) }}</option>
+              </select>
               <p v-if="selectedSource?.delivery === 'proxy'" class="delivery-hint">当前画质经服务器加载，带宽较低时可降低画质。若有“原画直连”，可尝试切换；部分设备不支持原画格式。</p>
               <p v-else-if="selectedSource?.resolution === 'original'" class="delivery-hint">原画直接从网盘加载，播放效果取决于设备对原始视频与音频格式的支持。</p>
             </div>
@@ -1483,20 +1413,18 @@ defineExpose({ retry });
             </div>
 
             <div v-if="videoRef" class="setting-group subtitle-setting-group">
-              <div class="setting-heading"><span>字幕</span><small>内嵌轨道 / 资源自带字幕</small></div>
+              <div class="setting-heading"><span>字幕</span></div>
               <SubtitleControls :video="videoRef" :hls="hlsRef" :username="username" :notice="playback?.subtitleNotice" />
             </div>
 
             <div class="setting-group automation-setting-group">
               <div class="setting-heading">
                 <span>播放偏好</span>
-                <small>{{ playbackAutomationSummary }}</small>
               </div>
               <div class="automation-list">
                 <div class="automation-row">
                   <span class="automation-copy">
                     <strong>跳过片头片尾</strong>
-                    <small>片头 {{ playbackAutomation.introSeconds }} 秒 · 片尾 {{ playbackAutomation.outroSeconds }} 秒</small>
                   </span>
                   <button
                     type="button"
@@ -1512,16 +1440,15 @@ defineExpose({ retry });
                 </div>
 
                 <div class="skip-durations">
-                  <label>片头时长（秒）<input type="number" min="0" max="600" step="1" :value="playbackAutomation.introSeconds" :disabled="savingPreferences" @change="updateSkipDuration('introSeconds', $event)" /></label>
-                  <label>片尾时长（秒）<input type="number" min="0" max="600" step="1" :value="playbackAutomation.outroSeconds" :disabled="savingPreferences" @change="updateSkipDuration('outroSeconds', $event)" /></label>
-                  <p>0表示不跳过该部分。设置随当前账户保存。</p>
+                  <label><span>片头</span><span class="duration-input"><input type="number" min="0" max="600" step="1" aria-label="片头时长（秒）" :value="playbackAutomation.introSeconds" :disabled="savingPreferences" @change="updateSkipDuration('introSeconds', $event)" /><span>秒</span></span></label>
+                  <label><span>片尾</span><span class="duration-input"><input type="number" min="0" max="600" step="1" aria-label="片尾时长（秒）" :value="playbackAutomation.outroSeconds" :disabled="savingPreferences" @change="updateSkipDuration('outroSeconds', $event)" /><span>秒</span></span></label>
+                  <p>0 秒表示不跳过</p>
                   <p v-if="preferencesError" role="alert" class="preferences-error">{{ preferencesError }}</p>
                   <p v-else-if="savingPreferences || preferencesSaved" role="status">{{ savingPreferences ? '正在保存…' : '播放偏好已保存' }}</p>
                 </div>
                 <div class="automation-row">
                   <span class="automation-copy">
                     <strong>连续播放</strong>
-                    <small>播放结束后自动进入下一集</small>
                   </span>
                   <button
                     type="button"
@@ -1538,9 +1465,7 @@ defineExpose({ retry });
               </div>
             </div>
           </div>
-        </main>
-
-        <aside v-if="episodes.length" ref="episodePanelRef" class="episode-panel">
+        <section v-if="activePanel === 'episodes'" id="episode-panel" role="tabpanel" aria-labelledby="episodes-tab" class="episode-panel">
           <div class="episode-heading">
             <div class="episode-heading-title">
               <div class="episode-heading-main">
@@ -1591,6 +1516,8 @@ defineExpose({ retry });
               </span>
             </button>
           </div>
+        </section>
+          </div>
         </aside>
       </div>
 
@@ -1600,12 +1527,13 @@ defineExpose({ retry });
 </template>
 
 <style scoped>
-.skip-durations { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; padding: 12px 0; }
+.skip-durations { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; padding: 4px 0 16px; }
 .skip-durations label { display: grid; gap: 7px; color: var(--text-secondary); font-size: .75rem; }
-.skip-durations input { width: 100%; min-height: 42px; padding: 8px 12px; border: var(--glass-border); border-radius: 8px; color: var(--text-primary); background: var(--surface-2); }
-.skip-durations p { grid-column: 1 / -1; color: var(--text-tertiary); font-size: .72rem; }
+.duration-input { display: flex; align-items: center; height: 44px; gap: 8px; padding: 0 10px; border: 1px solid var(--divider); border-radius: 8px; background: var(--surface-2); }
+.duration-input input { width: 100%; min-width: 0; height: 100%; padding: 0; border: 0; color: var(--text-primary); background: transparent; font: inherit; font-size: 16px; }
+.duration-input > span { color: var(--text-tertiary); font-size: 12px; }
+.skip-durations p { grid-column: 1 / -1; color: var(--text-tertiary); font-size: .72rem; line-height: 1.5; }
 .skip-durations .preferences-error { color: var(--danger); }
-
 .delivery-hint { margin-top: 9px; color: var(--text-tertiary); font-size: .73rem; line-height: 1.6; }
 .player-backdrop { position: fixed; inset: 0; z-index: 1400; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / .58); opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s; }
 .player-backdrop.active { opacity: 1; visibility: visible; }
@@ -1623,7 +1551,7 @@ defineExpose({ retry });
 .icon-button { display: grid; width: 44px; flex-shrink: 0; place-items: center; border-radius: 50%; }
 .icon-button svg { width: 19px; height: 19px; }
 .text-action:hover, .icon-button:hover { background: var(--glass-bg-active); }
-.player-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; flex: 1; }
+.player-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; flex: 1; }
 .player-layout.single-column { grid-template-columns: minmax(0, 1fr); }
 .video-column { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding: 18px; }
 /* Only the stage owns dark tokens. Playback pixels are never blurred or tinted. */
@@ -1658,41 +1586,35 @@ defineExpose({ retry });
 .loading-wave i:nth-child(2) { animation-delay: .12s; }
 .loading-wave i:nth-child(3) { animation-delay: .24s; }
 .loading-wave i:nth-child(4) { animation-delay: .36s; }
-.player-toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); flex-shrink: 0; gap: 9px; padding: 14px 0; }
-.player-toolbar button { display: flex; min-width: 0; min-height: 60px; align-items: center; gap: 10px; padding: 9px 13px; border: 0; border-radius: 12px; color: var(--text-primary); background: var(--surface-1); text-align: left; }
-.player-toolbar button[aria-expanded='true'] { color: var(--liquid-accent-strong); background: var(--glass-lens); border-color: rgb(var(--accent-rgb) / .25); }
-.player-toolbar button > svg { width: 20px; height: 20px; flex-shrink: 0; color: var(--liquid-accent); }
-.player-toolbar button > span { display: grid; min-width: 0; flex: 1; gap: 2px; }
-.player-toolbar strong { font-size: .81rem; font-weight: 650; }
-.player-toolbar small { overflow: hidden; color: var(--text-tertiary); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
-.player-toolbar .toolbar-chevron { width: 15px; height: 15px; transition: transform .2s; }
-.player-toolbar [aria-expanded='true'] .toolbar-chevron { transform: rotate(180deg); }
-.playback-settings { display: grid; flex-shrink: 0; gap: 22px; margin-bottom: 8px; padding: 20px; border: 0; border-radius: 16px; background: var(--surface-1); }
-.settings-panel-heading, .setting-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.settings-panel-heading { margin-top: -6px; margin-bottom: -7px; }
-.settings-panel-heading > strong { font-size: .97rem; font-weight: 700; }
-.settings-panel-heading .icon-button { box-shadow: none; background: var(--glass-bg); }
-.setting-group { min-width: 0; }
-.setting-heading { margin-bottom: 10px; font-size: .82rem; font-weight: 650; }
-.setting-heading small { min-width: 0; overflow: hidden; color: var(--text-tertiary); font-size: .67rem; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
-.option-scroll { display: flex; gap: 7px; overflow-x: auto; padding: 3px 2px 7px; scrollbar-width: thin; }
-.option-chip { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; gap: 5px; flex-shrink: 0; padding: 0 15px; border: var(--glass-border); border-radius: 24px; color: var(--text-secondary); background: var(--glass-bg); font-size: .77rem; }
+.player-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-left: 1px solid var(--divider); background: var(--surface-1); }
+.player-toolbar { display: flex; flex-shrink: 0; gap: 24px; padding: 0 20px; border-bottom: 1px solid var(--divider); }
+.player-toolbar button { display: flex; align-items: center; min-height: 52px; gap: 7px; padding: 0 2px; border: 0; border-bottom: 2px solid transparent; color: var(--text-tertiary); background: transparent; font-size: .84rem; }
+.player-toolbar button[aria-selected='true'] { color: var(--liquid-accent); border-bottom-color: var(--liquid-accent); font-weight: 650; }
+.player-toolbar button svg { width: 17px; height: 17px; }
+.player-toolbar small { font-size: .7rem; font-variant-numeric: tabular-nums; }
+.panel-content { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+.playback-settings { display: grid; gap: 0; padding: 0 20px; }
+.setting-group { min-width: 0; padding: 18px 0; border-bottom: 1px solid var(--divider); }
+.setting-group:last-child { border-bottom: 0; }
+.setting-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; font-size: .8rem; font-weight: 600; }
+.setting-heading small { overflow: hidden; color: var(--text-tertiary); font-size: .67rem; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.setting-select { display: block; box-sizing: border-box; width: 100%; height: 44px; padding: 0 10px; border: 1px solid var(--divider); border-radius: 8px; color: var(--text-primary); background: var(--surface-2); font-size: 14px; }
+.option-scroll { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
+.option-chip { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; gap: 5px; flex: 1 0 auto; padding: 0 10px; border: 1px solid var(--divider); border-radius: 8px; color: var(--text-secondary); background: transparent; font-size: .75rem; }
 .option-chip svg { width: 14px; height: 14px; }
-.option-chip.active { color: var(--liquid-accent-strong); border-color: rgb(var(--accent-rgb) / .23); background: var(--glass-lens); box-shadow: none; font-weight: 650; }
-.option-chip:disabled { opacity: 1; cursor: default; }
-.automation-list { display: grid; border: var(--glass-border); border-radius: 20px; background: var(--glass-bg); }
-.automation-row { display: flex; min-width: 0; min-height: 70px; align-items: center; gap: 12px; padding: 12px 14px; }
-.automation-row + .automation-row { border-top: 1px solid rgb(60 84 122 / .1); }
-.automation-copy { display: grid; min-width: 0; flex: 1; gap: 4px; }
-.automation-copy strong { font-size: .8rem; font-weight: 600; }
-.automation-copy small { color: var(--text-tertiary); font-size: .68rem; line-height: 1.5; }
-/* The switch has a 44px touch target around its 30px visual track. */
-.setting-switch { position: relative; width: 52px; height: 44px; flex-shrink: 0; border: 0; border-radius: 24px; background: transparent; }
-.setting-switch::before { content: ''; position: absolute; inset: 7px 0; border: 1px solid rgb(80 105 145 / .14); border-radius: 18px; background: var(--switch-track); box-shadow: inset 0 1px 3px rgb(36 54 86 / .12); transition: background .2s; }
-.setting-switch span { position: absolute; top: 10px; left: 3px; width: 24px; height: 24px; border: 1px solid var(--divider); border-radius: 50%; background: var(--switch-knob); box-shadow: 0 2px 5px rgb(36 54 86 / .2); transition: transform .22s var(--spring-ease); }
+.option-chip.active { color: var(--liquid-accent); border-color: var(--liquid-accent); background: var(--liquid-accent-subtle); font-weight: 600; }
+.option-chip:disabled { opacity: .65; cursor: default; }
+.automation-list { display: grid; }
+.automation-row { display: flex; min-width: 0; min-height: 48px; align-items: center; gap: 12px; }
+.automation-row + .automation-row { border-top: 1px solid var(--divider); }
+.automation-copy { min-width: 0; flex: 1; }
+.automation-copy strong { font-size: .8rem; font-weight: 500; }
+.setting-switch { position: relative; width: 44px; height: 44px; flex-shrink: 0; border: 0; background: transparent; }
+.setting-switch::before { content: ''; position: absolute; inset: 10px 0; border-radius: 16px; background: var(--switch-track); transition: background .15s; }
+.setting-switch span { position: absolute; top: 12px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: var(--switch-knob); transition: transform .15s; }
 .setting-switch[aria-checked='true']::before { background: var(--liquid-accent); }
-.setting-switch[aria-checked='true'] span { transform: translateX(22px); }
-.episode-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; margin: 0; overflow: hidden; border-left: 1px solid var(--divider); background: transparent; }
+.setting-switch[aria-checked='true'] span { transform: translateX(20px); }
+.episode-panel { min-width: 0; }
 .episode-heading { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 20px 16px 15px; }
 .episode-heading-title { display: grid; min-width: 0; gap: 5px; }
 .episode-heading-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px; }
@@ -1704,11 +1626,12 @@ defineExpose({ retry });
 .episode-ranges button { min-height: 44px; flex-shrink: 0; padding: 0 14px; border: var(--glass-border); border-radius: 24px; color: var(--text-secondary); background: var(--glass-bg); font-size: .76rem; }
 .episode-ranges button.active { color: var(--liquid-accent-strong); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner); font-weight: 650; }
 .episode-list { display: grid; min-height: 0; align-content: start; gap: 8px; overflow-y: auto; overscroll-behavior: contain; padding: 3px 12px 16px; }
-.episode-item { display: grid; min-width: 0; min-height: 66px; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 10px; padding: 9px; border: 1px solid transparent; border-radius: 19px; color: var(--text-secondary); background: transparent; text-align: left;  box-shadow: none; }
-.episode-item.active { color: var(--text-primary); border-color: transparent; background: var(--glass-bg-active); box-shadow: none; }
+.episode-item { display: grid; min-width: 0; min-height: 66px; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 10px; padding: 9px; border: 1px solid transparent; border-radius: 8px; color: var(--text-secondary); background: transparent; text-align: left;  box-shadow: none; }
+.episode-item.active { color: var(--accent-ink); background: var(--liquid-accent); }
 .episode-item:hover { background: var(--glass-bg-hover); }
 .episode-number { position: relative; display: grid; width: 40px; height: 40px; place-items: center; border-radius: 8px; background: var(--glass-bg); font-size: .84rem; font-weight: 550; font-variant-numeric: tabular-nums; }
-.episode-item.active .episode-number { color: var(--liquid-accent-strong); border-color: rgb(var(--accent-rgb) / .2); background: var(--liquid-accent-subtle); box-shadow: none; }
+.episode-item.active .episode-number { color: inherit; background: transparent; }
+.episode-item.active .episode-copy small { color: inherit; opacity: .8; }
 .episode-latest { position: absolute; top: -6px; right: -5px; display: grid; min-width: 16px; height: 16px; place-items: center; padding: 0 3px; border: 1px solid var(--divider); border-radius: 9px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .5rem; font-weight: 650; line-height: 1; }
 .episode-current-dot { position: absolute; bottom: 4px; left: calc(50% - 2px); width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
 .episode-copy { display: grid; min-width: 0; gap: 4px; }
@@ -1737,40 +1660,21 @@ defineExpose({ retry });
   .stage-poster { display: none; }
   .stage-play-icon { width: 58px; height: 58px; }
   .stage-play-button small { font-size: .65rem; }
-  .player-toolbar { gap: 7px; padding: 12px 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .player-toolbar button { min-height: 62px; gap: 7px; padding: 9px 10px; border-radius: 12px; background: var(--surface-1); }
-  .player-toolbar strong { font-size: .77rem; }
-  .player-toolbar small { font-size: .62rem; }
-  .player-toolbar .toolbar-chevron { display: none; }
-  .playback-settings { gap: 17px; padding: 17px; margin-bottom: 14px; border-radius: 16px; }
-  .setting-heading { flex-wrap: wrap; gap: 4px 10px; }
-  .episode-panel { flex: 0 0 auto; margin: 0 calc(14px + var(--safe-area-right)) calc(20px + var(--safe-area-bottom)) calc(14px + var(--safe-area-left)); border: 0; overflow: visible; scroll-margin-top: 10px; }
+  .player-panel { flex: 0 0 auto; margin: 14px calc(14px + var(--safe-area-right)) calc(20px + var(--safe-area-bottom)) calc(14px + var(--safe-area-left)); border: 1px solid var(--divider); border-radius: 12px; }
+  .panel-content { overflow: visible; }
+  .setting-select { font-size: 16px; }
   .episode-heading { padding: 19px 16px 15px; }
   .episode-list { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; overflow: visible; padding: 7px 14px 20px; }
   .episode-item { position: relative; min-height: 52px; grid-template-columns: 1fr; padding: 0; gap: 0; border: 1px solid transparent; border-radius: 10px; background: var(--surface-1); box-shadow: none; }
   .episode-number { width: 100%; height: 100%; min-height: 52px; border: 0; border-radius: inherit; background: transparent; font-size: .9rem; }
-  .episode-item.active { border-color: rgb(255 255 255 / .35); box-shadow: none; }
-  .episode-item.active .episode-number { background: var(--glass-bg-active); color: var(--text-primary);  box-shadow: none;  border-color: rgb(var(--accent-rgb) / .2); }
+  .episode-item.active { border-color: var(--liquid-accent); background: var(--liquid-accent); color: var(--accent-ink); }
+  .episode-item.active .episode-number { color: inherit; background: transparent; }
   .episode-latest { top: -5px; right: -4px;  color: var(--accent-ink); }
   .episode-copy { display: none; }
 }
 @media (max-width: 360px) { .episode-list { grid-template-columns: repeat(4, minmax(0, 1fr)); } .player-toolbar button { gap: 5px; padding: 8px; } .player-toolbar button > svg { width: 17px; height: 17px; } }
-.player-backdrop.landscape-inline { height: var(--player-height, 100dvh); padding: 0; background: #000; }
-.landscape-inline .player-window { position: relative; width: 100%; height: var(--player-height, 100dvh); border: 0; border-radius: 0; background: #000; box-shadow: none; }
-.landscape-inline .player-header { position: absolute; z-index: 4; top: var(--safe-area-top); right: var(--safe-area-right); min-height: 0; padding: 8px; border: 0; background: transparent; pointer-events: none; }
-.landscape-inline .title-block, .landscape-inline .text-action { display: none; }
-.landscape-inline .header-actions { pointer-events: auto; }
-.landscape-inline .icon-button { color: #fff; background: rgb(15 17 22 / .58); }
-.landscape-inline .player-layout, .landscape-inline .video-column { display: block; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
-.landscape-inline .video-column { padding: 0; background: #000; }
-.landscape-inline .video-stage { width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; }
-.landscape-inline .video-column > .danmaku-controls,
-.landscape-inline .player-toolbar,
-.landscape-inline .playback-settings,
-.landscape-inline .episode-panel { display: none; }
-.rotated-player .player-window { position: absolute; top: 50%; left: 50%; width: var(--player-height); height: var(--player-width); max-width: none; max-height: none; transform: translate(-50%, -50%) rotate(90deg); }
-.rotated-player .player-header { top: 0; right: 0; }
-.rotated-player .video-stage { --safe-area-top: 0px; --safe-area-right: 0px; --safe-area-left: 0px; }
+.video-element:fullscreen { width: 100vw; height: 100vh; background: #000; }
+.video-element::-webkit-media-controls { color-scheme: dark; }
 
 @media (prefers-reduced-motion: reduce) { .player-backdrop, .loading-wave i, .playback-starting-pill svg, .setting-switch span, .setting-switch::before { transition: none; animation: none; } }
 </style>

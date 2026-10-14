@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue';
-import { Search, X } from '@lucide/vue';
+import { Settings2, Search, X } from '@lucide/vue';
 import type { MediaItem, CategoryType } from '../../types/media';
 import type { AppUser } from '../../services/authService';
 import BrandMark from '../common/BrandMark.vue';
-import UserAvatar from '../common/UserAvatar.vue';
 import { parseLibraryInput, type LibrarySaveFeedback } from '../../services/libraryFeedback';
 
 const props = defineProps<{
@@ -213,13 +212,11 @@ defineExpose({ focusSearch, scrollToTop });
       <div class="trailing-unit">
         <button
           class="account-capsule-btn"
-          :title="`当前账号：${user.username}`"
-          aria-label="打开账户菜单"
+          aria-label="打开设置"
           :disabled="busy"
           @click="emit('open-account')"
         >
-          <UserAvatar class="account-avatar" :username="user.username" />
-          <span class="account-name">{{ user.username }}</span>
+          <Settings2 aria-hidden="true" />
         </button>
       </div>
     </div>
@@ -227,7 +224,7 @@ defineExpose({ focusSearch, scrollToTop });
 </template>
 
 <style scoped>
-@media (min-width: 1024px) { .brand-unit { display: none !important; } .liquid-navbar { gap: 24px; } .search-unit { max-width: 640px; margin-right: auto; margin-left: 0; } }
+@media (min-width: 1024px) { .brand-unit, .trailing-unit { display: none !important; } .liquid-navbar { gap: 24px; } .search-unit { max-width: 640px; margin-right: auto; margin-left: 0; } }
 .liquid-navbar-wrapper { position: sticky; top: 0; z-index: 100; width: 100%; margin: 0 auto; padding: 0 max(40px, calc((100% - 1200px) / 2)); background: var(--nav-background); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border-bottom: 1px solid var(--divider); }
 .liquid-navbar { display: flex; align-items: center; gap: 40px; min-height: 88px; padding: 16px 0; border: 0; background: transparent; }
 .brand-unit { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 0; border: 0; color: var(--text-primary); background: transparent; text-align: left; }
@@ -254,9 +251,10 @@ defineExpose({ focusSearch, scrollToTop });
 .liquid-btn:hover:not(:disabled) { background: var(--liquid-accent-hover); }
 .trailing-unit { display: flex; flex-shrink: 0; }
 .account-capsule-btn { display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 4px; border: 0; border-radius: 50%; color: var(--text-secondary); background: transparent; }
-.account-avatar { width: 36px; height: 36px; border-radius: 50%; color: var(--liquid-accent); background: var(--surface-2); }
+.account-capsule-btn svg { width: 20px; height: 20px; }
 .account-name { display: none; }
 @media (max-width: 640px) {
+  .trailing-unit { display: none; }
   .liquid-navbar-wrapper { top: 0; padding: calc(var(--safe-area-top) + 8px) calc(20px + var(--safe-area-right)) 10px calc(20px + var(--safe-area-left)); background: var(--nav-background); border: 0; }
   .liquid-navbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 12px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
   .liquid-navbar::after { display: none; }

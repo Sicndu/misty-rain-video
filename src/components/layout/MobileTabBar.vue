@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LibraryBig, UserRound } from '@lucide/vue';
+import { LibraryBig, Settings2 } from '@lucide/vue';
 
 export type MobileTab = 'library' | 'account';
 
@@ -38,8 +38,8 @@ const emit = defineEmits<{
           :aria-current="activeTab === 'account' ? 'page' : undefined"
           @click="emit('navigate', 'account')"
         >
-          <span class="item-icon"><UserRound aria-hidden="true" /></span>
-          <span>我的</span>
+          <span class="item-icon"><Settings2 aria-hidden="true" /></span>
+          <span>设置</span>
         </button>
       </div>
     </nav>

@@ -81,6 +81,9 @@ export function useQuarkTransfer() {
   const searchResources = async (keyword: string, force = false) => {
     const normalizedKeyword = keyword.trim();
     if (!currentMedia.value || !normalizedKeyword) return;
+    if (!currentMedia.value.quarkFid && currentMedia.value.title !== normalizedKeyword) {
+      currentMedia.value = { ...currentMedia.value, title: normalizedKeyword, poster: '' };
+    }
     const sequence = ++searchSequence;
     searchKeyword.value = normalizedKeyword;
     isOpen.value = true;

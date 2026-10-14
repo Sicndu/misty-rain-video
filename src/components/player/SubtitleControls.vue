@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type Hls from 'hls.js';
+import { ChevronDown } from '@lucide/vue';
 import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
 const props = defineProps<{ video: HTMLVideoElement; hls?: Hls | null; compact?: boolean; notice?: string; username?: string }>();
 const options = ref<SubtitleTrackOption[]>([]);
@@ -66,20 +67,23 @@ onBeforeUnmount(() => { generation += 1; release(); });
 </script>
 <template>
   <div class="subtitle-controls" :class="{ compact }">
-    <select aria-label="选择影片字幕" :value="selected" @change="choose">
+    <div class="subtitle-picker"><select aria-label="选择影片字幕" :value="selected" @change="choose">
       <option value="off">字幕关闭</option>
       <option v-for="option in options" :key="option.id" :value="option.id">{{ option.label }}</option>
-    </select>
+    </select><ChevronDown aria-hidden="true" /></div>
     <template v-if="!compact">
       <p v-if="notice" role="status">{{ notice }}</p>
       <p v-if="error" role="alert">{{ error }} <button type="button" @click="retry">重试字幕</button></p>
-      <p v-else-if="!options.length">尚未检测到字幕。支持同目录VTT、SRT、ASS和SSA文件；部分内嵌字幕需要浏览器或网盘转码支持。</p>
+      <p v-else-if="!options.length">未检测到可用字幕</p>
     </template>
   </div>
 </template>
 <style scoped>
-select { width: 100%; min-height: 44px; padding: 0 12px; border: var(--glass-border); border-radius: 10px; color: var(--text-primary); background: var(--surface-2); font-size: .8rem; }
-p { margin-top: 8px; color: var(--text-tertiary); font-size: .73rem; line-height: 1.7; }
+.subtitle-picker { position: relative; }
+.subtitle-picker > svg { position: absolute; right: 12px; top: 14px; width: 16px; height: 16px; pointer-events: none; color: var(--text-tertiary); }
+select { appearance: none; -webkit-appearance: none; box-sizing: border-box; display: block; width: 100%; height: 44px; padding: 0 36px 0 12px; border: 1px solid var(--divider); border-radius: 8px; color: var(--text-primary); background: var(--surface-2); font: inherit; font-size: 14px; line-height: normal; }
+p { margin-top: 8px; color: var(--text-tertiary); font-size: .73rem; line-height: 1.5; }
 button { border: 0; padding: 4px; color: var(--liquid-accent); background: transparent; }
-.compact select { max-width: 130px; min-height: 32px; padding: 0 5px; border: 1px solid rgb(255 255 255 / .25); color: #fff; background: rgb(0 0 0 / .55); font-size: .7rem; }
+.compact select { max-width: 130px; height: 36px; color: #fff; background: rgb(0 0 0 / .55); font-size: 12px; }
+@media (max-width: 820px) { select { font-size: 16px; } }
 </style>

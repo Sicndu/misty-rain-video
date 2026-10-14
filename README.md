@@ -1,5 +1,7 @@
 # 烟雨影视
 
+此仓库基于 [holt230/misty-rain-video](https://github.com/holt230/misty-rain-video) 进行二次开发。
+
 个人云端影视片库与站内播放器，分别适配桌面导航与手机交互。支持资源检索与转存、片库更新、多用户目录隔离、播放历史、画质/音轨/字幕切换，以及 iPhone Web Clip 桌面入口。
 
 项目不提供、内置或销售影视内容，请仅管理和播放自己有权使用的资源。
@@ -21,14 +23,16 @@
 
 选集保存时会保留匹配的字幕文件，选择文件夹或全部保存时按正片存储规则保存影片及匹配字幕。SUB/IDX等文件也会随匹配视频保存，当前播放器支持上述文本格式。
 
-片头和片尾时长可分别配置为0～600秒，0表示不跳过该部分。跳过与连续播放偏好按账户保存；自动跳过会保留超过60秒的正片内容。主题和字幕语言选择在当前浏览器保存。
+片头和片尾时长可分别配置为0～600秒，0表示不跳过该部分。跳过与连续播放偏好按账户保存；自动跳过会保留超过60秒的正片内容。主题和字幕语言选择在当前浏览器保存。主题只在设置页提供；认证与自动维护位于管理员专属的“高级配置”。
+
+播放器的“选集”和“设置”标签互斥显示。移动端全屏按钮直接请求视频原生全屏：Safari 使用 `webkitEnterFullscreen`，其他支持的浏览器使用 `requestFullscreen`。浏览器接管全屏播放控件；不支持或拒绝全屏时保留当前页面并提示，不用网页旋转模拟。
 
 ## Docker Compose 部署
 
-要求：Linux x86_64、Docker Engine 24+、Docker Compose v2。官方镜像为公开镜像，无需登录 GHCR。
+要求：Linux x86_64、Docker Engine 24+、Docker Compose v2。镜像由 Sicndu/misty-rain-video 的 main 分支构建发布。
 
 ```text
-ghcr.io/holt230/misty-rain-video:amd64
+ghcr.io/sicndu/misty-rain-video:amd64
 ```
 
 下载仓库中的 `docker-compose.yml` 后执行：
@@ -51,7 +55,7 @@ curl http://127.0.0.1:5200/api/health
 在 `docker-compose.yml` 同目录创建 `.env`：
 
 ```env
-IMAGE_NAME=ghcr.io/holt230/misty-rain-video
+IMAGE_NAME=ghcr.io/sicndu/misty-rain-video
 IMAGE_TAG=amd64
 TZ=Asia/Shanghai
 APP_PUBLIC_URL=https://example.com/misty-rain/
