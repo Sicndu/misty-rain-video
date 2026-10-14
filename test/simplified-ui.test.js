@@ -102,6 +102,17 @@ test('desktop has one settings entry and no identity or theme controls in the si
   } finally { app.unmount(); }
 });
 
+test('desktop library has one selected category and its library heading is not a competing link', () => {
+  const app = mount(Sidebar, { user: user('admin'), activePage: 'library', category: 'movie', counts: { tv: 0, movie: 1, anime: 0, variety: 0 } });
+  try {
+    assert.equal(document.querySelectorAll('.desktop-sidebar .active').length, 1);
+    assert.equal(document.querySelectorAll('[aria-current="page"]').length, 1);
+    assert.match(document.querySelector('[aria-current="page"]').textContent, /电影/);
+    assert.equal(document.querySelector('.nav-label').textContent, '我的片库');
+    assert.ok(![...document.querySelectorAll('nav button')].some(button => button.textContent.trim() === '我的片库'));
+  } finally { app.unmount(); }
+});
+
 test('player tabs are mutually exclusive; settings contain one subtitle and two duration inputs', async t => {
   mockApi(t);
   const app = mount(Player, { isOpen: true, media, username: 'fixture' });

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Clapperboard, Film, Library, Sparkles, Tv, Settings } from '@lucide/vue';
+import { Clapperboard, Film, Sparkles, Tv, Settings } from '@lucide/vue';
 import BrandMark from '../common/BrandMark.vue';
 import type { AppUser } from '../../services/authService';
 import type { CategoryType } from '../../types/media';
@@ -15,10 +15,9 @@ const categories = [
 <template>
   <aside class="desktop-sidebar" aria-label="桌面导航">
     <button class="sidebar-brand" type="button" :disabled="disabled" @click="emit('library')"><BrandMark /><span><strong>烟雨影视</strong><small>MISTY RAIN</small></span></button>
-    <nav aria-label="片库与账户">
-      <button type="button" class="nav-main" :class="{ active: activePage === 'library' }" :disabled="disabled" @click="emit('library')"><Library aria-hidden="true" />我的片库</button>
-      <p class="nav-label">影片分类</p>
-      <button v-for="item in categories" :key="item.value" type="button" :class="{ active: activePage === 'library' && category === item.value }" :disabled="disabled" @click="emit('library', item.value)">
+    <nav aria-label="片库分类">
+      <p class="nav-label">我的片库</p>
+      <button v-for="item in categories" :key="item.value" type="button" :class="{ active: activePage === 'library' && category === item.value }" :aria-current="activePage === 'library' && category === item.value ? 'page' : undefined" :disabled="disabled" @click="emit('library', item.value)">
         <component :is="item.icon" aria-hidden="true" /><span>{{ item.title }}</span><small>{{ counts[item.value] }}</small>
       </button>
     </nav>
@@ -39,7 +38,6 @@ const categories = [
   nav button svg { width: 18px; height: 18px; }
   nav button small { margin-left: auto; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
   nav button:hover, nav button.active { color: var(--text-primary); background: var(--glass-bg-active); }
-  nav .nav-main { font-weight: 650; }
   .nav-label { padding: 16px 14px 5px; color: var(--text-tertiary); font-size: .68rem; }
   .sidebar-bottom { margin-top: auto; padding-top: 24px; }
   .sidebar-settings { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 46px; padding: 0 14px; border-radius: 10px; font-size: .88rem; }
