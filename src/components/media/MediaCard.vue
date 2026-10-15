@@ -94,23 +94,24 @@ const categoryLabels: Record<MediaItem['category'], string> = {
 
 <style scoped>
 .media-card { position: relative; min-width: 0; }
-.card-play-target { display: flex; width: 100%; min-width: 0; flex-direction: column; gap: 12px; padding: 0; border: 0; color: var(--text-primary); background: transparent; text-align: left; border-radius: 10px; }
-.poster-viewport { position: relative; display: block; width: 100%; aspect-ratio: 2 / 3; overflow: hidden; border-radius: 10px; background: var(--surface-2); box-shadow: 0 6px 18px rgb(0 0 0 / .2); }
+.card-play-target { display: flex; width: 100%; min-width: 0; flex-direction: column; gap: 10px; padding: 0; border: 0; color: var(--text-primary); background: transparent; text-align: left; border-radius: 14px; transition: transform .15s var(--spring-ease); }
+.card-play-target:active { transform: scale(.97); }
+.poster-viewport { position: relative; display: block; width: 100%; aspect-ratio: 2 / 3; overflow: hidden; border-radius: 14px; background: var(--surface-2); box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, .12), 0 4px 14px rgba(0, 0, 0, .22); }
 .poster-image { width: 100%; height: 100%; object-fit: cover; transition: transform .3s; }
-.quality-tag { position: absolute; top: 9px; left: 9px; max-width: calc(100% - 18px); overflow: hidden; padding: 2px 6px; border-radius: 4px; color: #fff; background: rgb(0 0 0 / .65); font-size: .6rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.card-caption { display: grid; min-width: 0; width: 100%; gap: 4px; padding: 0 30px 0 1px; }
-.media-title { display: block; overflow: hidden; color: var(--text-primary); font-size: .9rem; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0; }
-.media-subtitle { overflow: hidden; color: var(--text-tertiary); font-size: .72rem; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.quality-tag { position: absolute; top: 8px; left: 8px; max-width: calc(100% - 16px); overflow: hidden; padding: 2px 6px; border-radius: 6px; color: #fff; background: rgb(0 0 0 / .68); font-size: .62rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.card-caption { display: grid; min-width: 0; width: 100%; gap: 3px; padding: 0 28px 0 2px; }
+.media-title { display: block; overflow: hidden; color: var(--text-primary); font-size: .92rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.01em; line-height: 1.35; }
+.media-subtitle { overflow: hidden; color: var(--text-tertiary); font-size: .74rem; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
 .media-subtitle.has-update { color: var(--text-primary); }
-.more-trigger { position: absolute; bottom: -3px; right: -8px; display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; }
+.more-trigger { position: absolute; bottom: -3px; right: -8px; display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; transition: color .15s, background .15s; }
 .more-trigger::before { display: none; }
-.more-trigger:hover { color: var(--text-primary); background: var(--glass-bg); }
+.more-trigger:hover, .more-trigger:active { color: var(--text-primary); background: var(--glass-bg); }
 .more-trigger svg { position: relative; width: 19px; height: 19px; }
 .category-trigger, .hover-actions { display: none; }
 .hover-play { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity .2s; }
-.play-disk { display: grid; width: 54px; height: 54px; place-items: center; border: 1px solid var(--divider); border-radius: 50%; color: #fff; background: var(--glass-bg); backdrop-filter: blur(10px); }
+.play-disk { display: grid; width: 52px; height: 52px; place-items: center; border: 1px solid var(--divider); border-radius: 50%; color: #fff; background: var(--glass-bg); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .play-disk svg { width: 22px; height: 22px; margin-left: 2px; }
 @media (hover: hover) { .card-play-target:hover .poster-image { transform: scale(1.035); } .card-play-target:hover .hover-play { opacity: 1; } }
 .card-play-target:focus-visible .hover-play { opacity: 1; }
-@media (max-width: 640px) { .media-title { font-size: .87rem; } .poster-viewport { border-radius: 10px; } .card-play-target { gap: 9px; } }
+@media (max-width: 640px) { .media-title { font-size: .88rem; } .poster-viewport { border-radius: 14px; } .card-play-target { gap: 8px; } }
 </style>

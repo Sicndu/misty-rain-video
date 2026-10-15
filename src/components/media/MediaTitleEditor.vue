@@ -28,18 +28,22 @@ useDialog(dialogRef, () => props.open, () => { if (!props.saving) emit('cancel')
 
 <style scoped>
 .title-backdrop { position: fixed; inset: 0; z-index: 1750; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgb(0 0 0 / .45); }
-.title-sheet { width: min(420px, 100%); max-height: calc(100dvh - 24px); overflow-y: auto; padding: 24px; border: 1px solid var(--divider); border-radius: 16px; background: var(--surface-1); box-shadow: var(--glass-shadow-lg); }
+.title-sheet { width: min(420px, 100%); max-height: calc(100dvh - 24px); overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 24px; border: 1px solid var(--divider); border-radius: 20px; background: var(--surface-1); box-shadow: var(--glass-shadow-lg); }
 header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 16px; }
-h2 { margin: 0; font-size: 1rem; font-weight: 600; }
-header button { display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 0; color: var(--text-secondary); background: transparent; }
+h2 { margin: 0; font-size: 1.08rem; font-weight: 700; letter-spacing: -.02em; }
+header button { display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--text-secondary); background: transparent; }
 header svg { width: 20px; height: 20px; }
-input { width: 100%; height: 48px; padding: 0 12px; border: 1px solid var(--divider); border-radius: 8px; color: var(--text-primary); background: var(--surface-2); font-size: 16px; }
-input:focus { outline: 2px solid var(--liquid-accent); outline-offset: 2px; }
-p { margin-top: 12px; color: var(--danger); font-size: .8rem; }
+input { width: 100%; height: 48px; padding: 0 14px; border: 1px solid var(--divider); border-radius: 12px; color: var(--text-primary); background: var(--surface-2); font-size: 16px; transition: border-color .15s; }
+input:focus { outline: 2px solid var(--liquid-accent); outline-offset: 1px; }
+p { margin-top: 10px; color: var(--danger); font-size: .8rem; }
 footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
-footer button { min-width: 76px; min-height: 44px; padding: 0 16px; border: 1px solid var(--divider); border-radius: 8px; color: var(--text-secondary); background: transparent; font-size: .84rem; }
+footer button { min-width: 80px; min-height: 44px; padding: 0 18px; border: 1px solid var(--divider); border-radius: 12px; color: var(--text-secondary); background: transparent; font-size: .88rem; font-weight: 600; transition: transform .15s, background .15s; }
+footer button:active { transform: scale(.98); }
 footer .save-title { color: var(--accent-ink); background: var(--liquid-accent); border-color: transparent; }
 button:disabled { opacity: .5; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-@media (max-width: 640px) { .title-backdrop { align-items: flex-end; padding: 0; } .title-sheet { padding: 20px 20px calc(20px + var(--safe-area-bottom)); border-radius: 20px 20px 0 0; } }
+@media (max-width: 640px) {
+  .title-backdrop { align-items: flex-end; padding: 0; }
+  .title-sheet { padding: 20px 20px calc(24px + var(--safe-area-bottom)); border-radius: 28px 28px 0 0; }
+}
 </style>

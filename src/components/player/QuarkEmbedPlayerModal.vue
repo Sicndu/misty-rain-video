@@ -1540,7 +1540,7 @@ defineExpose({ retry });
 .player-backdrop { position: fixed; inset: 0; z-index: 1400; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / .58); opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s; }
 .player-backdrop.active { opacity: 1; visibility: visible; }
 .player-backdrop:not(.active) { display: none; }
-.player-window { display: flex; flex-direction: column; width: min(1240px, 100%); height: min(850px, calc(100dvh - 48px)); min-height: 0; overflow: hidden; border: var(--glass-border); border-radius: 22px; color: var(--text-primary); background: var(--liquid-canvas); box-shadow: var(--glass-shadow-lg); }
+.player-window { display: flex; flex-direction: column; width: min(1240px, 100%); height: min(850px, calc(100dvh - 48px)); min-height: 0; overflow: hidden; border: var(--glass-border); border-radius: 24px; color: var(--text-primary); background: var(--liquid-canvas); box-shadow: var(--glass-shadow-lg); }
 .player-header { display: flex; flex-shrink: 0; min-height: 80px; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 24px; border-bottom: 1px solid var(--divider); background: transparent; }
 .title-block, .header-actions { display: flex; align-items: center; gap: 12px; }
 .title-block, .title-copy { min-width: 0; }
@@ -1555,9 +1555,9 @@ defineExpose({ retry });
 .text-action:hover, .icon-button:hover { background: var(--glass-bg-active); }
 .player-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; flex: 1; }
 .player-layout.single-column { grid-template-columns: minmax(0, 1fr); }
-.video-column { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding: 18px; }
+.video-column { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 18px; }
 /* Only the stage owns dark tokens. Playback pixels are never blurred or tinted. */
-.video-stage { --text-primary: #f6f8ff; --text-secondary: #d0daea; --text-tertiary: #b7c4d9; --liquid-accent: #b6ceff; --liquid-accent-strong: #91b3f7; position: relative; display: grid; width: 100%; min-height: 220px; aspect-ratio: var(--video-ratio, 16 / 9); flex: 0 0 auto; place-items: center; overflow: hidden; border: var(--glass-border); border-radius: 12px; color: var(--text-primary); background: #000; color-scheme: dark; }
+.video-stage { --text-primary: #f6f8ff; --text-secondary: #d0daea; --text-tertiary: #b7c4d9; --liquid-accent: #b6ceff; --liquid-accent-strong: #91b3f7; position: relative; display: grid; width: 100%; min-height: 220px; aspect-ratio: var(--video-ratio, 16 / 9); flex: 0 0 auto; place-items: center; overflow: hidden; border: var(--glass-border); border-radius: 14px; color: var(--text-primary); background: #000; color-scheme: dark; }
 .video-element { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; object-fit: contain; background: #000; }
 .stage-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 20px; overflow-y: auto; text-align: center; background: radial-gradient(ellipse at 50% 10%, #222831, #0c1016 75%); }
 .loading-state { isolation: isolate; }
@@ -1652,26 +1652,27 @@ defineExpose({ retry });
   .title-copy p { font-size: .71rem; }
   .header-actions { gap: 6px; }
   .text-action { padding: 0 13px; }
-  .player-layout { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
-  .video-column { flex: 0 0 auto; overflow: visible; padding: 14px calc(14px + var(--safe-area-right)) 0 calc(14px + var(--safe-area-left)); }
-  .video-stage { min-height: 0; aspect-ratio: var(--video-ratio, 16 / 9); border-radius: 10px; border: 0; }
-  .video-stage:last-child { margin-bottom: 14px; }
-  .stage-state { gap: 7px; padding: 12px;  background: radial-gradient(ellipse at 50% 10%, #222831, #0c1016 75%); }
+  .player-layout { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .video-column { flex: 0 0 auto; overflow: visible; padding: 12px calc(var(--mobile-gutter) + var(--safe-area-right)) 0 calc(var(--mobile-gutter) + var(--safe-area-left)); }
+  .video-stage { min-height: 0; aspect-ratio: var(--video-ratio, 16 / 9); border-radius: 14px; border: 0; }
+  .video-stage:last-child { margin-bottom: 12px; }
+  .stage-state { gap: 7px; padding: 12px; background: radial-gradient(ellipse at 50% 10%, #222831, #0c1016 75%); }
   .stage-state strong { font-size: .88rem; }
   .stage-state p { font-size: .74rem; line-height: 1.45; }
   .stage-poster { display: none; }
   .stage-play-icon { width: 58px; height: 58px; }
   .stage-play-button small { font-size: .65rem; }
-  .player-panel { flex: 0 0 auto; margin: 14px calc(14px + var(--safe-area-right)) calc(20px + var(--safe-area-bottom)) calc(14px + var(--safe-area-left)); border: 1px solid var(--divider); border-radius: 12px; }
+  .player-panel { flex: 0 0 auto; margin: 12px calc(var(--mobile-gutter) + var(--safe-area-right)) calc(24px + var(--safe-area-bottom)) calc(var(--mobile-gutter) + var(--safe-area-left)); border: 1px solid var(--divider); border-radius: 16px; }
   .panel-content { overflow: visible; }
-  .setting-select { font-size: 16px; }
-  .episode-heading { padding: 19px 16px 15px; }
-  .episode-list { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; overflow: visible; padding: 7px 14px 20px; }
-  .episode-item { position: relative; min-height: 52px; grid-template-columns: 1fr; padding: 0; gap: 0; border: 1px solid transparent; border-radius: 10px; background: var(--surface-1); box-shadow: none; }
+  .setting-select { font-size: 16px; border-radius: 12px; }
+  .episode-heading { padding: 18px 16px 14px; }
+  .episode-list { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; overflow: visible; padding: 6px 14px 20px; }
+  .episode-item { position: relative; min-height: 52px; grid-template-columns: 1fr; padding: 0; gap: 0; border: 1px solid transparent; border-radius: 12px; background: var(--surface-1); box-shadow: none; transition: transform .15s; }
+  .episode-item:active { transform: scale(.96); }
   .episode-number { width: 100%; height: 100%; min-height: 52px; border: 0; border-radius: inherit; background: transparent; font-size: .9rem; }
   .episode-item.active { border-color: var(--liquid-accent); background: var(--liquid-accent); color: var(--accent-ink); }
   .episode-item.active .episode-number { color: inherit; background: transparent; }
-  .episode-latest { top: -5px; right: -4px;  color: var(--accent-ink); }
+  .episode-latest { top: -5px; right: -4px; color: var(--accent-ink); border-radius: 9999px; }
   .episode-copy { display: none; }
 }
 @media (max-width: 360px) { .episode-list { grid-template-columns: repeat(4, minmax(0, 1fr)); } .player-toolbar button { gap: 5px; padding: 8px; } .player-toolbar button > svg { width: 17px; height: 17px; } }

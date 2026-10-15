@@ -696,19 +696,22 @@ const navigateMobileTab = (tab: MobileDockTab) => {
 .page-container { position: relative; z-index: 1; width: 100%; max-width: 1280px; margin: 0 auto; padding: 36px 40px 90px; }
 .library-intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .library-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; min-width: 0; }
-.library-title h1 { font-size: 2rem; font-weight: 650; letter-spacing: -.035em; line-height: 1.3; }
-.library-title p { color: var(--text-tertiary); font-size: .75rem; }
+.library-title h1 { font-size: 1.85rem; font-weight: 700; letter-spacing: -.03em; line-height: 1.3; }
+.library-title p { color: var(--text-tertiary); font-size: .78rem; font-weight: 500; }
 .library-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.add-library-button { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 6px; padding: 0 14px; border: 0; border-radius: 22px; color: var(--text-primary); background: var(--glass-bg-active); font-size: .8rem; font-weight: 550; transition: background .2s; }
+.add-library-button { display: flex; min-height: 40px; align-items: center; justify-content: center; gap: 6px; padding: 0 16px; border: 0; border-radius: 9999px; color: var(--text-primary); background: var(--glass-bg-active); font-size: .84rem; font-weight: 600; transition: transform .15s var(--spring-ease), background .2s; }
 .add-library-button:hover { background: rgb(255 255 255 / .16); }
-.add-library-button svg { width: 17px; height: 17px; stroke-width: 2; }
-.category-toolbar { display: flex; margin-bottom: 28px; border-bottom: 1px solid rgb(255 255 255 / .07); }
-.check-updates-button { position: relative; display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; transition: background .2s, color .2s; }
+.add-library-button:active { transform: scale(.95); }
+.add-library-button svg { width: 17px; height: 17px; stroke-width: 2.2; }
+.category-toolbar { display: flex; margin-bottom: 28px; border-bottom: 1px solid var(--divider); }
+.check-updates-button { position: relative; display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; transition: transform .15s var(--spring-ease), background .2s, color .2s; }
 .check-updates-button:hover { color: var(--text-primary); background: var(--glass-bg); }
+.check-updates-button:active { transform: scale(.92); }
 .check-updates-button svg { width: 18px; height: 18px; }
-.apply-updates-button { display: block; width: 100%; min-height: 44px; margin-bottom: 20px; padding: 10px 16px; border: var(--glass-border); border-radius: 12px; color: var(--text-primary); background: var(--glass-bg); text-align: left; font-size: .8rem; }
+.apply-updates-button { display: block; width: 100%; min-height: 48px; margin-bottom: 20px; padding: 12px 16px; border: var(--glass-border); border-radius: 14px; color: var(--text-primary); background: var(--glass-bg); text-align: left; font-size: .84rem; font-weight: 500; transition: background .2s, transform .15s; }
 .apply-updates-button:hover { background: var(--glass-bg-hover); }
-.update-count-dot { position: absolute; top: 0; right: 0; display: grid; min-width: 17px; height: 17px; padding: 0 3px; place-items: center; border-radius: 20px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .58rem; }
+.apply-updates-button:active { transform: scale(.99); }
+.update-count-dot { position: absolute; top: 2px; right: 2px; display: grid; min-width: 17px; height: 17px; padding: 0 4px; place-items: center; border-radius: 9999px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .6rem; font-weight: 650; }
 .check-updates-button.checking svg { animation: update-spin .9s linear infinite; }
 @keyframes update-spin { to { transform: rotate(360deg); } }
 @media (min-width: 1024px) {
@@ -717,13 +720,13 @@ const navigateMobileTab = (tab: MobileDockTab) => {
   .category-toolbar { display: none; }
 }
 @media (max-width: 640px) {
-  .page-container { padding: 16px calc(20px + var(--safe-area-right)) var(--mobile-content-bottom) calc(20px + var(--safe-area-left)); }
-  .library-intro { margin-bottom: 16px; }
+  .page-container { padding: 14px calc(var(--mobile-gutter) + var(--safe-area-right)) var(--mobile-content-bottom) calc(var(--mobile-gutter) + var(--safe-area-left)); }
+  .library-intro { margin-bottom: 14px; }
   .library-title { display: grid; gap: 2px; }
-  .library-title h1 { font-size: 1.65rem; }
-  .library-title p { font-size: .69rem; }
-  .library-actions { gap: 4px; }
-  .add-library-button { padding: 0 12px; }
-  .category-toolbar { margin-bottom: 22px; }
+  .library-title h1 { font-size: 1.65rem; font-weight: 700; }
+  .library-title p { font-size: .72rem; }
+  .library-actions { gap: 6px; }
+  .add-library-button { padding: 0 14px; min-height: 38px; }
+  .category-toolbar { margin-bottom: 20px; }
 }
 </style>
