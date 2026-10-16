@@ -153,8 +153,7 @@ const previewImage = (resource: ResourceItem) => preview(resource)?.entries.find
 const dateText = (value: string) => Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleDateString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit'}) : '';
 const resourceMeta = (resource: ResourceItem) => {
   const data = preview(resource);
-  const quality = /^(?:4K|8K|1080P|720P|HDR|杜比)/i.test(resource.quality || '') ? resource.quality : '';
-  return [data ? data.videoCount ? `${data.videoCount} 个视频` : '无可播放视频' : quality,
+  return [data ? data.videoCount ? `${data.videoCount} 个视频` : '无可播放视频' : '',
     data?.sizeFormatted || resource.size, dateText(resource.datetime)].filter(Boolean).join(' · ');
 };
 const cacheDetails = (data: QuarkShareDetails) => { if (detailResource.value) previews.value.set(resourceKey(detailResource.value),data); };
