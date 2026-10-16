@@ -499,7 +499,6 @@ export class QuarkGateway {
     this.playbackCache = playbackCache;
     this.libraryConfigStore = libraryConfigStore;
     this.tvPlaybackClient = tvPlaybackClient;
-    this.directPlaybackEnabled = process.env.PLAYER_MEDIA_DELIVERY !== 'proxy';
     this.sessions = new Map();
     this.shareThumbnails = new ShareThumbnails((url,signal) => this.fetchMedia(url, undefined, 'thumbnail', '', { signal }));
     this.accountCache = null;
@@ -552,7 +551,7 @@ export class QuarkGateway {
       libraryConfigured: cookiePlaybackConfigured,
       cookiePlaybackConfigured,
       advancedPlaybackConfigured,
-      isAuthenticated: cookiePlaybackConfigured || advancedPlaybackConfigured,
+      isAuthenticated: advancedPlaybackConfigured,
       nickname: playbackStatus.nickname || libraryStatus.nickname || ''
     };
   }
@@ -1187,9 +1186,9 @@ export class QuarkGateway {
 
     const normalized = await this.#normalizePlayData(playData, savedFid, cookie, capabilities?.nativeHls === true);
     if (!normalized.sources.length) {
-      throw new QuarkApiError('播放服务没有返回当前文件可用的播放地址', {
-        code: 'QUARK_PLAY_SOURCE_EMPTY',
-        statusCode: 502
+      throw new QuarkApiError('当前设备没有可用的直连画质，请更换片源或使用支持原生 HLS 的浏览器', {
+        code: 'DIRECT_SOURCE_UNAVAILABLE',
+        statusCode: 409
       });
     }
 
@@ -1221,8 +1220,7 @@ export class QuarkGateway {
         mimeType: source.mimeType,
         isHls: source.isHls,
         delivery: source.delivery,
-        url: streamUrl,
-        ...(source.isHls && source.delivery === 'direct' ? { proxyUrl: `${streamUrl}?delivery=proxy` } : {})
+        url: streamUrl
       };
     });
 
@@ -1401,44 +1399,16 @@ export class QuarkGateway {
 
   async getDirectStreamUrl(sessionId, sourceId, user = SYSTEM_USER) {
     let { source } = this.getStreamSource(sessionId, sourceId, user);
-    const unavailable = () => new QuarkApiError('直连暂不可用，请重新连接或选择兼容画质', {
+    const unavailable = () => new QuarkApiError('直连暂不可用，请重新连接或更换片源', {
       code: 'DIRECT_SOURCE_UNAVAILABLE', statusCode: 409
     });
-    if (source.delivery !== 'direct') {
-      if (source.directOnly) throw unavailable();
-      return null;
-    }
+    if (source.delivery !== 'direct') throw unavailable();
     if (Date.now() - source.resolvedAt >= 10 * 60 * 1000) {
       source = await this.refreshStreamSource(sessionId, sourceId, user);
     }
     // 客户端仍显示直连时，不能因刷新回退而悄悄开始服务器中转。
     if (source.delivery !== 'direct') throw unavailable();
     return this.#assertRemoteUrl(source.upstreamUrl);
-  }
-
-  registerAsset(session, upstreamUrl, requestProfile = 'web', requestCookie = '') {
-    const existingId = session.assetIndex.get(upstreamUrl);
-    if (existingId && session.assets.has(existingId)) {
-      Object.assign(session.assets.get(existingId), { requestProfile, requestCookie, touchedAt: Date.now() });
-      return existingId;
-    }
-    const assetId = createOpaqueId();
-    session.assets.set(assetId, { upstreamUrl, requestProfile, requestCookie, touchedAt: Date.now() });
-    session.assetIndex.set(upstreamUrl, assetId);
-    return assetId;
-  }
-
-  getAsset(sessionId, assetId, user = SYSTEM_USER) {
-    const session = this.#getSession(sessionId, normalizeUser(user));
-    const asset = session.assets.get(assetId);
-    if (!asset) {
-      throw new QuarkApiError('播放分片地址已过期，请重新加载', {
-        code: 'PLAY_ASSET_EXPIRED',
-        statusCode: 410
-      });
-    }
-    asset.touchedAt = Date.now();
-    return { session, asset };
   }
 
   async fetchMedia(upstreamUrl, rangeHeader, requestProfile = 'web', requestCookie = '', options = {}) {
@@ -2278,75 +2248,16 @@ export class QuarkGateway {
   }
 
   async #loadPlayData(savedFid) {
-    const cookie = this.#requireCookie();
-    let webData = { __playbackProfile: 'web' };
-
-    // TV 的渐进式视频可免 Cookie 直连。片库管理仍保留原有网页认证。
-    if (this.directPlaybackEnabled && this.credentialStore.getTvAuth?.()?.refreshToken && this.tvPlaybackClient) {
-      try {
-        const data = await this.tvPlaybackClient.getStreaming(savedFid);
-        if (hasRawPlaybackSource(data)) return { ...data, __playbackProfile: 'tv' };
-      } catch {
-        // TV 认证或接口不可用时保留已有 Cookie 播放能力。
-      }
+    if (!this.credentialStore.getTvAuth?.()?.refreshToken || !this.tvPlaybackClient) {
+      throw new QuarkApiError('直连播放认证已失效，请管理员重新认证', { code:'QUARK_AUTH_REQUIRED', statusCode:401 });
     }
-
-    // fmp4_av 要求上游返回同一时间轴的音视频复用流。旧 fmp4
-    // 模式在部分 60 FPS/HDR 文件上会产生音频 PTS 偏移，表现为声音
-    // 与画面内字幕逐渐不同步。保留旧参数仅作老文件兼容兜底。
-    const supportProfiles = [
-      'fmp4_av,m3u8,dolby_vision',
-      'fmp4,m3u8'
-    ];
-    for (const supports of supportProfiles) {
-      const requestBody = {
-        fid: savedFid,
-        resolutions: 'normal,low,high,super,2k,4k',
-        supports
-      };
-      for (const endpoint of [
-        `${MEDIA_HOST}/file/v2/play?pr=ucpro&fr=pc`,
-        `${API_HOST}/file/v2/play?pr=ucpro&fr=pc`
-      ]) {
-        try {
-          const result = await this.#requestJson(endpoint, {
-            method: 'POST',
-            cookie,
-            body: requestBody,
-            acceptErrorCodes: true,
-            captureResponseCookies: true,
-            userAgent: QUARK_DESKTOP_USER_AGENT
-          });
-          if (Number(result?.code) === 0 && result?.data) {
-            webData = {
-              ...result.data,
-              __playbackProfile: 'web',
-              __mediaCookie: mergeCookieHeaders(cookie, result.__responseCookies)
-            };
-            if (hasRawPlaybackSource(webData)) return webData;
-          }
-        } catch (error) {
-          if (error?.code === 'QUARK_AUTH_REQUIRED') throw error;
-          // Try the alternate host/profile, then the optional advanced profile.
-        }
-      }
-    }
-
-    const tvAuth = this.credentialStore.getTvAuth?.();
-    if (tvAuth?.refreshToken && this.tvPlaybackClient) {
-      try {
-        const data = await this.tvPlaybackClient.getStreaming(savedFid);
-        const advancedData = { ...data, __playbackProfile: 'tv' };
-        if (hasRawPlaybackSource(advancedData)) return advancedData;
-      } catch {
-        // Advanced playback is optional; the Cookie/download path remains usable.
-      }
-    }
-
-    return webData;
+    // Playback never falls back to Cookie-based relay. Authentication and
+    // provider failures must remain visible so they cannot consume server video traffic.
+    return { ...await this.tvPlaybackClient.getStreaming(savedFid), __playbackProfile:'tv' };
   }
 
   async #normalizePlayData(data, savedFid, cookie, nativeHls = false) {
+    if (data?.__playbackProfile !== 'tv') throw new QuarkApiError('当前来源不支持直连', { code:'DIRECT_SOURCE_UNAVAILABLE', statusCode:409 });
     const rawSources = playbackVideoItems(data);
     const seen = new Set();
     const sources = [];
@@ -2372,6 +2283,7 @@ export class QuarkGateway {
       ].flat().filter(Boolean).join(',');
       const isHls = /\.m3u8(?:$|\?)/i.test(upstreamUrl)
         || /m3u8|mpegurl|hls/i.test(formatHints);
+      if (isHls && !nativeHls) continue; // CDN playlists do not grant browser CORS.
       sources.push({
         upstreamUrl,
         requestProfile: data?.__playbackProfile || 'web',
@@ -2387,13 +2299,13 @@ export class QuarkGateway {
         mimeType: isHls ? 'application/vnd.apple.mpegurl' : (item.mime_type || (/mkv|matroska/i.test(formatHints) ? 'video/x-matroska' : 'video/mp4')),
         isHls,
         nativeHls,
-        delivery: this.directPlaybackEnabled && data?.__playbackProfile === 'tv' && (!isHls || nativeHls) ? 'direct' : 'proxy'
+        delivery: 'direct'
       });
     }
 
     // 依赖 hls.js 的设备仍需要 CORS；原生 HLS 设备直接播放转码流，
     // 无需额外获取格式兼容性较差的原文件。
-    if (!nativeHls && this.directPlaybackEnabled && data?.__playbackProfile === 'tv' && sources.length && sources.every(source => source.isHls)) {
+    if (!sources.length) {
       try {
         const download = await this.tvPlaybackClient?.getDownload?.(savedFid);
         if (download?.download_url) {
@@ -2407,40 +2319,6 @@ export class QuarkGateway {
         }
       } catch {
         // 原文件下载权限与转码播放权限可能不同。
-      }
-    }
-
-    if (!sources.length && data?.__playbackProfile !== 'tv') {
-      const download = await this.#requestJson(`${API_HOST}/file/download?pr=ucpro&fr=pc`, {
-        method: 'POST',
-        cookie,
-        body: { fids: [savedFid], speedup_session: '' },
-        acceptErrorCodes: true,
-        captureResponseCookies: true,
-        userAgent: QUARK_DESKTOP_USER_AGENT
-      });
-      const downloadData = download?.data;
-      const downloadItem = Array.isArray(downloadData)
-        ? (downloadData[0] || {})
-        : (downloadData?.list?.[0] || downloadData || {});
-      const upstreamUrl = firstNonEmpty(downloadItem.download_url, downloadItem.url);
-      if (upstreamUrl) {
-        sources.push({
-          upstreamUrl,
-          requestProfile: 'web',
-          requestCookie: mergeCookieHeaders(cookie, download.__responseCookies),
-          resolution: 'original',
-          label: '原画',
-          rank: 4320,
-          width: 0,
-          height: 0,
-          fps: 0,
-          codec: '',
-          bitrate: 0,
-          mimeType: 'video/mp4',
-          isHls: false,
-          delivery: 'proxy'
-        });
       }
     }
 

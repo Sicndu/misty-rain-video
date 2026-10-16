@@ -58,7 +58,6 @@ export interface PlaybackSource {
   isHls: boolean;
   delivery?: 'direct' | 'proxy';
   url: string;
-  proxyUrl?: string;
 }
 
 export interface PlaybackAudioTrack {
@@ -201,8 +200,7 @@ export class QuarkStreamService {
       episode: { ...playback.episode, thumbnail:playback.episode.thumbnail ? withAppBase(playback.episode.thumbnail) : '' },
       sources: playback.sources.map(source => ({
         ...source,
-        url: withAppBase(source.url),
-        ...(source.proxyUrl ? { proxyUrl: withAppBase(source.proxyUrl) } : {})
+        url: withAppBase(source.url)
       })),
       subtitles: playback.subtitles.map(subtitle => ({ ...subtitle, url: withAppBase(subtitle.url) }))
     }));

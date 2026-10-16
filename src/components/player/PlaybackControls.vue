@@ -1,29 +1,30 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { ChevronLeft, PictureInPicture2, X, ListVideo } from '@lucide/vue';
+import { ChevronLeft, PictureInPicture2, X, ListVideo, Settings2 } from '@lucide/vue';
 import MobilePlaybackControls from './MobilePlaybackControls.vue';
 
 const props = defineProps<{
-  video: HTMLVideoElement; expanded: boolean; title: string; nativeFullscreen?: boolean;
+  video: HTMLVideoElement; expanded: boolean; title: string; nativeFullscreen?: boolean; pictureMode?: 'contain' | 'cover' | 'crop';
   episodes: Array<{ fid: string; episodeTitle: string }>; currentIndex: number;
 }>();
 const emit = defineEmits<{
   (event: 'fullscreen'): void;
   (event: 'inset', pixels: number): void;
+  (event: 'picture-mode', value: 'contain' | 'cover' | 'crop'): void;
 }>();
 const root = ref<HTMLElement | null>(null);
 const visible = ref(true);
-const settingsOpen = ref(false);
-const episodesOpen = ref(false);
+type Menu = 'quality' | 'preferences' | 'episodes';
+const menu = ref<Menu | null>(null);
+const qualityButton = ref<HTMLButtonElement | null>(null);
 const settingsButton = ref<HTMLButtonElement | null>(null);
 const episodesButton = ref<HTMLButtonElement | null>(null);
 const panelMaxHeight = ref(320);
-const closeSettings = () => { const trigger = episodesOpen.value ? episodesButton : settingsButton; settingsOpen.value = false; episodesOpen.value = false; trigger.value?.focus({ preventScroll: true }); reveal(); };
-const toggleSettings = () => { settingsOpen.value = !settingsOpen.value; episodesOpen.value = false; reveal(); };
-const outside = (event: PointerEvent) => { if (!root.value?.contains(event.target as Node)) { settingsOpen.value = false; episodesOpen.value = false; } };
-const panelKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Escape' && (settingsOpen.value || episodesOpen.value)) { event.preventDefault(); event.stopPropagation(); closeSettings(); }
-};
+const menuTitle = computed(() => menu.value === 'quality' ? '清晰度' : menu.value === 'episodes' ? '选集与片源' : '播放偏好');
+const closeSettings = () => { const trigger = menu.value === 'episodes' ? episodesButton : menu.value === 'quality' ? qualityButton : settingsButton; menu.value = null; trigger.value?.focus({ preventScroll:true }); reveal(); };
+const toggleMenu = (value: Menu) => { menu.value = menu.value === value ? null : value; reveal(); };
+const outside = (event: PointerEvent) => { if (!root.value?.contains(event.target as Node)) menu.value = null; };
+const panelKeydown = (event: KeyboardEvent) => { if (event.key === 'Escape' && menu.value) { event.preventDefault(); event.stopPropagation(); closeSettings(); } };
 const feedback = ref('');
 const pip = ref(false);
 const rate = ref(1);
@@ -41,7 +42,7 @@ const measure = () => {
 };
 const scheduleHide = () => {
   clearTimeout(hideTimer);
-  if (props.expanded && !props.video.paused && !settingsOpen.value && !episodesOpen.value) hideTimer = setTimeout(() => {
+  if (props.expanded && !props.video.paused && !menu.value) hideTimer = setTimeout(() => {
     if (root.value?.contains(document.activeElement) && document.activeElement?.matches(':focus-visible')) return;
     visible.value = false;
   }, 3500);
@@ -93,8 +94,8 @@ async function togglePip() {
   } catch { tell('当前无法进入画中画'); reveal(); }
 }
 const changeRate = (event: Event) => { props.video.playbackRate = Number((event.target as HTMLSelectElement).value); };
-watch(() => props.expanded, expanded => { if (!expanded) episodesOpen.value = false; });
-watch([() => props.expanded, visible, settingsOpen, episodesOpen], () => { measure(); scheduleHide(); }, { flush: 'post' });
+watch(() => props.expanded, expanded => { if (!expanded && menu.value === 'episodes') menu.value = null; });
+watch([() => props.expanded, visible, menu], () => { measure(); scheduleHide(); }, { flush: 'post' });
 watch([() => props.video, root], ([video, element]) => {
   release(); cancelGesture(); feedback.value = ''; visible.value = true;
   const sync = () => {
@@ -123,15 +124,24 @@ onBeforeUnmount(() => { release(); cancelGesture(); clearTimeout(feedbackTimer);
     <MobilePlaybackControls :video="video" :expanded="expanded" @fullscreen="emit('fullscreen')">
       <div class="transport-tools">
         <slot />
-        <button v-if="expanded" ref="episodesButton" type="button" aria-label="选集与片源" :aria-expanded="episodesOpen" aria-controls="player-settings-menu" @click="episodesOpen = !episodesOpen; settingsOpen = false; reveal()"><ListVideo /></button>
-        <select aria-label="播放速度" :value="rate" @change="changeRate"><option v-for="speed in [.5,.75,1,1.25,1.5,2]" :key="speed" :value="speed">{{ speed }}×</option></select>
-        <button ref="settingsButton" type="button" class="quality-button" aria-label="播放设置" title="画质与播放设置" :aria-expanded="settingsOpen" aria-controls="player-settings-menu" @click="toggleSettings">画质</button>
-        <button v-if="canPip" type="button" :aria-label="pip ? '退出画中画' : '画中画'" @click="togglePip"><PictureInPicture2 /></button>
+        <button v-if="expanded" ref="episodesButton" type="button" aria-label="选集与片源" :aria-expanded="menu === 'episodes'" aria-controls="player-settings-menu" @click="toggleMenu('episodes')"><ListVideo /></button>
+        <select class="speed-picker" aria-label="播放速度" :value="rate" @change="changeRate"><option v-for="speed in [.5,.75,1,1.25,1.5,2]" :key="speed" :value="speed">{{ speed }}×</option></select>
+        <button ref="qualityButton" type="button" class="quality-button" aria-label="选择画质" :aria-expanded="menu === 'quality'" aria-controls="player-settings-menu" @click="toggleMenu('quality')">画质</button>
+        <button type="button" class="fit-button" aria-label="切换画面模式" :title="pictureMode === 'crop' ? '放大裁切 125%；点击恢复完整画面' : pictureMode === 'cover' ? '铺满播放区；点击放大裁切' : '完整画面；点击铺满播放区'" @click="emit('picture-mode',pictureMode === 'cover' ? 'crop' : pictureMode === 'crop' ? 'contain' : 'cover')">{{ pictureMode === 'crop' ? '裁切' : pictureMode === 'cover' ? '铺满' : '适应' }}</button>
+        <button ref="settingsButton" type="button" aria-label="播放偏好" :aria-expanded="menu === 'preferences'" aria-controls="player-settings-menu" @click="toggleMenu('preferences')"><Settings2 /></button>
+
       </div>
     </MobilePlaybackControls>
-    <section v-show="settingsOpen || episodesOpen" id="player-settings-menu" class="settings-menu" :aria-label="episodesOpen ? '选集与片源' : '播放设置'" :inert="!settingsOpen && !episodesOpen" :style="{ maxHeight: `${panelMaxHeight}px` }">
-      <header><strong>{{ episodesOpen ? '选集与片源' : '播放设置' }}</strong><button type="button" aria-label="关闭播放设置" @click="closeSettings"><X /></button></header>
-      <div class="settings-body"><div v-show="settingsOpen"><slot name="settings" /></div><div v-show="episodesOpen"><slot name="episodes" :active="episodesOpen" /></div></div>
+    <section v-show="menu" id="player-settings-menu" class="settings-menu" :class="{ 'quality-menu':menu === 'quality' }" :aria-label="menuTitle" :inert="!menu" :style="{ maxHeight: `${panelMaxHeight}px` }">
+      <header><strong>{{ menuTitle }}</strong><button type="button" aria-label="关闭播放器菜单" @click="closeSettings"><X /></button></header>
+      <div class="settings-body">
+        <div v-show="menu === 'quality'"><slot name="quality" :close="closeSettings" /></div>
+        <div v-show="menu === 'preferences'">
+          <div class="preference-shortcuts"><label class="small-speed">倍速<select aria-label="偏好播放速度" :value="rate" @change="changeRate"><option v-for="speed in [.5,.75,1,1.25,1.5,2]" :key="speed" :value="speed">{{ speed }}×</option></select></label><button v-if="canPip" type="button" class="pip-action" :aria-label="pip ? '退出画中画' : '画中画'" @click="togglePip"><PictureInPicture2 />{{ pip ? '退出画中画' : '画中画' }}</button></div>
+          <slot name="settings" />
+        </div>
+        <div v-show="menu === 'episodes'"><slot name="episodes" :active="menu === 'episodes'" /></div>
+      </div>
     </section>
   </div>
 </template>
@@ -146,7 +156,7 @@ onBeforeUnmount(() => { release(); cancelGesture(); clearTimeout(feedbackTimer);
 .transport-tools>select option { background:#151518; color:white; }
 button { width:36px; height:40px; flex-shrink:0; display:grid; place-items:center; padding:8px; border:0; color:inherit; background:transparent; cursor:pointer; }
 button svg { width:20px; height:20px; }
-.quality-button { width:40px; padding:0; font-size:12px; }
+.quality-button,.fit-button { width:36px; padding:0; font-size:12px; }.fit-button[aria-pressed=true] { color:#a8c8ff; }
 button:focus-visible,select:focus-visible { outline:2px solid currentColor; outline-offset:-2px; }
 .player-gesture { position:absolute; inset:0; z-index:2; touch-action:pan-y; }
 .gesture-feedback { position:absolute; z-index:8; left:50%; top:45%; transform:translate(-50%,-50%); padding:8px 14px; border-radius:8px; background:#000b; color:white; font-size:14px; pointer-events:none; }
@@ -158,4 +168,10 @@ button:focus-visible,select:focus-visible { outline:2px solid currentColor; outl
 .settings-body { min-height:0; overflow-y:auto; overscroll-behavior:contain; }
 @media(max-width:820px) { .player-controls:not(.expanded) .settings-menu { position:fixed; left:8px; right:8px; bottom:max(8px,env(safe-area-inset-bottom)); width:auto; max-height:min(520px,calc(100dvh - 120px)) !important; } }
 @media(max-width:360px) { .transport-tools>select { width:46px; } .transport-tools button,.transport-tools :deep(.subtitle-controls) { width:32px; flex-basis:32px; } }
+</style>
+
+<style scoped>
+.quality-menu { width:min(280px,calc(100% - 8px)); }.preference-shortcuts { display:flex; align-items:center; padding:6px 16px; border-bottom:1px solid var(--divider); }.pip-action { display:flex; align-items:center; gap:8px; width:auto; padding:0 8px; color:var(--text-secondary); font-size:13px; }.small-speed { display:none; align-items:center; gap:12px; font-size:13px; }.small-speed select { min-height:40px; color:var(--text-primary); background:var(--surface-2); border:0; border-radius:6px; }
+@media(max-width:480px) { .transport-tools { gap:0; }.transport-tools>select { width:44px; }.transport-tools button { width:32px; }.transport-tools :deep(.subtitle-controls) { width:32px; flex-basis:32px; } }
+@media(max-width:360px) { .speed-picker { display:none; }.small-speed { display:flex; }.preference-shortcuts { justify-content:space-between; } }
 </style>

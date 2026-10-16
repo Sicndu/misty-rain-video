@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readRequestBody, readWebResponseText, sendError, sendJson, sendSuccess, pipeWebResponse } from './http.js';
+import { readRequestBody, sendError, sendJson, sendSuccess } from './http.js';
 import { AuthService } from './auth.js';
 import { DanmakuService } from './danmaku/service.js';
 import { LibraryConfigStore, LibraryViewRepository, MediaRepository, PlaybackCacheRepository, PlaybackHistoryRepository, PlayerPreferencesStore, QuarkCredentialStore, LibraryMaintenanceRepository } from './storage.js';
@@ -174,31 +174,6 @@ const publicPlaybackStatus = status => ({
   ...(status?.nickname ? { nickname: status.nickname } : {})
 });
 
-const forwardedPrefix = request => {
-  const value = String(request.headers['x-forwarded-prefix'] || '').split(',')[0].trim();
-  if (!value || value === '/' || !/^\/[a-zA-Z0-9._~/-]+$/.test(value) || value.includes('..')) return '';
-  return value.replace(/\/+$/, '');
-};
-
-const rewriteHlsManifest = (manifest, baseUrl, session, gateway, publicPrefix = '', requestProfile = 'web', requestCookie = '') => {
-  const register = value => {
-    const upstreamUrl = new URL(value, baseUrl).toString();
-    const assetId = gateway.registerAsset(session, upstreamUrl, requestProfile, requestCookie);
-    return `${publicPrefix}/api/player/sessions/${encodeURIComponent(session.id)}/assets/${encodeURIComponent(assetId)}`;
-  };
-
-  return manifest.split(/\r?\n/).map(line => {
-    if (!line) return line;
-    if (!line.startsWith('#')) return register(line.trim());
-    return line.replace(/URI=("|')([^"']+)(\1)/g, (_match, quote, uri) => `URI=${quote}${register(uri)}${quote}`);
-  }).join('\n');
-};
-
-const isManifestResponse = (upstream, upstreamUrl, forceHls = false) => {
-  const contentType = upstream.headers.get('content-type') || '';
-  return forceHls || /mpegurl|m3u8/i.test(contentType) || /\.m3u8(?:$|\?)/i.test(upstreamUrl);
-};
-
 const createProxyRequestController = (request, response) => {
   const controller = new AbortController();
   const abort = () => {
@@ -216,57 +191,6 @@ const createProxyRequestController = (request, response) => {
       response.off?.('close', handleResponseClose);
     }
   };
-};
-
-const proxyUpstream = async ({ request, response, gateway, session, upstreamUrl, forceHls = false, requestProfile = 'web', requestCookie = '' }) => {
-  const proxyRequest = createProxyRequestController(request, response);
-  try {
-    const upstream = await gateway.fetchMedia(
-      upstreamUrl,
-      request.headers.range,
-      requestProfile,
-      requestCookie,
-      { method: request.method, signal: proxyRequest.signal }
-    );
-    if (isManifestResponse(upstream, upstreamUrl, forceHls) && upstream.ok) {
-      const manifest = await readWebResponseText(upstream);
-      const rewritten = rewriteHlsManifest(manifest, upstreamUrl, session, gateway, forwardedPrefix(request), requestProfile, requestCookie);
-      response.statusCode = upstream.status;
-      response.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
-      response.setHeader('Cache-Control', 'no-store');
-      response.end(rewritten);
-      return;
-    }
-    await pipeWebResponse(upstream, response);
-  } finally {
-    proxyRequest.cleanup();
-  }
-};
-
-const fetchStreamWithRefresh = async ({ gateway, sessionId, sourceId, source, range, method, signal, user }) => {
-  let currentSource = source;
-  let refreshed = false;
-  while (true) {
-    try {
-      const upstream = await gateway.fetchMedia(
-        currentSource.upstreamUrl,
-        range,
-        currentSource.requestProfile,
-        currentSource.requestCookie,
-        { method, signal }
-      );
-      // Media nodes also use 412 when a signed playback URL has expired or its
-      // signature preconditions no longer match. Refresh the source once just
-      // like the other expiry responses before returning an upstream error.
-      const shouldRefresh = [401, 403, 410, 412].includes(upstream.status);
-      if (!shouldRefresh || refreshed) return { source: currentSource, upstream };
-      await upstream.body?.cancel().catch(() => {});
-    } catch (error) {
-      if (error?.code !== 'STREAM_NETWORK_ERROR' || refreshed) throw error;
-    }
-    currentSource = await gateway.refreshStreamSource(sessionId, sourceId, user);
-    refreshed = true;
-  }
 };
 
 export const handleApiRequest = async (request, response, context) => {
@@ -679,7 +603,7 @@ export const handleApiRequest = async (request, response, context) => {
         const body = await readRequestBody(request);
         await context.quarkGateway.saveCookie(body.cookie || '');
         const status = await context.quarkGateway.getPlaybackStatus();
-        sendSuccess(response, publicPlaybackStatus(status), '片库与播放 Cookie 已验证并安全保存');
+        sendSuccess(response, publicPlaybackStatus(status), '片库 Cookie 已验证并安全保存');
         return true;
       }
     }
@@ -728,53 +652,15 @@ export const handleApiRequest = async (request, response, context) => {
     if (streamMatch && (request.method === 'GET' || request.method === 'HEAD')) {
       const sessionId = decodeURIComponent(streamMatch[1]);
       const sourceId = decodeURIComponent(streamMatch[2]);
-      const { session, source } = context.quarkGateway.getStreamSource(sessionId, sourceId, user);
-      if ((source.directOnly || source.delivery === 'direct') && url.searchParams.get('delivery') !== 'proxy') {
-        const location = await context.quarkGateway.getDirectStreamUrl(sessionId, sourceId, user);
-        if (location) {
-          response.statusCode = 302;
-          response.setHeader('Location', location);
-          response.setHeader('Referrer-Policy', 'no-referrer');
-          response.setHeader('Cache-Control', 'no-store');
-          response.end();
-          return true;
-        }
-      }
-      const proxyRequest = createProxyRequestController(request, response);
-      try {
-        const refreshed = await fetchStreamWithRefresh({
-          gateway: context.quarkGateway,
-          sessionId,
-          sourceId,
-          source,
-          range: request.headers.range,
-          method: request.method,
-          signal: proxyRequest.signal,
-          user
-        });
-        const upstream = refreshed.upstream;
-        const activeSource = refreshed.source;
-
-        if (isManifestResponse(upstream, activeSource.upstreamUrl, activeSource.isHls) && upstream.ok) {
-          const manifest = await readWebResponseText(upstream);
-          response.statusCode = upstream.status;
-          response.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
-          response.setHeader('Cache-Control', 'no-store');
-          response.end(rewriteHlsManifest(
-            manifest,
-            activeSource.upstreamUrl,
-            session,
-            context.quarkGateway,
-            forwardedPrefix(request),
-            activeSource.requestProfile,
-            activeSource.requestCookie
-          ));
-        } else {
-          await pipeWebResponse(upstream, response);
-        }
-      } finally {
-        proxyRequest.cleanup();
-      }
+      context.quarkGateway.getStreamSource(sessionId, sourceId, user);
+      if (url.searchParams.get('delivery') === 'proxy') throw Object.assign(new Error('服务器中转已禁用，请刷新播放器使用直连'), { code:'VIDEO_RELAY_DISABLED', statusCode:409 });
+      const location = await context.quarkGateway.getDirectStreamUrl(sessionId, sourceId, user);
+      if (!location) throw Object.assign(new Error('当前画质不能直连，请更换画质或片源'), { code:'DIRECT_SOURCE_UNAVAILABLE', statusCode:409 });
+      response.statusCode = 302;
+      response.setHeader('Location', location);
+      response.setHeader('Referrer-Policy','no-referrer');
+      response.setHeader('Cache-Control','no-store');
+      response.end();
       return true;
     }
 
@@ -802,21 +688,8 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
-    const assetMatch = pathname.match(/^\/api\/player\/sessions\/([^/]+)\/assets\/([^/]+)$/);
-    if (assetMatch && (request.method === 'GET' || request.method === 'HEAD')) {
-      const sessionId = decodeURIComponent(assetMatch[1]);
-      const assetId = decodeURIComponent(assetMatch[2]);
-      const { session, asset } = context.quarkGateway.getAsset(sessionId, assetId, user);
-      await proxyUpstream({
-        request,
-        response,
-        gateway: context.quarkGateway,
-        session,
-        upstreamUrl: asset.upstreamUrl,
-        requestProfile: asset.requestProfile,
-        requestCookie: asset.requestCookie
-      });
-      return true;
+    if (/^\/api\/player\/sessions\/[^/]+\/assets\//.test(pathname)) {
+      throw Object.assign(new Error('服务器视频中转已禁用，请重新打开影片'), { code:'VIDEO_RELAY_DISABLED', statusCode:410 });
     }
 
     sendJson(response, 404, { code: 'API_NOT_FOUND', message: '接口不存在' });

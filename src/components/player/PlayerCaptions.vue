@@ -19,7 +19,8 @@ watch([() => props.video, () => props.fit, () => props.controlsInset, () => prop
       })).filter(Boolean);
   };
   const measure = () => {
-    const rect = video.getBoundingClientRect();
+    const viewport = video.parentElement?.getBoundingClientRect();
+    const rect = viewport?.width && viewport.height ? viewport : video.getBoundingClientRect();
     style.value = captionLayout(rect.width, rect.height, video.videoWidth, video.videoHeight, props.fit, props.controlsInset);
   };
   const bind = () => {

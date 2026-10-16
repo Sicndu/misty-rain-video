@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type Hls from 'hls.js';
 import DanmakuControls from './DanmakuControls.vue';
 import PlaybackControls from './PlaybackControls.vue';
 import EpisodeSourcePanel from './EpisodeSourcePanel.vue';
@@ -11,7 +10,7 @@ import { playbackHealth } from '../../services/playbackHealth';
 import { configureVideoRequest, playbackSourceLabel, selectInitialPlaybackSource } from '../../services/playbackSource';
 import SubtitleControls from './SubtitleControls.vue';
 import { PlayerPreferencesService } from '../../services/playerPreferencesService';
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { CircleAlert, LoaderCircle, Play, RefreshCw, ChevronLeft, Bookmark, BookmarkCheck } from '@lucide/vue';
 import type { MediaItem, PlaybackHistoryEntry, PlaybackHistoryUpdate } from '../../types/media';
 import {
@@ -48,19 +47,12 @@ const emit = defineEmits<{
 }>();
 
 type PlayerPhase = 'idle' | 'resolving' | 'preparing' | 'ready' | 'error' | 'auth-required';
-type SoundEffectMode = 'original' | 'dialogue' | 'cinema' | 'night';
 
 interface PlaybackAutomationSettings {
   skipIntroOutro: boolean;
   autoNext: boolean;
   introSeconds: number;
   outroSeconds: number;
-}
-
-interface SoundEffectOption {
-  value: SoundEffectMode;
-  label: string;
-  hint: string;
 }
 
 const toast = useToast();
@@ -70,7 +62,6 @@ const androidControlsInset = ref(0);
 const inlineEpisodesHost = ref<HTMLElement | null>(null);
 const fullscreenEpisodesHost = ref<HTMLElement | null>(null);
 const episodeTarget = computed(() => fullscreen.value && !nativeFullscreen.value && fullscreenEpisodesHost.value ? fullscreenEpisodesHost.value : inlineEpisodesHost.value);
-const hlsRef = shallowRef<Hls | null>(null);
 const phase = ref<PlayerPhase>('idle');
 const session = ref<QuarkPlaybackSession | null>(null);
 const playback = ref<PreparedPlayback | null>(null);
@@ -79,8 +70,13 @@ const selectedSourceId = ref('');
 const errorMessage = ref('');
 const statusMessage = ref('');
 const playbackStarting = ref(false);
-const videoAspectRatio = ref(16 / 9);
-const pictureFit = ref<'contain' | 'cover'>('contain');
+// A stable viewport makes contain/cover distinct for wide and portrait content.
+const videoAspectRatio = 16 / 9;
+type PictureMode = 'contain' | 'cover' | 'crop';
+const pictureMode = ref<PictureMode>('contain');
+try { const saved=localStorage.getItem('misty_rain_picture_mode') || localStorage.getItem('misty_rain_picture_fit'); if (saved === 'cover' || saved === 'crop') pictureMode.value=saved; } catch {}
+const pictureFit = computed(() => pictureMode.value === 'contain' ? 'contain' : 'cover');
+watch(pictureMode, value => { try { localStorage.setItem('misty_rain_picture_mode',value); } catch {} });
 const prolongedBuffering = ref(false);
 const interruptionPosition = ref(0);
 let playbackWatchdog: number | null = null;
@@ -117,25 +113,7 @@ const isIOSPlaybackDevice = typeof navigator !== 'undefined'
   && /iPhone|iPad|iPod/i.test(navigator.userAgent);
 const nativeHlsSupported = typeof document !== 'undefined'
   && Boolean(document.createElement('video').canPlayType('application/vnd.apple.mpegurl'));
-const storedSoundEffect = localStorage.getItem('misty_rain_sound_effect');
-const soundEffectMode = ref<SoundEffectMode>(
-  !isIOSPlaybackDevice && ['original', 'dialogue', 'cinema', 'night'].includes(storedSoundEffect || '')
-    ? storedSoundEffect as SoundEffectMode
-    : 'original'
-);
-// iOS WebClip 的 HTMLMediaElement 经过 Web Audio 后不再与原生视频时钟硬同步。
-// 手机端优先保证音画和画面内字幕同步，音效仍保留在其他平台。
-const soundEffectAvailable = ref(!isIOSPlaybackDevice && typeof window !== 'undefined'
-  && Boolean(window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext));
 let requestSequence = 0;
-let audioContext: AudioContext | null = null;
-let mediaAudioSource: MediaElementAudioSourceNode | null = null;
-let dryGain: GainNode | null = null;
-let wetGain: GainNode | null = null;
-let lowShelf: BiquadFilterNode | null = null;
-let presenceFilter: BiquadFilterNode | null = null;
-let highShelf: BiquadFilterNode | null = null;
-let dynamicsCompressor: DynamicsCompressorNode | null = null;
 let lastProgressSavedAt = 0;
 let lastSavedPosition = -1;
 let savingProgress: Promise<PlaybackHistoryEntry | null> | null = null;
@@ -143,9 +121,7 @@ let sourceAttachSequence = 0;
 let playAttemptSequence = 0;
 let autoNextTimer: number | null = null;
 let bufferingTimer: number | null = null;
-let hlsNetworkRetryTimer: number | null = null;
-let hlsNetworkRetryCount = 0;
-let hlsMediaRecoveryCount = 0;
+
 let lastPlaybackPosition = 0;
 let lastPlaybackProgressAt = 0;
 let lastAudibleVolume = Math.max(0.1, Math.min(1, Number(localStorage.getItem('misty_rain_player_volume')) || 1));
@@ -163,33 +139,16 @@ const { fullscreen, nativeFullscreen, error: fullscreenError, toggle: toggleFull
 const embeddedSubtitles = useEmbeddedSubtitles(videoRef, () => playback.value?.embeddedSubtitleUrl);
 watch(fullscreenError, message => { if (message) { toast.show(message, '!'); announce(message); } });
 
-const soundEffectOptions: SoundEffectOption[] = [
-  { value: 'original', label: '原声', hint: '不做处理' },
-  { value: 'dialogue', label: '对白增强', hint: '突出人声' },
-  { value: 'cinema', label: '影院', hint: '增强低频与细节' },
-  { value: 'night', label: '夜间', hint: '平衡音量起伏' }
-];
-
 const episodes = computed(() => session.value?.episodes || []);
 const currentEpisode = computed(() => episodes.value[currentEpisodeIndex.value] || null);
 const movieMode = computed(() => props.media?.category === 'movie');
 
-const sources = computed(() => playback.value?.sources || []);
+const sources = computed(() => (playback.value?.sources || []).filter(source=>source.delivery==='direct'));
 const selectedSource = computed(() => sources.value.find(source => source.id === selectedSourceId.value) || sources.value[0]);
-const sourceAllowsSoundEffects = computed(() => soundEffectAvailable.value && selectedSource.value?.delivery !== 'direct');
-const compatibleSource = computed(() => selectInitialPlaybackSource(
-  sources.value.flatMap(source => {
-    if (source.delivery === 'proxy' && source.resolution !== 'original') return [source];
-    if (source.isHls && source.proxyUrl) return [{ ...source, delivery: 'proxy' as const, url: source.proxyUrl }];
-    return [];
-  }),
-  { mobile: true, respectPreference: false }
-));
 const audioTracks = computed(() => detectedAudioTracks.value.length
   ? detectedAudioTracks.value
   : (playback.value?.audioTracks || []));
 const audioSwitchable = computed(() => detectedAudioTracks.value.length > 1 || getNativeAudioTrackCount() > 1);
-const selectedSoundEffect = computed(() => soundEffectOptions.find(option => option.value === soundEffectMode.value));
 const episodeStatus = computed(() => {
   const episode = currentEpisode.value;
   if (movieMode.value) return episodes.value.length > 1 ? `${episodes.value.length} 个视频` : '';
@@ -212,35 +171,7 @@ const playActionLabel = computed(() => {
 });
 const sourceDetail = (source: PlaybackSource) => source.width && source.height ? `${source.width}×${source.height}` : '';
 
-const resetSoundEffectGraph = (replaceVideo = false) => {
-  for (const node of [mediaAudioSource, dryGain, wetGain, lowShelf, presenceFilter, highShelf, dynamicsCompressor]) {
-    try {
-      node?.disconnect();
-    } catch {
-      // Safari 在页面休眠后可能已经断开节点。
-    }
-  }
-  audioContext?.close().catch(() => {});
-  audioContext = null;
-  mediaAudioSource = null;
-  dryGain = null;
-  wetGain = null;
-  lowShelf = null;
-  presenceFilter = null;
-  highShelf = null;
-  dynamicsCompressor = null;
-  if (replaceVideo) videoInstanceKey.value += 1;
-};
-
 const destroyPlaybackEngine = () => {
-  if (hlsNetworkRetryTimer !== null) {
-    window.clearTimeout(hlsNetworkRetryTimer);
-    hlsNetworkRetryTimer = null;
-  }
-  hlsNetworkRetryCount = 0;
-  hlsMediaRecoveryCount = 0;
-  hlsRef.value?.destroy();
-  hlsRef.value = null;
   detectedAudioTracks.value = [];
   selectedAudioIndex.value = -1;
 };
@@ -296,119 +227,6 @@ const announce = (message: string) => {
   statusMessage.value = message;
 };
 
-const setAudioParam = (parameter: AudioParam | undefined, value: number, timeConstant = 0.018) => {
-  if (!parameter || !audioContext) return;
-  parameter.cancelScheduledValues(audioContext.currentTime);
-  parameter.setTargetAtTime(value, audioContext.currentTime, timeConstant);
-};
-
-const configureSoundEffect = (mode: SoundEffectMode) => {
-  if (!audioContext || !dryGain || !wetGain || !lowShelf || !presenceFilter || !highShelf || !dynamicsCompressor) return;
-
-  const settings: Record<Exclude<SoundEffectMode, 'original'>, {
-    low: number;
-    presence: number;
-    high: number;
-    threshold: number;
-    knee: number;
-    ratio: number;
-    attack: number;
-    release: number;
-    output: number;
-  }> = {
-    dialogue: { low: -2, presence: 5, high: 1, threshold: -30, knee: 16, ratio: 3.5, attack: 0.008, release: 0.22, output: 1.05 },
-    cinema: { low: 3.5, presence: 1.5, high: 2.2, threshold: -24, knee: 20, ratio: 2.2, attack: 0.012, release: 0.3, output: 0.94 },
-    night: { low: -3.5, presence: 3.2, high: -1.5, threshold: -38, knee: 12, ratio: 9, attack: 0.004, release: 0.42, output: 1.08 }
-  };
-
-  if (mode === 'original') {
-    setAudioParam(dryGain.gain, 1);
-    setAudioParam(wetGain.gain, 0);
-    return;
-  }
-
-  const effect = settings[mode];
-  setAudioParam(lowShelf.gain, effect.low);
-  setAudioParam(presenceFilter.gain, effect.presence);
-  setAudioParam(highShelf.gain, effect.high);
-  setAudioParam(dynamicsCompressor.threshold, effect.threshold);
-  setAudioParam(dynamicsCompressor.knee, effect.knee);
-  setAudioParam(dynamicsCompressor.ratio, effect.ratio);
-  setAudioParam(dynamicsCompressor.attack, effect.attack);
-  setAudioParam(dynamicsCompressor.release, effect.release);
-  setAudioParam(dryGain.gain, 0);
-  setAudioParam(wetGain.gain, effect.output);
-};
-
-const ensureSoundEffectGraph = async () => {
-  const video = videoRef.value;
-  if (!video || !sourceAllowsSoundEffects.value) return false;
-  try {
-    if (!audioContext) {
-      const AudioContextConstructor = window.AudioContext
-        || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AudioContextConstructor) return false;
-      audioContext = new AudioContextConstructor({ latencyHint: 'interactive' });
-      mediaAudioSource = audioContext.createMediaElementSource(video);
-      dryGain = audioContext.createGain();
-      wetGain = audioContext.createGain();
-      lowShelf = audioContext.createBiquadFilter();
-      presenceFilter = audioContext.createBiquadFilter();
-      highShelf = audioContext.createBiquadFilter();
-      dynamicsCompressor = audioContext.createDynamicsCompressor();
-
-      lowShelf.type = 'lowshelf';
-      lowShelf.frequency.value = 140;
-      presenceFilter.type = 'peaking';
-      presenceFilter.frequency.value = 2800;
-      presenceFilter.Q.value = 0.85;
-      highShelf.type = 'highshelf';
-      highShelf.frequency.value = 6500;
-      dryGain.gain.value = 1;
-      wetGain.gain.value = 0;
-
-      mediaAudioSource.connect(dryGain).connect(audioContext.destination);
-      mediaAudioSource
-        .connect(lowShelf)
-        .connect(presenceFilter)
-        .connect(highShelf)
-        .connect(dynamicsCompressor)
-        .connect(wetGain)
-        .connect(audioContext.destination);
-    }
-    // iOS WebClip 从后台恢复时可能返回 Safari 私有的 interrupted 状态。
-    // 只判断 suspended 会让原声通道继续连在无输出的 AudioContext 上。
-    if (audioContext.state !== 'running') await audioContext.resume();
-    configureSoundEffect(soundEffectMode.value);
-    return true;
-  } catch {
-    soundEffectAvailable.value = false;
-    soundEffectMode.value = 'original';
-    localStorage.setItem('misty_rain_sound_effect', 'original');
-    return false;
-  }
-};
-
-const selectSoundEffect = async (mode: SoundEffectMode) => {
-  if (!sourceAllowsSoundEffects.value) return;
-  if (mode === soundEffectMode.value) return;
-  soundEffectMode.value = mode;
-  localStorage.setItem('misty_rain_sound_effect', mode);
-  if (mode === 'original' && audioContext) {
-    const video = videoRef.value;
-    const resumeAt = video?.currentTime || 0;
-    const shouldPlay = Boolean(video && !video.paused);
-    const source = selectedSource.value;
-    resetSoundEffectGraph(true);
-    await nextTick();
-    if (source) await attachSource(source, resumeAt, shouldPlay);
-  } else if (!(await ensureSoundEffectGraph())) {
-    toast.show('当前浏览器无法启用音效处理，已恢复原声', '!', 3000);
-    return;
-  }
-  announce(`已切换到${soundEffectOptions.find(option => option.value === mode)?.label || '原声'}音效`);
-};
-
 const restoreVideoAudioOutput = () => {
   const video = videoRef.value;
   if (!video || !audioOutputNeedsReset) return;
@@ -418,12 +236,7 @@ const restoreVideoAudioOutput = () => {
   audioOutputNeedsReset = false;
 };
 
-const resumeSoundEffect = () => {
-  if (isAndroidPlaybackDevice) hlsRef.value?.startLoad(-1);
-  restoreVideoAudioOutput();
-  // 即使已切回“原声”，旧媒体节点仍经过 AudioContext，也必须恢复它。
-  if (audioContext || soundEffectMode.value !== 'original') void ensureSoundEffectGraph();
-};
+const handlePlay = () => restoreVideoAudioOutput();
 
 const handleVolumeChange = () => {
   const video = videoRef.value;
@@ -504,16 +317,7 @@ const attachSource = async (
   shouldPlay = false,
   applyIntroSkip = false
 ) => {
-  if (source.delivery === 'direct') {
-    // 跨域媒体接入 Web Audio 会输出静音。已有音频节点无法从媒体元素解绑，
-    // 从中转音效切换直连时必须更换元素，而不只是 disconnect。
-    soundEffectMode.value = 'original';
-    if (audioContext || mediaAudioSource) {
-      videoRef.value?.pause();
-      destroyPlaybackEngine();
-      resetSoundEffectGraph(true);
-    }
-  }
+  if (source.delivery !== 'direct') throw new Error('服务器中转已禁用，请重新打开影片');
   await nextTick();
   const video = videoRef.value;
   if (!video) return;
@@ -531,74 +335,7 @@ const attachSource = async (
   lastPlaybackPosition = resumeAt;
   lastPlaybackProgressAt = Date.now();
 
-  // Safari/iOS 可直接交给原生视频管线；仅在原生不支持 HLS 的浏览器
-  // 懒加载 hls.js，避免 WebClip 不必要地下载并初始化解码器。
-  if (source.isHls && !video.canPlayType('application/vnd.apple.mpegurl')) {
-    if (source.delivery === 'direct') throw new Error('当前浏览器无法原生播放此视频，请使用兼容画质');
-    const { default: HlsRuntime } = await import('hls.js');
-    if (attachSequence !== sourceAttachSequence || video !== videoRef.value) return;
-    if (HlsRuntime.isSupported()) {
-      const hls = new HlsRuntime({
-        enableWorker: true,
-        lowLatencyMode: false,
-        capLevelToPlayerSize: true,
-        backBufferLength: 30,
-        maxBufferLength: 20,
-        maxMaxBufferLength: 40
-      });
-      hlsRef.value = hls;
-      hls.on(HlsRuntime.Events.MEDIA_ATTACHED, () => hls.loadSource(source.url));
-      hls.on(HlsRuntime.Events.MANIFEST_PARSED, () => {
-        if (attachSequence !== sourceAttachSequence) return;
-        detectedAudioTracks.value = hls.audioTracks.map((track, index) => ({
-          id: String(index),
-          label: track.name || track.lang || `音轨 ${index + 1}`,
-          language: track.lang || '',
-          codec: '',
-          channels: ''
-        }));
-        if (detectedAudioTracks.value.length) selectedAudioIndex.value = Math.max(0, hls.audioTrack);
-        seekAndMaybePlay(resumeAt, shouldPlay, attachSequence, applyIntroSkip);
-      });
-      hls.on(HlsRuntime.Events.AUDIO_TRACKS_UPDATED, () => {
-        detectedAudioTracks.value = hls.audioTracks.map((track, index) => ({
-          id: String(index),
-          label: track.name || track.lang || `音轨 ${index + 1}`,
-          language: track.lang || '',
-          codec: '',
-          channels: ''
-        }));
-      });
-      hls.on(HlsRuntime.Events.FRAG_LOADED, () => {
-        hlsNetworkRetryCount = 0;
-      });
-      hls.on(HlsRuntime.Events.ERROR, (_event, data) => {
-        if (!data.fatal || attachSequence !== sourceAttachSequence || phase.value !== 'ready') return;
-        if (data.type === HlsRuntime.ErrorTypes.NETWORK_ERROR) {
-          if (hlsNetworkRetryTimer !== null) return;
-          if (hlsNetworkRetryCount < 3) {
-            const retryDelays = [600, 1_500, 3_000];
-            const retryDelay = retryDelays[hlsNetworkRetryCount++] ?? 3_000;
-            hlsNetworkRetryTimer = window.setTimeout(() => {
-              hlsNetworkRetryTimer = null;
-              if (attachSequence === sourceAttachSequence && hlsRef.value === hls && phase.value === 'ready') hls.startLoad();
-            }, retryDelay);
-            return;
-          }
-          interruptPlayback('网络连接中断，请检查网络后重新连接，继续从当前进度播放');
-          return;
-        }
-        if (data.type === HlsRuntime.ErrorTypes.MEDIA_ERROR) {
-          if (hlsMediaRecoveryCount++ === 0) hls.recoverMediaError();
-          else interruptPlayback('视频解码中断，请重新连接后继续播放');
-          return;
-        }
-        interruptPlayback('视频流中断，请重新连接当前剧集');
-      });
-      hls.attachMedia(video);
-      return;
-    }
-  }
+  if (source.isHls && !video.canPlayType('application/vnd.apple.mpegurl')) throw new Error('当前浏览器不支持此直连画质，请更换片源');
 
   video.src = source.url;
   video.load();
@@ -770,12 +507,9 @@ const handleVisibilityChange = () => {
       manualPlayRequired.value = true;
       void persistProgress(true, false, true);
     }
-    hlsRef.value?.stopLoad();
-    audioContext?.suspend().catch(() => {});
     return;
   }
   if (!pageWasHidden) {
-    hlsRef.value?.startLoad(-1);
     audioOutputNeedsReset = true;
     if (phase.value === 'ready') manualPlayRequired.value = isAndroidPlaybackDevice ? Boolean(video?.paused) : true;
   }
@@ -792,7 +526,7 @@ const handlePageHide = () => {
   pageWasHidden = true;
 
   stopVideo(true);
-  resetSoundEffectGraph(true);
+  videoInstanceKey.value += 1;
 };
 
 const handlePageShow = async () => {
@@ -827,11 +561,6 @@ const handlePlaybackAvailable = () => {
   if (videoRef.value && !videoRef.value.paused && !videoRef.value.seeking) monitorPlayback();
 };
 
-const handleMetadata = () => {
-  const video = videoRef.value;
-  if (video?.videoWidth && video.videoHeight) videoAspectRatio.value = video.videoWidth / video.videoHeight;
-};
-
 const handleSeeking = () => {
   lastPlaybackProgressAt = Date.now();
   lastPlaybackPosition = videoRef.value?.currentTime || 0;
@@ -853,7 +582,6 @@ const interruptPlayback = (message: string) => {
   manualPlayRequired.value = false;
   clearBufferingIndicator(false);
   video?.pause();
-  hlsRef.value?.stopLoad();
   void persistProgress(true);
   void revealPlaybackNotice();
   announce(message);
@@ -895,7 +623,7 @@ const monitorPlayback = () => {
 const handleVideoError = () => {
   if (phase.value !== 'ready') return;
   if (selectedSource.value?.resolution === 'original' && videoRef.value?.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
-    interruptPlayback('当前设备不支持此原画格式，请在播放设置中选择其他画质');
+    interruptPlayback('当前设备不支持此原画格式，请选择其他直连画质或更换片源');
     return;
   }
   interruptPlayback(videoRef.value?.error?.code === MediaError.MEDIA_ERR_NETWORK
@@ -915,10 +643,6 @@ const prepareEpisode = async (index: number, resumeAt = 0) => {
     await persistProgress(true);
   }
   interruptionPosition.value = resumeAt;
-  if (currentEpisodeIndex.value !== index || !playback.value) {
-    videoAspectRatio.value = 16 / 9;
-    pictureFit.value = 'contain';
-  }
   const sequence = ++requestSequence;
   introSkipped = false;
   episodeCompletionHandled = false;
@@ -1053,28 +777,10 @@ const changeQuality = async (source: PlaybackSource) => {
   if (source.delivery) localStorage.setItem('misty_rain_player_delivery', source.delivery);
   else localStorage.removeItem('misty_rain_player_delivery');
   announce(`已切换到${playbackSourceLabel(source)}`);
-  await attachSource(source, resumeAt, shouldPlay);
-};
-
-const useCompatibleSource = async () => {
-  const source = compatibleSource.value;
-  if (!source) return;
-  if (playback.value) playback.value.sources = playback.value.sources.map(item => item.id === source.id ? source : item);
-  selectedSourceId.value = source.id;
-  errorMessage.value = '';
-  phase.value = 'ready';
-  await attachSource(source, interruptionPosition.value, true);
+  try { await attachSource(source,resumeAt,shouldPlay); } catch (error) { handleServiceError(error); }
 };
 
 const selectAudioTrack = (index: number) => {
-  const hls = hlsRef.value;
-  if (hls && index >= 0 && index < hls.audioTracks.length) {
-    hls.audioTrack = index;
-    selectedAudioIndex.value = index;
-    announce(`已切换到${audioTracks.value[index]?.label || `音轨 ${index + 1}`}`);
-    return;
-  }
-
   const nativeTracks = (videoRef.value as (HTMLVideoElement & {
     audioTracks?: ArrayLike<{ enabled: boolean }>;
   }) | null)?.audioTracks;
@@ -1111,7 +817,7 @@ const close = () => {
   phase.value = 'idle';
   requestSequence += 1;
   stopVideo(true);
-  resetSoundEffectGraph(true);
+  videoInstanceKey.value += 1;
   emit('close');
 };
 
@@ -1138,7 +844,6 @@ onBeforeUnmount(() => {
   void persistProgress(true, false, true);
   phase.value = 'idle';
   stopVideo(true);
-  resetSoundEffectGraph();
   window.removeEventListener('pagehide', handlePageHide);
   window.removeEventListener('pageshow', handlePageShow);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -1226,19 +931,17 @@ defineExpose({ retry });
               ref="videoRef"
               class="video-element"
               :class="{ 'native-fullscreen': nativeFullscreen }"
-              :style="{ objectFit: pictureFit }"
+              :style="{ objectFit: pictureFit, transform:pictureMode === 'crop' ? 'scale(1.25)' : 'none' }"
               :controls="nativeFullscreen"
               controlslist="nodownload noremoteplayback"
               playsinline
               :preload="isIOSPlaybackDevice ? 'auto' : 'metadata'"
               :poster="isMobilePlaybackDevice ? undefined : media.poster"
-              @play="resumeSoundEffect"
+              @play="handlePlay"
               @volumechange="handleVolumeChange"
               @playing="handlePlaying"
               @waiting="handleWaiting"
               @stalled="handleWaiting"
-              @loadedmetadata="handleMetadata"
-              @resize="handleMetadata"
               @seeking="handleSeeking"
               @canplay="handlePlaybackAvailable"
               @seeked="handlePlaybackAvailable"
@@ -1258,7 +961,7 @@ defineExpose({ retry });
                 :src="subtitle.url"
               />
             </video>
-            <PlayerCaptions v-if="!isIOSPlaybackDevice && videoRef && phase === 'ready'" :video="videoRef" :fit="pictureFit" :controls-inset="androidControlsInset" :native-fullscreen="nativeFullscreen" />
+            <PlayerCaptions v-if="(!isIOSPlaybackDevice || pictureMode === 'crop') && videoRef && phase === 'ready'" :video="videoRef" :fit="pictureFit" :controls-inset="androidControlsInset" :native-fullscreen="nativeFullscreen" />
             <div v-if="phase === 'resolving' || phase === 'preparing'" class="stage-state loading-state" role="status" aria-live="polite">
               <img v-if="media.poster && !isMobilePlaybackDevice" class="stage-poster" :src="media.poster" alt="" aria-hidden="true" />
               <div class="loading-content">
@@ -1280,12 +983,7 @@ defineExpose({ retry });
                   <RefreshCw aria-hidden="true" />
                   {{ interruptionPosition > 0 ? '重新连接并续播' : '重新连接' }}
                 </button>
-                <button
-                  v-if="phase === 'error' && selectedSource?.delivery === 'direct' && compatibleSource"
-                  type="button" class="secondary-button" @click="useCompatibleSource"
-                >
-                  使用兼容画质（服务器中转）
-                </button>
+
               </div>
             </div>
 
@@ -1322,31 +1020,13 @@ defineExpose({ retry });
           </div>
 
           <PlaybackControls v-if="videoRef && phase === 'ready'" :native-fullscreen="nativeFullscreen"
-            :video="videoRef" :expanded="fullscreen && !nativeFullscreen" :title="media.title" :episodes="episodes" :current-index="currentEpisodeIndex"
-            @fullscreen="toggleFullscreen" @inset="androidControlsInset = $event">
-            <SubtitleControls :video="videoRef" :hls="hlsRef" :native-fullscreen="nativeFullscreen" :username="username" :notice="playback?.subtitleNotice" compact icon-only
+            :video="videoRef" :expanded="fullscreen && !nativeFullscreen" :picture-mode="pictureMode" :title="media.title" :episodes="episodes" :current-index="currentEpisodeIndex"
+            @fullscreen="toggleFullscreen" @picture-mode="pictureMode = $event" @inset="androidControlsInset = $event">
+            <SubtitleControls :video="videoRef" :native-fullscreen="nativeFullscreen" :username="username" :notice="playback?.subtitleNotice" compact icon-only
               :loading="embeddedSubtitles.loading.value" :read-error="embeddedSubtitles.error.value" @retry-embedded="embeddedSubtitles.retry" />
             <template #episodes><div class="fullscreen-episode-panel"><button type="button" class="collect-series" :disabled="collecting || collectedAll" @click="collectSeries"><BookmarkCheck v-if="collectedAll" /><Bookmark v-else />{{ collectedAll ? '已收藏' : collecting ? '收藏中…' : '收藏整部' }}</button><div ref="fullscreenEpisodesHost"></div></div></template>
+            <template #quality="{ close }"><div class="quality-options" role="listbox" aria-label="清晰度选择"><button v-for="source in sources" :key="source.id" type="button" role="option" :aria-selected="selectedSourceId === source.id" @click="changeQuality(source); close()"><span>{{ source.resolution === 'original' ? '原画' : source.label }}<small>{{ sourceDetail(source) }}</small></span><span v-if="selectedSourceId === source.id" aria-hidden="true">✓</span></button><p>视频从网盘直连播放</p></div></template>
             <template #settings><div class="playback-settings" id="playback-settings">
-            <div class="setting-group">
-              <div class="setting-heading"><span>画面比例</span><small></small></div>
-              <div class="option-scroll" role="group" aria-label="画面显示方式">
-                <button type="button" class="option-chip" :class="{ active: pictureFit === 'contain' }" :aria-pressed="pictureFit === 'contain'" @click="pictureFit = 'contain'">适应</button>
-                <button type="button" class="option-chip" :class="{ active: pictureFit === 'cover' }" :aria-pressed="pictureFit === 'cover'" @click="pictureFit = 'cover'">铺满</button>
-              </div>
-            </div>
-            <div class="setting-group">
-              <div class="setting-heading">
-                <span>画质</span>
-                <small>{{ selectedSource ? sourceDetail(selectedSource) : '' }}</small>
-              </div>
-              <select class="setting-select" aria-label="画质选择" :value="selectedSourceId" @change="changeQuality(sources.find(source => source.id === ($event.target as HTMLSelectElement).value)!)">
-                <option v-for="source in sources" :key="source.id" :value="source.id">{{ playbackSourceLabel(source) }}</option>
-              </select>
-              <p v-if="selectedSource?.delivery === 'proxy'" class="delivery-hint">服务器中转</p>
-              <p v-else-if="selectedSource?.resolution === 'original'" class="delivery-hint">原画直连 · 需设备支持</p>
-            </div>
-
             <div v-if="audioSwitchable" class="setting-group">
               <div class="setting-heading">
                 <span>音频</span>
@@ -1363,27 +1043,6 @@ defineExpose({ retry });
                   @click="selectAudioTrack(index)"
                 >
                   {{ track.label }}{{ track.codec ? ` · ${track.codec}` : '' }}
-                </button>
-              </div>
-            </div>
-
-            <div v-if="sourceAllowsSoundEffects" class="setting-group">
-              <div class="setting-heading">
-                <span>音效</span>
-                <small>{{ selectedSoundEffect?.hint || '设备端实时处理' }}</small>
-              </div>
-              <div class="option-scroll" role="radiogroup" aria-label="音效选择">
-                <button
-                  v-for="effect in soundEffectOptions"
-                  :key="effect.value"
-                  type="button"
-                  class="option-chip"
-                  :class="{ active: soundEffectMode === effect.value }"
-                  role="radio"
-                  :aria-checked="soundEffectMode === effect.value"
-                  @click="selectSoundEffect(effect.value)"
-                >
-                  {{ effect.label }}
                 </button>
               </div>
             </div>
@@ -1585,4 +1244,8 @@ defineExpose({ retry });
 
 <style scoped>
 :global(html[data-theme='dark']) .player-page { --liquid-accent:#8fb8f1; --liquid-accent-strong:#a9c9f5; --liquid-accent-subtle:rgb(143 184 241 / .14); --accent-ink:#122039; }
+</style>
+
+<style scoped>
+.quality-options { padding:6px 12px 10px; }.quality-options>button { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; min-height:48px; padding:8px 10px; border:0; border-radius:7px; color:var(--text-primary); background:transparent; text-align:left; font:inherit; font-size:14px; cursor:pointer; }.quality-options>button[aria-selected=true] { color:var(--liquid-accent); background:var(--liquid-accent-subtle); }.quality-options small { display:block; margin-top:3px; color:var(--text-tertiary); font-size:11px; }.quality-options p { padding:8px 10px 0; color:var(--text-tertiary); font-size:11px; }
 </style>

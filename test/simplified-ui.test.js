@@ -264,40 +264,27 @@ test('desktop library has one selected category and its library heading is not a
   } finally { app.unmount(); }
 });
 
-test('one player control bar owns captions, episodes and settings without a duplicate page panel', async t => {
-  mockApi(t);
-  const app = mount(Player, { isOpen: true, media, username: 'fixture' });
-  try {
-    await flush();
-    const controls = document.querySelector('.video-column > .player-controls');
-    assert.ok(controls);
-    assert.equal(document.querySelector('.player-panel'), null);
-    assert.equal(document.querySelector('#episode-panel'), null);
-    assert.equal(document.querySelectorAll('select[aria-label="选择影片字幕"]').length, 1);
-    assert.ok(controls.querySelector('select[aria-label="选择影片字幕"]'));
-    assert.equal(document.querySelector('.video-stage .mobile-controls'), null, 'inline transport stays below captions');
-    const menu = controls.querySelector('#player-settings-menu');
-    assert.equal(menu.style.display, 'none');
-    const button = controls.querySelector('button[aria-label="播放设置"]');
-    button.click(); await nextTick();
-    assert.equal(button.getAttribute('aria-expanded'), 'true');
-    assert.notEqual(menu.style.display, 'none');
-    assert.ok(menu.querySelector('[aria-label="画质选择"]'));
-    document.querySelector('[aria-label="画面显示方式"] button:last-child').click(); await nextTick();
-    assert.equal(document.querySelector('video').style.objectFit, 'cover');
-    assert.equal(document.querySelectorAll('.duration-input input').length, 0);
-    document.querySelector('[aria-label="跳过片头片尾"]').click(); await flush();
-    assert.equal(document.querySelectorAll('.duration-input input').length, 2);
-    assert.equal(document.querySelector('[aria-label="片头时长（秒）"]').value, '30');
-    assert.equal(document.querySelector('[aria-label="片尾时长（秒）"]').value, '45');
-    menu.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})); await nextTick();
-    assert.equal(menu.style.display, 'none'); assert.equal(document.activeElement,button);
-    assert.equal(document.querySelector('[aria-label="选集与片源"]'), null);
-    assert.ok(document.querySelector('.watch-details .episode-source-panel'));
-    assert.ok(document.querySelector('main.player-page'));
-    assert.equal(document.querySelector('[aria-modal="true"]'), null);
-    assert.equal(document.querySelector('.rotated-player'), null);
-  } finally { app.unmount(); }
+test('quality is a dedicated menu and quick crop preserves playback independently of preferences', async t => {
+  mockApi(t);localStorage.removeItem('misty_rain_picture_fit');localStorage.removeItem('misty_rain_picture_mode');
+  const app=mount(Player,{isOpen:true,media,username:'fixture'});
+  try{
+    await flush();const controls=document.querySelector('.video-column > .player-controls'),video=document.querySelector('video');
+    assert.ok(controls);assert.equal(document.querySelector('.player-panel'),null);assert.equal(document.querySelectorAll('select[aria-label="选择影片字幕"]').length,1);
+    const menu=controls.querySelector('#player-settings-menu'),quality=controls.querySelector('[aria-label="选择画质"]');
+    quality.click();await nextTick();assert.equal(menu.getAttribute('aria-label'),'清晰度');assert.notEqual(menu.style.display,'none');
+    assert.ok(menu.querySelector('[aria-label="清晰度选择"]'));assert.doesNotMatch(menu.querySelector('.quality-options').textContent,/片头|音频|画面比例/);
+    assert.equal(menu.querySelector('.settings-body > div:nth-child(2)').style.display,'none');
+    menu.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await nextTick();
+    assert.equal(menu.style.display,'none');assert.equal(document.activeElement,quality);
+    video.currentTime=42;const src=video.getAttribute('src');controls.querySelector('[aria-label="切换画面模式"]').click();await nextTick();
+    assert.equal(video.style.objectFit,'cover');assert.equal(document.querySelector('.video-stage').style.getPropertyValue('--video-ratio'),String(16/9));assert.equal(video.currentTime,42);assert.equal(video.getAttribute('src'),src);
+    assert.equal(localStorage.getItem('misty_rain_picture_mode'),'cover');
+    controls.querySelector('[aria-label="切换画面模式"]').click();await nextTick();assert.equal(video.style.transform,'scale(1.25)');assert.equal(video.currentTime,42);assert.equal(video.getAttribute('src'),src);
+    controls.querySelector('[aria-label="切换画面模式"]').click();await nextTick();assert.equal(video.style.transform,'none');assert.equal(video.style.objectFit,'contain');
+    controls.querySelector('button[aria-label="播放偏好"]').click();await nextTick();assert.equal(menu.getAttribute('aria-label'),'播放偏好');assert.equal(menu.querySelector('.settings-body > div:first-child').style.display,'none');
+    document.querySelector('[aria-label="跳过片头片尾"]').click();await flush();assert.equal(document.querySelector('[aria-label="片头时长（秒）"]').value,'30');
+    assert.ok(document.querySelector('.watch-details .episode-source-panel'));assert.equal(document.querySelector('.rotated-player'),null);
+  }finally{app.unmount();localStorage.removeItem('misty_rain_picture_fit');localStorage.removeItem('misty_rain_picture_mode')}
 });
 
 
@@ -513,4 +500,17 @@ test('fullscreen moves the same episode panel and restores its compact view when
     document.querySelector('[aria-label="选集与片源"]').click();await flush();assert.notEqual(document.querySelector('.settings-menu').style.display,'none');
     await document.exitFullscreen();await flush();assert.equal(document.querySelector('.watch-details .episode-source-panel'),panel);assert.ok(panel.querySelector('.view-compact'));assert.equal(panel.querySelectorAll('[aria-selected="true"]').length,1);
   }finally{app.unmount();document.exitFullscreen=original;window.HTMLElement.prototype.requestFullscreen=originalRequest;localStorage.removeItem('misty_rain_episode_view');}
+});
+
+test('iOS inline zoom keeps captions in the visible viewport and hands them back in native fullscreen',async t=>{
+ const descriptor=Object.getOwnPropertyDescriptor(navigator,'userAgent');Object.defineProperty(navigator,'userAgent',{configurable:true,value:'iPhone Safari'});
+ localStorage.removeItem('misty_rain_picture_mode');localStorage.removeItem('misty_rain_picture_fit');mockApi(t);
+ const app=mount(Player,{isOpen:true,media,username:'ios-crop'});
+ try{
+  await flush();const video=document.querySelector('video');assert.equal(video.classList.contains('player-captions-active'),false);
+  document.querySelector('[aria-label="切换画面模式"]').click();await nextTick();document.querySelector('[aria-label="切换画面模式"]').click();await flush();
+  assert.equal(video.style.transform,'scale(1.25)');assert.equal(video.classList.contains('player-captions-active'),true);
+  video.dispatchEvent(new window.Event('webkitbeginfullscreen'));await flush();assert.equal(video.classList.contains('player-captions-active'),false);
+  video.dispatchEvent(new window.Event('webkitendfullscreen'));await flush();assert.equal(video.classList.contains('player-captions-active'),true);
+ }finally{app.unmount();localStorage.removeItem('misty_rain_picture_mode');if(descriptor)Object.defineProperty(navigator,'userAgent',descriptor);else delete navigator.userAgent;}
 });
