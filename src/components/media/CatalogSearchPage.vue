@@ -7,18 +7,18 @@ import { catalogSortOptions, catalogSortDescription, sortCatalogItems, type Cata
 const sort = ref<CatalogSort>('recommended');
 const props = defineProps<{ query: string; active: boolean; libraryCatalogIds: string[] }>();
 const emit = defineEmits<{ (e: 'select', item: DiscoveryItem): void; (e: 'search-resources', query: string): void; (e: 'back'): void }>();
-const items = ref<DiscoveryItem[]>([]), loading = ref(false), error = ref('');
+const items = ref<DiscoveryItem[]>([]), loading = ref(false), error = ref(''), partial = ref(false);
 const visibleItems = computed(() => sortCatalogItems(items.value, sort.value));
 const categories = { movie: '电影', tv: '电视剧', anime: '动漫', variety: '综艺' };
 let controller: AbortController | undefined, sequence = 0, loadedQuery = '';
 const search = async () => {
   controller?.abort(); const seq = ++sequence;
   if (!props.query) return;
-  controller = new AbortController(); loading.value = true; error.value = ''; items.value = [];
+  controller = new AbortController(); loading.value = true; error.value = ''; partial.value = false; items.value = [];
   try {
     const result = await searchCatalog(props.query, controller.signal);
     if (seq !== sequence) return;
-    items.value = result; loadedQuery = props.query;
+    items.value = result.items; partial.value = result.partial; loadedQuery = result.partial ? '' : props.query;
   } catch { if (seq === sequence) error.value = '影片信息暂时无法加载'; }
   finally { if (seq === sequence) loading.value = false; }
 };
@@ -31,6 +31,7 @@ onBeforeUnmount(() => { controller?.abort(); sequence++; });
 <template>
   <section class="catalog-search" aria-label="影片搜索结果">
     <header class="catalog-heading"><button type="button" class="back" @click="emit('back')"><ArrowLeft aria-hidden="true" />返回</button><h1>“{{ query }}”</h1><span v-if="!loading && items.length">{{ items.length }} 部影片</span><label v-if="items.length" class="catalog-sort"><select v-model="sort" aria-label="影片排序" :title="catalogSortDescription[sort]"><option v-for="option in catalogSortOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label></header>
+    <p v-if="!loading && partial" class="catalog-notice" role="status">豆瓣暂时返回了部分结果<button type="button" @click="search">重试</button></p>
     <div v-if="loading" class="catalog-grid" role="status" aria-label="正在搜索影片"><div v-for="n in 6" :key="n" class="skeleton"></div></div>
     <div v-else-if="items.length" class="catalog-grid">
       <button v-for="item in visibleItems" :key="item.id" class="catalog-card" type="button" :aria-label="`${libraryCatalogIds.includes(item.id) ? '播放' : '查找片源'}：${item.title}（${item.year || '年份未知'}）`" @click="emit('select', item)">
@@ -44,6 +45,8 @@ onBeforeUnmount(() => { controller?.abort(); sequence++; });
   </section>
 </template>
 <style scoped>
+.catalog-notice { display: flex; align-items: center; gap: 12px; color: var(--text-tertiary); font-size: .8rem; margin: 0 0 20px; }
+.catalog-notice button { border: 0; background: transparent; color: var(--liquid-accent); min-height: 36px; padding: 0 8px; }
 .catalog-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin-bottom: 24px; }
 .catalog-sort { margin-left: auto; }
 .catalog-sort select { min-height: 40px; padding: 0 12px; border: 1px solid var(--divider); border-radius: 8px; color: var(--text-secondary); background: var(--surface-2); font-size: .8rem; }

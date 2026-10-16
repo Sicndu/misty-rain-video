@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DISCOVERY_FEEDS, fetchDiscoveryFeed, isDiscoveryImageUrl, ratingCount } from './discoverySources.js';
-import { resourceTitleRelevance } from './searchTitle.js';
+import { catalogTitleRelevance } from './catalogTitle.js';
 
 const TTL = 6 * 60 * 60_000;
 const RETRY_DELAY = 15 * 60_000;
@@ -106,8 +106,8 @@ export class DiscoveryService {
   }
 
   matchingCatalogItems(query) {
-    return Object.values(this.snapshots).flatMap(snapshot => snapshot.items)
-      .filter(item => item.provider === 'douban' && resourceTitleRelevance(query, item.title) > 0);
+    return [...this.catalogItems.values(), ...Object.values(this.snapshots).flatMap(snapshot => snapshot.items)]
+      .filter(item => item.provider === 'douban' && catalogTitleRelevance(query, item) > 0);
   }
 
   async poster(id) {

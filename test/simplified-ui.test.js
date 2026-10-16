@@ -514,3 +514,13 @@ test('iOS inline zoom keeps captions in the visible viewport and hands them back
   video.dispatchEvent(new window.Event('webkitendfullscreen'));await flush();assert.equal(video.classList.contains('player-captions-active'),true);
  }finally{app.unmount();localStorage.removeItem('misty_rain_picture_mode');if(descriptor)Object.defineProperty(navigator,'userAgent',descriptor);else delete navigator.userAgent;}
 });
+
+test('partial catalog displays an honest notice and refreshes when returning; complete results clear it', async t => {
+ let calls=0;t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({code:0,data:{items:[discovered],partial:calls===1}})});
+ const props=reactive({query:'部分片名',active:true,libraryCatalogIds:[]});const app=mount(Catalog,props);
+ try {
+  await flush();assert.match(document.querySelector('.catalog-notice').textContent,/部分结果/);assert.ok(document.querySelector('.catalog-card'));
+  props.active=false;await flush();props.active=true;await flush();
+  assert.equal(calls,2);assert.equal(document.querySelector('.catalog-notice'),null);
+ }finally{app.unmount();}
+});

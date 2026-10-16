@@ -169,3 +169,13 @@ test('发现数据和海报均要求登录，直接播放失败也记住已取�
   const request = Object.assign(Readable.from([Buffer.from(JSON.stringify({ shareUrl: 'https://pan.quark.cn/s/cancelled' }))]), { method: 'POST', url: '/api/player/sessions', headers: { host: 'localhost' } });
   await handleApiRequest(request, response(), context); assert.deepEqual(removed, ['https://pan.quark.cn/s/cancelled']);
 });
+
+test('catalog matching includes registered titles and aliases, not only current charts',t=>{
+ const service=new DiscoveryService({dataDir:temp(t),posterService:{}});t.after(()=>service.stop());
+ service.registerCatalogItems([{...record(),title:'沙丘',aliases:['Dune']},
+  {...record('douban-124','tv'),title:'闹鬼酒店 第一季',aliases:['Haunted Hotel']}]);
+ assert.deepEqual(service.matchingCatalogItems('Dune').map(item=>item.id),['douban-123']);
+ assert.deepEqual(service.matchingCatalogItems('酒店').map(item=>item.id),['douban-124']);
+ assert.deepEqual(service.matchingCatalogItems('Hotel Haunted').map(item=>item.id),['douban-124']);
+ assert.equal(service.matchingCatalogItems('无关电影').length,0);
+});
