@@ -340,6 +340,19 @@ test('captions arriving during native fullscreen start automatically, while a na
   } finally { app.unmount(); }
 });
 
+test('a temporary hidden state in native fullscreen does not become a persisted off preference', async () => {
+ const video=document.createElement('video');video.textTracks.push({kind:'subtitles',label:'中文',language:'zh',mode:'disabled'});
+ const props=reactive({video,username:'native-handoff-fixture',nativeFullscreen:true});const app=mount(Subtitles,props);
+ try{await flush();video.textTracks[0].mode='hidden';video.textTracks.dispatchEvent(new window.Event('change'));await nextTick();assert.equal(video.textTracks[0].mode,'hidden');props.nativeFullscreen=false;await nextTick();assert.equal(video.textTracks[0].mode,'showing');assert.notEqual(localStorage.getItem('misty_rain_subtitles:native-handoff-fixture'),'off');}finally{app.unmount()}
+});
+
+test('native selection of an equivalent filtered track preserves its language instead of turning all captions off', async () => {
+ const video=document.createElement('video');video.textTracks.push({kind:'subtitles',label:'中文',language:'zh',mode:'disabled'});
+ const hls={subtitleTracks:[{name:'中文',lang:'zh'}],subtitleTrack:-1,subtitleDisplay:false,constructor:{Events:{SUBTITLE_TRACKS_UPDATED:'updated',SUBTITLE_TRACK_SWITCH:'switch',SUBTITLE_TRACKS_CLEARED:'cleared'}},on(){},off(){}};
+ const app=mount(Subtitles,{video,hls,username:'native-equivalent-fixture',nativeFullscreen:true});
+ try{await flush();hls.subtitleDisplay=false;hls.subtitleTrack=-1;video.textTracks[0].mode='showing';video.textTracks.dispatchEvent(new window.Event('change'));await nextTick();assert.notEqual(localStorage.getItem('misty_rain_subtitles:native-equivalent-fixture'),'off');assert.equal(hls.subtitleDisplay,true);}finally{app.unmount()}
+});
+
 test('searching new content updates the save title; replacing an existing source retains its identity', async t => {
   mockApi(t);
   let transfer;

@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type Hls from 'hls.js';
 import { Captions, ChevronDown } from '@lucide/vue';
-import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleLanguageKey, centerSubtitleCue, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
+import { activeSubtitleTrack, selectSubtitleTrack, setSubtitleDefaults, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleLanguageKey, managedSubtitleTracks, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
 const props = defineProps<{ video: HTMLVideoElement; hls?: Hls | null; compact?: boolean; notice?: string; username?: string; nativeFullscreen?: boolean; loading?: boolean; readError?: string }>();
 const emit = defineEmits<{ (event: 'retry-embedded'): void }>();
 const options = ref<SubtitleTrackOption[]>([]);
 const selected = ref('off');
+const automaticOption = computed(() => options.value.find(option => /^(zh|chi|zho)/i.test(option.language)) || options.value[0]);
+const readyTracks = () => Array.from(props.video.textTracks).filter(track => ['subtitles','captions'].includes(track.kind) && managedSubtitleTracks.get(track)?.ready !== false && managedSubtitleTracks.get(track)?.active !== false);
 const error = ref('');
 const preferenceKey = subtitlePreferenceKey(props.username);
 let preference = 'auto';
@@ -15,46 +17,39 @@ let release = () => {};
 let applying = false;
 let generation = 0;
 let lastActive = 'off';
-const positionCues = () => {
-  for (const track of Array.from(props.video.textTracks)) {
-    if (!['subtitles', 'captions'].includes(track.kind) || track.mode !== 'showing') continue;
-    for (const item of Array.from(track.activeCues || [])) {
-      if (!('position' in item)) continue;
-      const cue = item as VTTCue;
-      centerSubtitleCue(cue);
-    }
-
-  }
-};
-watch(() => props.nativeFullscreen, positionCues);
 const rememberNativeChoice = () => {
   const id = activeSubtitleTrack(props.video, props.hls);
   selected.value = id;
   if (!options.value.length) return;
-  preference = subtitlePreference(options.value.find(option => option.id === id));
+  const native = id.startsWith('native:') ? props.video.textTracks[Number(id.slice(7))] : undefined;
+  const option = options.value.find(option => option.id === id) || (native ? options.value.find(option => subtitleLanguageKey(option.language) === subtitleLanguageKey(native.language)) : undefined);
+  if (id !== 'off' && !option) return;
+  preference = subtitlePreference(option);
   try { localStorage.setItem(preferenceKey, preference); } catch { /* Native playback remains usable. */ }
 };
 const sync = () => {
   if (applying) return;
   try { preference = localStorage.getItem(preferenceKey) || 'auto'; } catch { /* Keep this session's preference. */ }
   options.value = subtitleTrackOptions(props.video, props.hls);
-  const automatic = options.value.find(option => /^(zh|chi|zho)/i.test(option.language)) || options.value[0];
+  const automatic = automaticOption.value;
   const preferred = options.value.find(option => subtitlePreference(option) === preference)
     || (preference.includes(':language:') ? options.value.find(option => subtitleLanguageKey(option.language) === subtitleLanguageKey(preference.split(':language:')[1])) : undefined);
   const desired = preference === 'auto' ? automatic?.id : preference === 'off' ? 'off' : preferred?.id;
-  if (desired && desired !== activeSubtitleTrack(props.video, props.hls)) {
+  const showing = Array.from(props.video.textTracks).filter(track => ['subtitles','captions'].includes(track.kind) && track.mode === 'showing');
+  if (desired && (desired !== activeSubtitleTrack(props.video, props.hls) || showing.length > 1)) {
     applying = true;
     selectSubtitleTrack(props.video, props.hls, desired);
     applying = false;
   }
   lastActive = activeSubtitleTrack(props.video, props.hls);
+  setSubtitleDefaults(props.video, lastActive);
   selected.value = preference === 'auto' ? 'auto' : lastActive;
-  positionCues();
 };
 watch(() => props.nativeFullscreen, (fullscreen, wasFullscreen) => {
   if (wasFullscreen && !fullscreen) {
     options.value = subtitleTrackOptions(props.video, props.hls);
-    rememberNativeChoice();
+    // Hidden or temporarily missing tracks during handoff do not mean off.
+    if (activeSubtitleTrack(props.video, props.hls) !== 'off' || options.value.length && readyTracks().every(track => track.mode === 'disabled')) rememberNativeChoice();
   }
   sync();
 });
@@ -82,13 +77,11 @@ watch([() => props.video, () => props.hls] as const, async ([video, hls]) => {
   const failed = () => { error.value = '字幕加载失败，可重试或选择其他字幕；影片仍可继续播放。'; };
   const loaded = () => { error.value = ''; sync(); };
   const tracks = Array.from(video.querySelectorAll('track'));
-  const textTracks = new Set<TextTrack>();
-  const bindCues = () => { for (const track of Array.from(video.textTracks)) if (!textTracks.has(track)) { track.addEventListener?.('cuechange', positionCues); textTracks.add(track); } };
-  bindCues();
   const modeChanged = () => {
     if (applying) return;
     const current = activeSubtitleTrack(video, hls);
     const available = subtitleTrackOptions(video, hls);
+    if (props.nativeFullscreen && current === 'off' && readyTracks().some(track => track.mode === 'hidden')) return;
     // A retired track or a temporary hidden track is not a native picker choice.
     if (props.nativeFullscreen && current !== lastActive
       && (available.some(item => item.id === current) || available.some(item => item.id === lastActive))) {
@@ -99,7 +92,6 @@ watch([() => props.video, () => props.hls] as const, async ([video, hls]) => {
   video.textTracks.addEventListener('change', modeChanged);
   const events = ['addtrack', 'removetrack'];
   events.forEach(event => video.textTracks.addEventListener(event, sync));
-  video.textTracks.addEventListener('addtrack', bindCues);
   video.addEventListener('loadedmetadata', sync);
   video.addEventListener('subtitletracksupdated', sync);
   tracks.forEach(track => { track.addEventListener('load', loaded); track.addEventListener('error', failed); });
@@ -109,8 +101,6 @@ watch([() => props.video, () => props.hls] as const, async ([video, hls]) => {
   release = () => {
     video.textTracks.removeEventListener('change', modeChanged);
     events.forEach(event => video.textTracks.removeEventListener(event, sync));
-    video.textTracks.removeEventListener('addtrack', bindCues);
-    textTracks.forEach(track => track.removeEventListener?.('cuechange', positionCues));
     video.removeEventListener('loadedmetadata', sync);
     video.removeEventListener('subtitletracksupdated', sync);
     tracks.forEach(track => { track.removeEventListener('load', loaded); track.removeEventListener('error', failed); });
@@ -122,7 +112,7 @@ onBeforeUnmount(() => { generation += 1; release(); });
 <template>
   <div class="subtitle-controls" :class="{ compact }">
     <div class="subtitle-picker"><Captions class="captions-icon" aria-hidden="true" /><select aria-label="选择影片字幕" :value="selected" @change="choose">
-      <option value="auto">{{ loading ? '正在读取字幕…' : options.length ? '字幕 · 自动' : '字幕 · 暂无可用轨道' }}</option>
+      <option value="auto">{{ loading ? '正在读取字幕…' : options.length ? `自动 · ${automaticOption?.label || '字幕'}` : '字幕 · 暂无可用轨道' }}</option>
       <option value="off">字幕关闭</option>
       <option v-for="option in options" :key="option.id" :value="option.id">{{ option.label }}</option>
     </select><ChevronDown aria-hidden="true" /></div>

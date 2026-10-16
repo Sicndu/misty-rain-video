@@ -4,7 +4,7 @@ import test from 'node:test';
 import { transform } from 'esbuild';
 
 const { code } = await transform(fs.readFileSync('src/services/subtitleTracks.ts', 'utf8'), { loader: 'ts', format: 'esm' });
-const { subtitleTrackOptions, selectSubtitleTrack, activeSubtitleTrack, subtitlePreference } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const { subtitleTrackOptions, selectSubtitleTrack, activeSubtitleTrack, subtitlePreference, managedSubtitleTracks } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 const videoFixture = () => ({ textTracks: [
   { kind: 'subtitles', label: '中文', language: 'zh', mode: 'showing' },
   { kind: 'captions', label: 'English', language: 'en', mode: 'disabled' },
@@ -36,4 +36,11 @@ test('HLS字幕使用流媒体选择接口，并与文件字幕互斥', () => {
   assert.equal(hls.subtitleTrack, -1);
   assert.equal(video.textTracks[1].mode, 'showing');
   assert.notEqual(subtitlePreference({ origin: 'hls', language: 'zh' }), subtitlePreference({ origin: 'sidecar', language: 'zh' }));
+});
+
+test('Safari selection marks exactly one HTML default track and leaves a loading track alone', () => {
+ const video=videoFixture();const elements=video.textTracks.slice(0,2).map(track=>({track,dataset:{subtitleOrigin:'sidecar'},default:false}));video.querySelectorAll=()=>elements;
+ selectSubtitleTrack(video,null,'native:1');assert.equal(elements[1].default,true);assert.equal(elements[0].default,false);
+ const loading={kind:'subtitles',label:'加载中',language:'zh',mode:'hidden'};video.textTracks.push(loading);managedSubtitleTracks.set(loading,{active:true,ready:false,origin:'embedded'});
+ selectSubtitleTrack(video,null,'off');assert.equal(elements[1].default,false);assert.equal(loading.mode,'hidden');assert.ok(!subtitleTrackOptions(video).some(o=>o.label==='加载中'));
 });
