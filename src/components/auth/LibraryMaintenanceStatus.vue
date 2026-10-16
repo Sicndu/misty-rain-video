@@ -9,6 +9,8 @@ interface MaintenanceItem {
   status: string;
   lastAction: string;
   lastActionAt: string;
+  checkedAt?: string;
+  nextCheckAt?: number;
 }
 interface MaintenanceStatus {
   enabled: boolean;
@@ -36,7 +38,7 @@ const refresh = async () => {
     if (!controller.signal.aborted) error.value = '暂时无法读取自动追更状态';
   } finally { loading.value = false; }
 };
-const timeLabel = (value: string) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '';
+const timeLabel = (value: string | number) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '';
 onMounted(() => {
   void refresh();
   timer = setInterval(() => { if (!document.hidden) void refresh(); }, 60_000);
@@ -63,6 +65,8 @@ onUnmounted(() => { clearInterval(timer); controller.abort(); });
           <li v-for="item in status.items" :key="item.quarkFid">
             <strong>{{ item.title }}</strong>
             <p>{{ item.message }}</p>
+            <small v-if="item.checkedAt">本片检查：{{ timeLabel(item.checkedAt) }}</small>
+            <small v-if="item.status === 'retrying' && item.nextCheckAt">下次自动复查：{{ timeLabel(item.nextCheckAt) }}</small>
             <small v-if="item.lastActionAt">{{ timeLabel(item.lastActionAt) }} · {{ item.lastAction }}</small>
           </li>
         </ul>

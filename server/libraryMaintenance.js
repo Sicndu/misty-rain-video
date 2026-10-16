@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import { shareSelectionKey } from './shareSelection.js';
 
 const MINUTE = 60_000;
+const FAILURE_POLICY_VERSION = 1;
+const UNAVAILABLE_THRESHOLD = 3;
 const sourceFingerprint = card => crypto.createHash('sha256')
   .update(JSON.stringify([card.quarkShareUrl || '', card.quarkPasscode || '', shareSelectionKey(card.quarkSelectionFids)])).digest('hex');
 const unavailableCodes = new Set(['QUARK_SHARE_UNAVAILABLE', 'QUARK_SHARE_EMPTY', 'LIBRARY_SOURCE_MISSING']);
@@ -58,6 +60,7 @@ export class LibraryMaintenance {
       items: Object.entries(state.items || {}).filter(([fid]) => fids.has(fid)).map(([quarkFid, item]) => ({
         quarkFid, title: data.libraryViewRepository?.titleFor(quarkFid) || item.title, checkedAt: item.checkedAt, nextCheckAt: item.nextCheckAt,
         status: item.status, message: item.message, addedCount: item.addedCount || 0,
+        code: item.code || '', unavailableCount: item.unavailableCount || 0,
         lastActionAt: item.lastActionAt || '', lastAction: item.lastAction || ''
       }))
     };
@@ -87,7 +90,9 @@ export class LibraryMaintenance {
           for (const fid of Object.keys(state.items)) if (!fids.has(fid)) delete state.items[fid];
           const due = cards.filter(card => {
             const prior = state.items[card.quarkFid];
-            return !prior || prior.source !== sourceFingerprint(card) || prior.nextCheckAt <= this.now();
+            return !prior || prior.source !== sourceFingerprint(card)
+              || (prior.status === 'retrying' && prior.failurePolicyVersion !== FAILURE_POLICY_VERSION)
+              || prior.nextCheckAt <= this.now();
           }).sort((a, b) => (state.items[a.quarkFid]?.nextCheckAt || 0) - (state.items[b.quarkFid]?.nextCheckAt || 0)).slice(0, 20);
           let searches = 0;
           for (const card of due) {
@@ -95,13 +100,23 @@ export class LibraryMaintenance {
             const prior = state.items[card.quarkFid];
             const source = sourceFingerprint(card);
             const entry = prior?.source === source ? { ...prior } : { source, unavailableCount: 0, failures: 0 };
+            // Recheck legacy HTTP failures once after this classification fix;
+            // do not inherit their six-hour backoff or unverified failure count.
+            if (entry.failurePolicyVersion !== FAILURE_POLICY_VERSION) {
+              entry.failurePolicyVersion = FAILURE_POLICY_VERSION;
+              entry.unavailableCount = 0;
+              entry.failures = 0;
+            }
             entry.title = card.title;
             entry.checkedAt = new Date(this.now()).toISOString();
             entry.addedCount = 0;
+            let confirmedUnavailable = false;
             try {
               const [status] = await this.context.quarkGateway.checkLibraryUpdates([card], user, { force: true });
               if (status.updateCheckAvailable) {
+                entry.code = '';
                 entry.unavailableCount = 0;
+                entry.candidateCursor = 0;
                 entry.failures = 0;
                 entry.status = 'current';
                 entry.message = '已检查当前来源，暂无待补剧集';
@@ -117,18 +132,25 @@ export class LibraryMaintenance {
               } else {
                 entry.failures = (entry.failures || 0) + 1;
                 const unavailable = unavailableCodes.has(status.code);
+                confirmedUnavailable = unavailable;
+                entry.code = status.code || '';
                 entry.unavailableCount = unavailable ? (entry.unavailableCount || 0) + 1 : 0;
                 entry.status = 'retrying';
-                entry.message = unavailable ? '原来源暂不可用，保留已有剧集并等待复查' : '暂时无法检查来源，稍后重试';
+                entry.message = unavailable
+                  ? `原来源不可用，已确认 ${Math.min(entry.unavailableCount, UNAVAILABLE_THRESHOLD)}/${UNAVAILABLE_THRESHOLD} 次；复查后自动验证新来源，保留已有剧集`
+                  : '暂时无法检查来源，稍后重试';
                 if (unavailable && card.quarkSelectionFids !== undefined) {
                   entry.message = '所选来源暂不可用，保留你的选集范围等待恢复；不会自动改为保存全部';
                 }
-                if (entry.unavailableCount >= 3 && card.quarkSelectionFids === undefined && searches < 2 && !this.stopped) {
+                if (entry.unavailableCount >= UNAVAILABLE_THRESHOLD && card.quarkSelectionFids === undefined && searches < 2 && !this.stopped) {
                   searches += 1;
                   const results = await this.context.resourceSearch.search(card.title, { force: true, priority: 'background' });
-                  const candidates = [...new Map((results.merged_by_type?.quark || [])
+                  const candidatePool = [...new Map((results.merged_by_type?.quark || [])
                     .filter(item => /^https:\/\/pan\.quark\.cn\/s\/[a-zA-Z0-9]+$/.test(item.url) && item.url !== card.quarkShareUrl)
-                    .map(item => [item.url, item])).values()].slice(0, 5);
+                    .map(item => [item.url, item])).values()];
+                  const cursor = (entry.candidateCursor || 0) % Math.max(1, candidatePool.length);
+                  const candidates = [...candidatePool.slice(cursor), ...candidatePool.slice(0, cursor)].slice(0, 5);
+                  entry.candidateCursor = cursor;
                   let updated = false;
                   for (const candidate of candidates) {
                     if (this.stopped) break;
@@ -140,12 +162,15 @@ export class LibraryMaintenance {
                     } catch (error) {
                       if (error?.code === 'QUARK_AUTH_REQUIRED' || error?.code === 'LIBRARY_MUTATION_IN_PROGRESS') throw error;
                     }
+                    entry.candidateCursor = (entry.candidateCursor + 1) % candidatePool.length;
                     if (updated) break;
                   }
                   entry.message = '尚未找到可确认的同剧来源，将继续重试；已有剧集保留';
                   if (updated) {
                     entry.source = sourceFingerprint(updated);
+                    entry.code = '';
                     entry.unavailableCount = 0;
+                    entry.candidateCursor = 0;
                     entry.failures = 0;
                     entry.status = 'relinked';
                     entry.message = '已验证并关联新的追更来源，保留原目录和剧集';
@@ -161,15 +186,22 @@ export class LibraryMaintenance {
             } catch (error) {
               if (error?.code === 'QUARK_AUTH_REQUIRED') throw error;
               entry.failures = (entry.failures || 0) + 1;
-              entry.unavailableCount = 0;
+              entry.code = error?.code || '';
+              if (!confirmedUnavailable) entry.unavailableCount = 0;
               entry.status = 'retrying';
-              entry.message = messageForError(error);
+              entry.message = confirmedUnavailable && entry.unavailableCount >= UNAVAILABLE_THRESHOLD
+                ? '原来源已确认不可用，新来源检查暂未完成，将自动重试；已有剧集保留'
+                : messageForError(error);
             }
             if (entry.addedCount || entry.status === 'relinked') {
               entry.lastActionAt = entry.checkedAt;
               entry.lastAction = entry.message;
             }
-            entry.nextCheckAt = this.now() + Math.min(6 * 60 * MINUTE, this.intervalMs * 2 ** Math.min(4, Math.max(0, (entry.failures || 0) - 3)));
+            // A confirmed dead share needs continued candidate discovery;
+            // temporary source-check failures retain exponential backoff.
+            entry.nextCheckAt = this.now() + (entry.unavailableCount >= UNAVAILABLE_THRESHOLD
+              ? this.intervalMs
+              : Math.min(6 * 60 * MINUTE, this.intervalMs * 2 ** Math.min(4, Math.max(0, (entry.failures || 0) - 3))));
             state.items[card.quarkFid] = entry;
             data.maintenanceRepository.write(state);
           }

@@ -146,6 +146,73 @@ test('失败退避、来源人工变更重置失败计数；重叠运行和停�
   assert.equal(lists, 1);
 });
 
+test('升级错误分类后旧异常在首次巡检复查，不继承六小时退避，也不把旧失败当作确认失效', async t => {
+  const f = fixture(t);
+  await f.service.runOnce();
+  f.calls.length = 0;
+  const state = f.data.get('one').maintenanceRepository.read();
+  const legacy = state.items.show;
+  legacy.status = 'retrying';
+  legacy.failures = 12;
+  legacy.unavailableCount = 2;
+  legacy.nextCheckAt = Date.parse(legacy.checkedAt) + 6 * 60 * 60_000;
+  delete legacy.failurePolicyVersion;
+  f.data.get('one').maintenanceRepository.write(state);
+  f.setStatus({ updateCheckAvailable: false, code: 'QUARK_SHARE_UNAVAILABLE' });
+  await f.service.runOnce();
+  const updated = f.data.get('one').maintenanceRepository.read().items.show;
+  assert.equal(updated.unavailableCount, 1);
+  assert.equal(updated.failures, 1);
+  assert.equal(updated.nextCheckAt - Date.parse(updated.checkedAt), 30 * 60_000);
+  assert.match(f.service.status(f.users[0]).items[0].message, /1\/3/);
+  assert.equal(f.service.status(f.users[0]).items[0].code, 'QUARK_SHARE_UNAVAILABLE');
+  assert.equal(f.calls.length, 0);
+  await f.service.runOnce();
+  assert.equal(f.data.get('one').maintenanceRepository.read().items.show.unavailableCount, 1);
+});
+
+test('每轮验证至多五条但继续后续候选，第六条可关联；已确认失效后不延长候选发现间隔', async t => {
+  const f = fixture(t);
+  f.setStatus({ updateCheckAvailable: false, code: 'QUARK_SHARE_UNAVAILABLE' });
+  const candidates = Array.from({ length: 6 }, (_, index) => ({ url: `https://pan.quark.cn/s/candidate${index + 1}` }));
+  const checked = [];
+  f.context.resourceSearch.search = async () => ({ merged_by_type: { quark: candidates } });
+  f.context.quarkGateway.relinkLibrarySource = async (item, candidate, _user, options) => {
+    assert.equal(options.isCurrent(item), true);
+    checked.push(candidate.url);
+    return candidate.url === candidates[5].url && options.commit(item, { quarkShareUrl: candidate.url, quarkPasscode: '' });
+  };
+  for (let i = 0; i < 3; i += 1) { await f.service.runOnce(); f.tick(); }
+  assert.deepEqual(checked, candidates.slice(0, 5).map(item => item.url));
+  const state = f.data.get('one').maintenanceRepository.read().items.show;
+  assert.equal(state.nextCheckAt - Date.parse(state.checkedAt), 30 * 60_000);
+  await f.service.runOnce();
+  assert.deepEqual(checked, candidates.map(item => item.url));
+  assert.equal(f.data.get('one').mediaRepository.all()[0].quarkShareUrl, candidates[5].url);
+  assert.equal(f.service.status(f.users[0]).items[0].status, 'relinked');
+  assert.equal(f.service.status(f.users[0]).items[0].unavailableCount, 0);
+});
+
+test('候选检索失败不抹掉原来源已确认失效的记录，下轮继续检索而非重数三次', async t => {
+  const f = fixture(t);
+  f.setStatus({ updateCheckAvailable: false, code: 'QUARK_SHARE_UNAVAILABLE' });
+  let searches = 0;
+  const normalSearch = f.context.resourceSearch.search;
+  f.context.resourceSearch.search = async (...args) => {
+    searches += 1;
+    if (searches === 1) throw Object.assign(new Error('搜索超时'), { code: 'RESOURCE_SEARCH_TIMEOUT' });
+    return normalSearch(...args);
+  };
+  for (let i = 0; i < 3; i += 1) { await f.service.runOnce(); f.tick(); }
+  const failed = f.data.get('one').maintenanceRepository.read().items.show;
+  assert.equal(failed.unavailableCount, 3);
+  assert.equal(failed.nextCheckAt - Date.parse(failed.checkedAt), 30 * 60_000);
+  assert.match(f.service.status(f.users[0]).items[0].message, /原来源已确认不可用/);
+  await f.service.runOnce();
+  assert.equal(searches, 2);
+  assert.equal(f.service.status(f.users[0]).items[0].status, 'relinked');
+});
+
 test('精确来源比较与交换不会覆盖手动换源、其他同名 FID，或复活已删除卡片', t => {
   const f = fixture(t);
   const repo = f.data.get('one').mediaRepository;

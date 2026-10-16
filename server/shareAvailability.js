@@ -10,7 +10,7 @@ const MAX_ENTRIES = 2_000;
 export const shareFailureCode = message => {
   const text = String(message || '');
   if (/提取码|访问码|密码|passcode|password/i.test(text)) return 'QUARK_SHARE_PASSCODE_REQUIRED';
-  if (/取消.*分享|分享.*(?:取消|失效|过期|删除|不存在)|不存在.*分享|share.*(?:cancelled|expired|deleted|not found)/i.test(text)) {
+  if (/(?:取消|删除|撤销).*分享|分享.*(?:取消|撤销|失效|过期|删除|不存在)|不存在.*分享|share.*(?:cancelled|expired|deleted|not found)/i.test(text)) {
     return 'QUARK_SHARE_UNAVAILABLE';
   }
   return 'QUARK_SHARE_ACCESS_FAILED';
