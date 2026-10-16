@@ -28,6 +28,7 @@ export class DiscoveryService {
     this.filePath = path.resolve(dataDir, 'discovery-cache.json');
     this.posters = posterService; this.loadFeed = loadFeed; this.now = now; this.ttlMs = ttlMs; this.retryMs = retryMs;
     this.snapshots = {}; this.pending = new Map(); this.imagePending = new Map(); this.imageRetries = new Map();
+    this.catalogItems = new Map();
     this.load = limiter(2); this.loadImage = limiter(3); this.controllers = new Set(); this.stopped = false;
     try {
       const cache = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
@@ -95,12 +96,26 @@ export class DiscoveryService {
     }) };
   }
 
+  registerCatalogItems(items) {
+    for (const item of items) {
+      this.catalogItems.delete(item.id); this.catalogItems.set(item.id, item);
+      if (this.catalogItems.size > 2000) this.catalogItems.delete(this.catalogItems.keys().next().value);
+    }
+  }
+
+  matchingCatalogItems(query) {
+    const normalize = value => value.normalize('NFKC').toLowerCase().replace(/[\s\p{P}]+/gu, '');
+    const keyword = normalize(query); if (!keyword) return [];
+    return Object.values(this.snapshots).flatMap(snapshot => snapshot.items)
+      .filter(item => item.provider === 'douban' && normalize(item.title).includes(keyword));
+  }
+
   async poster(id) {
     if (!/^(douban|bangumi)-\d{1,13}$/.test(id)) throw error('封面不存在', 404);
     const cached = this.posters.catalogPoster(id);
     if (cached) return cached;
     if (this.imagePending.has(id)) return this.imagePending.get(id);
-    const item = Object.values(this.snapshots).flatMap(snapshot => snapshot.items).find(item => item.id === id && item.imageUrl);
+    const item = this.catalogItems.get(id) || Object.values(this.snapshots).flatMap(snapshot => snapshot.items).find(item => item.id === id && item.imageUrl);
     if (!item) throw error('封面不存在', 404);
     if ((this.imageRetries.get(id) || 0) > this.now()) throw error('封面暂时不可用', 503);
     const task = this.loadImage(() => { if (this.stopped) throw error('服务正在重启', 503); return this.posters.resolveCatalogPoster(item); })

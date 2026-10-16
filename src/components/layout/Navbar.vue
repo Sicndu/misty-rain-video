@@ -7,6 +7,7 @@ import BrandMark from '../common/BrandMark.vue';
 import { parseLibraryInput, type LibrarySaveFeedback } from '../../services/libraryFeedback';
 
 const props = defineProps<{
+  query?: string;
   currentCategory: CategoryType;
   currentCategoryName: string;
   user: AppUser;
@@ -24,6 +25,7 @@ const emit = defineEmits<{
 }>();
 
 const searchQuery = ref('');
+watch(() => props.query, value => { searchQuery.value = value || ''; }, { immediate: true });
 const isSearchPanelOpen = ref(false);
 const searchInput = ref<HTMLInputElement | null>(null);
 const searchUnit = ref<HTMLElement | null>(null);
@@ -53,7 +55,6 @@ const handleTriggerSearch = () => {
   const q = searchQuery.value.trim();
   if (!q) return;
   emit('search-media', q);
-  searchQuery.value = '';
   isSearchPanelOpen.value = false;
   searchInput.value?.blur();
 };
@@ -83,11 +84,11 @@ const handleSaveToCard = async () => {
     id: 'custom-' + Date.now(),
     title: '待识别片名',
     category: props.currentCategory,
-    tag: '自定义网盘',
+    tag: '',
     status: '已收录',
     desc: '用户自定义网盘分享资源',
-    poster: 'https://images.unsplash.com/photo-1578836537282-3171d77f8632?w=600&q=80',
-    quarkQuality: '4K 原画',
+    poster: '',
+    quarkQuality: '',
     quarkShareUrl: parsedInput.value.url,
     quarkPasscode: parsedInput.value.passcode
   };
@@ -162,7 +163,7 @@ defineExpose({ focusSearch, scrollToTop });
           :aria-describedby="parsedInput.kind === 'invalid' || saveError ? 'library-input-feedback' : undefined"
           :disabled="busy"
           class="liquid-search-input"
-          placeholder="搜索片名或粘贴分享链接"
+          placeholder="搜索影片、剧集或粘贴分享链接"
           @input="handleInput"
           @focus="handleInput"
           @blur="handleSearchBlur"
@@ -196,12 +197,12 @@ defineExpose({ focusSearch, scrollToTop });
           </div>
           <template v-else>
             <div class="dropdown-meta">
-              <span class="meta-label">片名检索</span>
+              <span class="meta-label">查找影片</span>
               <span class="meta-val">《{{ searchQuery }}》</span>
             </div>
             <div class="dropdown-button-group">
               <button type="submit" class="liquid-btn btn-accent" :disabled="busy">
-                检索网盘资源
+                搜索影片
               </button>
             </div>
           </template>

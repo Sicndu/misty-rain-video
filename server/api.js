@@ -12,6 +12,7 @@ import { ResourceSearchService } from './resourceSearch.js';
 import { ShareAvailability } from './shareAvailability.js';
 import { TvPlaybackClient } from './tvPlaybackClient.js';
 import { DiscoveryService } from './discoveryService.js';
+import { CatalogSearch } from './catalogSearch.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -60,6 +61,7 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
   };
   context.libraryMaintenance = new LibraryMaintenance(context);
   context.discovery = new DiscoveryService({ dataDir, posterService: context.posterService });
+  context.catalogSearch = new CatalogSearch({ discovery: context.discovery });
   return context;
 };
 
@@ -355,6 +357,10 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
+    if (pathname === '/api/catalog/search' && request.method === 'GET') {
+      sendSuccess(response, await context.catalogSearch.search(url.searchParams.get('q')));
+      return true;
+    }
     if (pathname === '/api/discovery' && request.method === 'GET') {
       sendSuccess(response, await context.discovery.get(url.searchParams.get('category') || 'all'));
       return true;
@@ -672,7 +678,11 @@ export const handleApiRequest = async (request, response, context) => {
 
     if ((pathname === '/api/player/sessions' || pathname === '/api/quark/resolve') && request.method === 'POST') {
       const body = await readRequestBody(request);
-      try { sendSuccess(response, await context.quarkGateway.createPlaybackSession(body, user)); }
+      try {
+        const session = await context.quarkGateway.createPlaybackSession(body, user, userData.playbackCache);
+        if (session.cachedOnly && body.shareUrl) context.shareAvailability?.markUnavailable(body.shareUrl);
+        sendSuccess(response, session);
+      }
       catch (error) {
         if (error?.code === 'QUARK_SHARE_UNAVAILABLE' && body.shareUrl) context.shareAvailability?.markUnavailable(body.shareUrl);
         throw error;

@@ -4,6 +4,7 @@ export interface QuarkEpisode {
   fid: string;
   fileName: string;
   episodeNumber: number;
+  seasonNumber?: number;
   episodeTitle: string;
   updatedAt: string;
   size: number;
@@ -75,6 +76,7 @@ export interface QuarkPlaybackSession {
   sessionId: string;
   title: string;
   episodes: QuarkEpisode[];
+  cachedOnly?: boolean;
 }
 
 export interface PreparedPlayback {

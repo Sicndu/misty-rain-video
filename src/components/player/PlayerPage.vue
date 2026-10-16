@@ -7,7 +7,7 @@ import { configureVideoRequest, playbackSourceLabel, selectInitialPlaybackSource
 import SubtitleControls from './SubtitleControls.vue';
 import { PlayerPreferencesService } from '../../services/playerPreferencesService';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { CircleAlert, ListVideo, LoaderCircle, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
+import { CircleAlert, ListVideo, LoaderCircle, Play, RefreshCw, SlidersHorizontal, ChevronLeft } from '@lucide/vue';
 import type { MediaItem, PlaybackHistoryEntry, PlaybackHistoryUpdate } from '../../types/media';
 import {
   QuarkServiceError,
@@ -18,7 +18,7 @@ import {
   type QuarkPlaybackSession
 } from '../../services/quarkStreamService';
 import { useToast } from '../../composables/useToast';
-import { useDialog } from '../../composables/useDialog';
+import { firstPlayableEpisode, nextPlayableEpisode } from '../../services/playbackNavigation';
 import { useVideoFullscreen } from '../../composables/useVideoFullscreen';
 import { useEmbeddedSubtitles } from '../../composables/useEmbeddedSubtitles';
 import { PlaybackHistoryService } from '../../services/playbackHistoryService';
@@ -775,15 +775,7 @@ const handlePause = () => {
   void persistProgress(true);
 };
 
-const nextEpisodeIndex = () => {
-  const episode = currentEpisode.value;
-  if (!episode) return -1;
-  if (episode.episodeNumber > 0) {
-    const numberedIndex = episodes.value.findIndex(item => item.episodeNumber === episode.episodeNumber + 1);
-    if (numberedIndex >= 0) return numberedIndex;
-  }
-  return currentEpisodeIndex.value > 0 ? currentEpisodeIndex.value - 1 : -1;
-};
+const nextEpisodeIndex = () => nextPlayableEpisode(episodes.value, currentEpisodeIndex.value, props.media?.category, session.value?.cachedOnly);
 
 const handleEnded = () => {
   completeCurrentEpisode(false);
@@ -982,7 +974,6 @@ const prepareEpisode = async (index: number, resumeAt = 0) => {
     selectedSourceId.value = initialSource.id;
     phase.value = 'ready';
     announce(`${episode.episodeTitle}已就绪，可用画质 ${result.sources.map(item => item.label).join('、')}`);
-    if (result.transferred) toast.show(`已按需转存《${episode.fileName}》到烟雨影视目录`, '✓', 3200);
     await attachSource(initialSource, resumeAt, true, true);
     if (resumeAt > 3) announce(`已续播${episode.episodeTitle} ${Math.floor(resumeAt / 60)} 分钟处`);
   } catch (error) {
@@ -1078,7 +1069,7 @@ const loadSession = async () => {
     const matchedHistoryIndex = history
       ? result.episodes.findIndex(episode => episode.fid === history.episodeFid)
       : -1;
-    const resumeIndex = Math.max(0, matchedHistoryIndex);
+    const resumeIndex = matchedHistoryIndex >= 0 ? matchedHistoryIndex : firstPlayableEpisode(result.episodes, media.category);
     const resumeAt = history && matchedHistoryIndex >= 0 && !history.completed ? history.position : 0;
     await prepareEpisode(resumeIndex, resumeAt);
   } catch (error) {
@@ -1159,11 +1150,6 @@ const close = () => {
   emit('close');
 };
 
-const dialogRef = ref<HTMLElement | null>(null);
-useDialog(dialogRef, () => props.isOpen, () => {
-  if (nativeFullscreen.value) return;
-  close();
-});
 
 watch(
   [() => props.isOpen, () => props.media?.id],
@@ -1204,20 +1190,16 @@ defineExpose({ retry });
 </script>
 
 <template>
-  <div
-    class="player-backdrop"
-    ref="dialogRef"
-    :class="{ active: isOpen }"
-    role="dialog"
-    aria-modal="true"
+  <main
+    class="player-page"
     :aria-label="media ? `播放《${media.title}》` : '视频播放器'"
-    @click.self="close"
   >
     <section v-if="media" class="player-window">
       <header class="player-header">
+        <button class="back-to-content" type="button" aria-label="返回上一页" @click="close"><ChevronLeft aria-hidden="true" />返回</button>
         <div class="title-block">
           <div class="title-copy">
-            <h2>{{ media.title }}</h2>
+            <h1>{{ media.title }}</h1>
             <p v-if="episodeStatus">{{ episodeStatus }}</p>
           </div>
         </div>
@@ -1226,14 +1208,13 @@ defineExpose({ retry });
           <button class="text-action" type="button" @click="emit('re-search', media)">
             换源
           </button>
-          <button class="icon-button" type="button" aria-label="关闭播放器" @click="close">
-            <X aria-hidden="true" />
-          </button>
+
         </div>
       </header>
 
+      <p v-if="session?.cachedOnly" class="cached-playback-note">原分享已失效，仍可播放已缓存的视频。其他集数可通过“换源”查找。</p>
       <div class="player-layout" :class="{ 'single-column': !episodes.length && !sources.length }">
-        <main class="video-column">
+        <div class="video-column">
           <div class="video-stage" :class="{ 'has-mobile-transport': isMobilePlaybackDevice && !nativeFullscreen && phase === 'ready' && !manualPlayRequired }" :style="{ '--video-ratio': videoAspectRatio }">
             <video
               :key="videoInstanceKey"
@@ -1351,7 +1332,7 @@ defineExpose({ retry });
           />
           </div>
 
-        </main>
+        </div>
         <aside v-if="episodes.length || sources.length" class="player-panel">
           <nav class="player-toolbar" role="tablist" aria-label="播放器面板">
             <button id="episodes-tab" type="button" role="tab" :aria-selected="activePanel === 'episodes'" aria-controls="episode-panel" @click="activePanel = 'episodes'"><ListVideo aria-hidden="true" />{{ movieMode ? '视频' : '选集' }} <small>{{ episodes.length }}</small></button>
@@ -1532,7 +1513,7 @@ defineExpose({ retry });
 
       <p class="sr-status" aria-live="polite">{{ statusMessage }}</p>
     </section>
-  </div>
+  </main>
 </template>
 
 <style scoped>
@@ -1547,15 +1528,17 @@ defineExpose({ retry });
 .playback-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 12px; margin-top: 6px; }
 .playback-tools :deep(.danmaku-controls) { flex: 1 1 100px; }
 .playback-tools :deep(.danmaku-row) { padding-top: 0; }
-.player-backdrop { position: fixed; inset: 0; z-index: 1400; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / .58); opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s; }
-.player-backdrop.active { opacity: 1; visibility: visible; }
-.player-backdrop:not(.active) { display: none; }
-.player-window { display: flex; flex-direction: column; width: min(1240px, 100%); height: min(850px, calc(100dvh - 48px)); min-height: 0; overflow: hidden; border: var(--glass-border); border-radius: 24px; color: var(--text-primary); background: var(--liquid-canvas); box-shadow: var(--glass-shadow-lg); }
+.player-page { position: relative; z-index: 1; width: 100%; min-height: 100dvh; color: var(--text-primary); background: var(--liquid-canvas); }
+.player-window { display: flex; flex-direction: column; width: 100%; height: 100dvh; min-height: 0; overflow: hidden; }
+.back-to-content { display: flex; align-items: center; gap: 4px; min-height: 44px; flex-shrink: 0; padding: 0; border: 0; color: var(--text-secondary); background: transparent; font-size: .85rem; }
+.back-to-content svg { width: 20px; height: 20px; }
+.cached-playback-note { padding: 10px 24px; color: var(--text-secondary); font-size: .8rem; }
 .player-header { display: flex; flex-shrink: 0; min-height: 80px; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 24px; border-bottom: 1px solid var(--divider); background: transparent; }
 .title-block, .header-actions { display: flex; align-items: center; gap: 12px; }
 .title-block, .title-copy { min-width: 0; }
+.title-block { flex: 1; }
 .source-badge { flex: 0 0 auto; padding: 6px 10px; border: var(--glass-border); border-radius: 18px; color: var(--liquid-accent-strong); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner); font-size: .7rem; font-weight: 650; }
-.title-copy h2 { overflow: hidden; color: var(--text-primary); font-size: 1.1rem; font-weight: 720; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.025em; }
+.title-copy h1 { overflow: hidden; color: var(--text-primary); font-size: 1.1rem; font-weight: 720; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.025em; }
 .title-copy p { margin-top: 3px; overflow: hidden; color: var(--text-tertiary); font-size: .75rem; text-overflow: ellipsis; white-space: nowrap; }
 .header-actions { flex-shrink: 0; gap: 8px; }
 .text-action, .icon-button { min-height: 44px; border: 0; color: var(--text-secondary); background: var(--glass-bg); box-shadow: none; }
@@ -1654,11 +1637,9 @@ defineExpose({ retry });
 @keyframes loading-wave { 0%, 100% { opacity: .45; transform: scaleY(.45); } 50% { opacity: 1; transform: scaleY(1); } }
 @media (max-width: 1000px) and (min-width: 821px) { .player-layout { grid-template-columns: minmax(0, 1fr) 255px; } .source-badge { display: none; } .player-toolbar .toolbar-chevron { display: none; } }
 @media (max-width: 820px) {
-  .player-backdrop { padding: 0; place-items: stretch; background: rgb(0 0 0 / .58); }
-  .player-window { width: 100%; height: 100dvh; border: 0; border-radius: 0;  box-shadow: var(--glass-highlight-inner), 0 28px 90px rgb(0 0 0 / .4); }
   .player-header { min-height: calc(72px + var(--safe-area-top)); padding: calc(10px + var(--safe-area-top)) calc(18px + var(--safe-area-right)) 10px calc(18px + var(--safe-area-left)); }
   .source-badge { display: none; }
-  .title-copy h2 { font-size: 1.06rem; }
+  .title-copy h1 { font-size: 1.06rem; }
   .title-copy p { font-size: .71rem; }
   .header-actions { gap: 6px; }
   .text-action { padding: 0 13px; }
@@ -1694,5 +1675,5 @@ defineExpose({ retry });
 .video-element:not(.native-fullscreen)::cue { font-size: clamp(14px, 1.8vw, 24px); }
 .video-element::-webkit-media-controls { color-scheme: dark; }
 
-@media (prefers-reduced-motion: reduce) { .player-backdrop, .loading-wave i, .playback-starting-pill svg, .setting-switch span, .setting-switch::before { transition: none; animation: none; } }
+@media (prefers-reduced-motion: reduce) { .loading-wave i, .playback-starting-pill svg, .setting-switch span, .setting-switch::before { transition: none; animation: none; } }
 </style>

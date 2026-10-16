@@ -922,13 +922,25 @@ export class QuarkGateway {
     }
   }
 
-  async createPlaybackSession({ quarkFid, shareUrl, title, passcode = '' }, user = SYSTEM_USER) {
+  async createPlaybackSession({ quarkFid, shareUrl, title, passcode = '' }, user = SYSTEM_USER, playbackCache = this.playbackCache) {
     const principal = normalizeUser(user);
     if (quarkFid) {
       await this.#assertLibraryAccess(quarkFid, principal);
       return this.#createDrivePlaybackSession({ quarkFid, title }, principal);
     }
-    return this.#createSharePlaybackSession({ shareUrl, title, passcode }, principal);
+    try { return await this.#createSharePlaybackSession({ shareUrl, title, passcode }, principal); }
+    catch (error) {
+      if (error?.code !== 'QUARK_SHARE_UNAVAILABLE') throw error;
+      const { pwdId } = parseShareUrl(shareUrl);
+      const cached = playbackCache?.forShare?.(pwdId) || [];
+      if (!cached.length) throw error;
+      const episodes = cached.map(item => serializeEpisode({ fid: item.episodeFid, file_name: item.fileName, size: item.size, pdir_fid: item.folderFid }));
+      const id = createOpaqueId();
+      this.sessions.set(id, { id, ownerUsername: principal.username, kind: 'cached-share', pwdId, title: title || '已缓存视频', episodes,
+        sources: new Map(), assets: new Map(), assetIndex: new Map(), createdAt: Date.now(), touchedAt: Date.now() });
+      return { sessionId: id, title: title || '已缓存视频', cachedOnly: true,
+        episodes: episodes.map(({ shareFidToken, parentFid, previewUrl, ...episode }) => episode) };
+    }
   }
 
   async probeShare({ shareUrl, passcode = '' }) {
@@ -1081,7 +1093,7 @@ export class QuarkGateway {
     }
 
     const cookie = this.#requireCookie();
-    const cacheKey = session.kind === 'share' ? `${session.pwdId}:${episode.fid}` : '';
+    const cacheKey = session.kind !== 'drive' ? `${session.pwdId}:${episode.fid}` : '';
     let savedFid = session.kind === 'drive' ? episode.fid : (playbackCache?.get(cacheKey)?.savedFid || '');
     let playData = null;
 
@@ -1091,13 +1103,15 @@ export class QuarkGateway {
       } catch (error) {
         if (error.code === 'QUARK_FILE_NOT_FOUND') {
           if (cacheKey) playbackCache?.remove(cacheKey);
-          if (session.kind === 'drive') throw error;
+          if (session.kind !== 'share') throw error;
           savedFid = '';
         } else {
           throw error;
         }
       }
     }
+
+    if (!savedFid && session.kind === 'cached-share') throw new QuarkApiError('这个视频尚未缓存，请换源后继续播放', { code: 'QUARK_SHARE_UNAVAILABLE', statusCode: 410 });
 
     let transferred = false;
     if (!savedFid && session.kind === 'share') {
@@ -1208,6 +1222,9 @@ export class QuarkGateway {
   }
 
   async #episodeSidecars(session, episode, cookie, user, playbackCache) {
+    if (session.kind === 'cached-share') return (playbackCache?.forShare?.(session.pwdId, true) || [])
+      .filter(item => isTextSubtitleFile({ file_name: item.fileName }) && subtitleMatchesVideo(episode.fileName, item.fileName, session.episodes.length === 1))
+      .slice(0, 32).map(item => ({ fid: item.savedFid, fileName: item.fileName, label: item.fileName, origin: 'sidecar', language: subtitleLanguage(item.fileName) }));
     if (!episode.fileName || !episode.parentFid) return [];
     session.subtitleFolders ||= new Map();
     const listFolder = async parentFid => {
@@ -1253,7 +1270,7 @@ export class QuarkGateway {
   validateHistorySession(sessionId, mediaFid, user = SYSTEM_USER) {
     const session = this.#getSession(sessionId, normalizeUser(user));
     if ((session.kind === 'drive' && session.driveFid !== mediaFid)
-      || (session.kind === 'share' && mediaFid)) {
+      || (session.kind !== 'drive' && mediaFid)) {
       throw new QuarkApiError('播放记录与当前影片会话不一致', { code: 'HISTORY_MEDIA_MISMATCH', statusCode: 403 });
     }
   }

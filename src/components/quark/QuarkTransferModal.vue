@@ -240,7 +240,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
       <div v-if="!detailResource && !isAnalyzing && !searchError" class="result-summary" aria-live="polite">
         <span>找到</span>
         <strong>{{ rankedQuarkResources.length }}</strong>
-        <span>条候选资源 · 添加时验证链接</span>
+        <span>条资源</span>
       </div>
       <p v-if="!detailResource && !isAnalyzing && searchNotice" class="result-summary" role="status">{{ searchNotice }}</p>
 

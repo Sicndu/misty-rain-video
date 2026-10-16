@@ -15,7 +15,7 @@ export function isDiscoveryImageUrl(value, provider) {
   try {
     const url = new URL(value);
     return url.protocol === 'https:' && !url.username && !url.password && (!url.port || url.port === '443')
-      && (provider === 'douban' ? /^(?:img\d+\.)?doubanio\.com$/i.test(url.hostname)
+      && (provider === 'douban' ? /^(?:(?:img\d+|qnmob\d+-sign)\.)?doubanio\.com$/i.test(url.hostname)
         : provider === 'bangumi' && ['lain.bgm.tv', 'lain.bangumi.tv'].includes(url.hostname));
   } catch { return false; }
 }

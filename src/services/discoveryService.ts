@@ -22,6 +22,13 @@ export async function loadDiscovery(category: DiscoveryCategory, signal: AbortSi
     items: section.items.map(item => ({ ...item, poster: withAppBase(item.poster) })) }));
 }
 
+export async function searchCatalog(query: string, signal: AbortSignal): Promise<DiscoveryItem[]> {
+  const response = await authFetch(apiUrl(`/api/catalog/search?q=${encodeURIComponent(query)}`), { signal });
+  const json = await response.json();
+  if (!response.ok || json.code !== 0 || !Array.isArray(json.data?.items)) throw new Error('影片信息暂时无法加载');
+  return json.data.items.map((item: DiscoveryItem) => ({ ...item, poster: withAppBase(item.poster) }));
+}
+
 export const discoveryMedia = (item: DiscoveryItem): MediaItem => ({
   id: `discovery:${item.id}`, catalogId: item.id, title: item.title, year: item.year,
   category: item.category, poster: item.poster, desc: item.description, tag: ''

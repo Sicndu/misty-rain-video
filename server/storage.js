@@ -278,6 +278,12 @@ export class PlaybackCacheRepository {
     return readJson(this.filePath, {})[key] || null;
   }
 
+  forShare(pwdId, subtitles = false) {
+    const prefix = `${subtitles ? 'subtitle:' : ''}${pwdId}:`;
+    return Object.entries(readJson(this.filePath, {})).filter(([key, entry]) => key.startsWith(prefix) && entry?.savedFid && entry?.fileName)
+      .slice(0, 5000).map(([key, entry]) => ({ ...entry, episodeFid: key.slice(prefix.length) }));
+  }
+
   set(key, value) {
     const cache = readJson(this.filePath, {});
     cache[key] = { ...value, updatedAt: new Date().toISOString() };

@@ -51,8 +51,9 @@ const Account = (await compile('src/components/auth/AccountPage.vue', 'account')
 const TitleEditor = (await compile('src/components/media/MediaTitleEditor.vue', 'title-editor')).default;
 const Sidebar = (await compile('src/components/layout/DesktopSidebar.vue', 'sidebar')).default;
 const Subtitles = (await compile('src/components/player/SubtitleControls.vue', 'subtitles')).default;
-const Player = (await compile('src/components/player/QuarkEmbedPlayerModal.vue', 'player')).default;
+const Player = (await compile('src/components/player/PlayerPage.vue', 'player')).default;
 const Discovery = (await compile('src/components/media/DiscoveryPage.vue', 'discovery')).default;
+const Catalog = (await compile('src/components/media/CatalogSearchPage.vue', 'catalog')).default;
 const ResourceModal = (await compile('src/components/quark/QuarkTransferModal.vue', 'resource-modal')).default;
 const { discoveryMedia, resourcePlaybackMedia } = await compile('src/services/discoveryService.ts', 'discovery-service');
 const { useQuarkTransfer } = await compile('src/composables/useQuarkTransfer.ts', 'transfer');
@@ -81,6 +82,27 @@ function mockApi(t) {
     return Response.json({ code: 0, data });
   });
 }
+
+test('catalog search never searches resources until a card or fallback is selected, ignores late query responses', async t => {
+  const pending=new Map(),requests=[];t.mock.method(globalThis,'fetch',url=>{requests.push(String(url));return new Promise(resolve=>pending.set(new URL(String(url),'http://localhost').searchParams.get('q'),resolve))});
+  let selected,fallback;const props=reactive({query:'旧片名',active:true,libraryCatalogIds:[],onSelect:item=>selected=item,onSearchResources:q=>fallback=q});const app=mount(Catalog,props);
+  try {
+    await flush();props.query='新片名';await flush();
+    pending.get('新片名')(Response.json({code:0,data:{items:[{...discovered,title:'新片名'}]}}));await flush();
+    pending.get('旧片名')(Response.json({code:0,data:{items:[{...discovered,title:'旧片名'}]}}));await flush();
+    assert.match(document.querySelector('.catalog-card').textContent,/新片名/);assert.ok(requests.every(url=>url.includes('/api/catalog/search')));assert.equal(selected,undefined);assert.equal(fallback,undefined);
+    document.querySelector('.catalog-card').click();assert.equal(selected.title,'新片名');
+    document.querySelector('.catalog-fallback button').click();assert.equal(fallback,'新片名');
+  } finally {app.unmount();}
+});
+
+test('empty catalog and provider failure each provide an explicit direct-resource search action', async t => {
+  let fail=false;t.mock.method(globalThis,'fetch',async()=>fail?Response.json({code:503},{status:503}):Response.json({code:0,data:{items:[]}}));
+  const props=reactive({query:'未收录',active:true,libraryCatalogIds:[]});const app=mount(Catalog,props);
+  try {await flush();assert.match(document.querySelector('.catalog-empty').textContent,/没有找到/);assert.ok(document.querySelector('.catalog-fallback button'));
+    fail=true;props.query='接口故障';await flush();assert.match(document.querySelector('[role="alert"]').textContent,/暂时无法加载/);assert.ok(document.querySelector('.catalog-fallback button'));
+  }finally{app.unmount();}
+});
 
 test('发现页切换分类时丢弃晚到的旧响应，点海报传递准确的元数据身份', async t => {
   const pending = new Map();
@@ -228,6 +250,9 @@ test('player tabs are mutually exclusive; captions remain beside video, settings
   try {
     await flush();
     assert.ok(document.querySelector('#episode-panel'));
+    assert.ok(document.querySelector('main.player-page'));
+    assert.equal(document.querySelector('[aria-modal="true"]'), null);
+    assert.equal(document.documentElement.style.overflow, '');
     assert.equal(document.querySelector('#playback-settings').style.display, 'none');
     assert.equal(document.querySelector('#playback-settings').getAttribute('aria-hidden'), 'true');
     document.querySelector('#settings-tab').click(); await nextTick();
@@ -245,6 +270,9 @@ test('player tabs are mutually exclusive; captions remain beside video, settings
     assert.equal(document.querySelector('[aria-label="片尾时长（秒）"]').value, '45');
     document.querySelector('#episodes-tab').click(); await nextTick();
     assert.ok(document.querySelector('#episode-panel'));
+    assert.ok(document.querySelector('main.player-page'));
+    assert.equal(document.querySelector('[aria-modal="true"]'), null);
+    assert.equal(document.documentElement.style.overflow, '');
     assert.equal(document.querySelector('#playback-settings').style.display, 'none');
     assert.equal(document.querySelector('#playback-settings').getAttribute('aria-hidden'), 'true');
     assert.equal(document.querySelectorAll('[role="option"][aria-selected="true"]').length, 1);
