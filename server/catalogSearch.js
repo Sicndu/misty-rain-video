@@ -36,21 +36,31 @@ export class CatalogSearch {
     const keyword = typeof query === 'string' ? query.trim().replace(/\s+/g, ' ') : '';
     if (!keyword || keyword.length > 100 || /https?:\/\//i.test(keyword)) throw Object.assign(new Error('请输入100字以内的片名'), { statusCode: 400 });
     const key = keyword.normalize('NFKC').toLowerCase(), cached = this.cache.get(key);
-    if (cached && cached.until > this.now()) { this.discovery.registerCatalogItems(cached.items); return { items: this.publicItems(cached.items) }; }
+    if (cached && cached.until > this.now()) { this.discovery.registerCatalogItems(cached.items); return { items: this.publicItems(cached.items), partial: Boolean(cached.partial) }; }
     if (this.pending.has(key)) return this.pending.get(key);
     if (this.pending.size >= 4) throw failure();
-    const task = this.load(keyword).then(results => {
+    const chartItems = () => (this.discovery.matchingCatalogItems?.(keyword) || []).filter(item =>
+      item?.provider === 'douban' && /^douban-[1-9]\d{0,12}$/.test(item.id)
+      && ['movie', 'tv', 'anime', 'variety'].includes(item.category) && text(item.title, 120)
+      && (!item.imageUrl || isDiscoveryImageUrl(item.imageUrl, 'douban')));
+    const task = this.load(keyword).then(results => ({ results, partial: false }), error => {
+      // Public search can require a login for individual queries. Reuse only
+      // matching public chart data we already have; do not bypass that boundary.
+      const results = chartItems();
+      if (!results.length) throw error;
+      return { results, partial: true };
+    }).then(({ results, partial }) => {
       // The public search can lag a current season already in Douban's charts.
       const merged = new Map();
-      for (const item of [...results, ...(this.discovery.matchingCatalogItems?.(keyword) || [])]) {
+      for (const item of partial ? results : [...results, ...chartItems()]) {
         const previous = merged.get(item.id);
         merged.set(item.id, { ...previous, ...item, ratingCount: item.ratingCount ?? previous?.ratingCount ?? null });
       }
       const items = [...merged.values()].slice(0, 30);
-      this.cache.delete(key); this.cache.set(key, { items, until: this.now() + 10 * 60_000 });
+      this.cache.delete(key); this.cache.set(key, { items, partial, until: this.now() + (partial ? 30_000 : 10 * 60_000) });
       if (this.cache.size > 100) this.cache.delete(this.cache.keys().next().value);
       this.discovery.registerCatalogItems(items);
-      return { items: this.publicItems(items) };
+      return { items: this.publicItems(items), partial };
     }).finally(() => this.pending.delete(key));
     this.pending.set(key, task); return task;
   }

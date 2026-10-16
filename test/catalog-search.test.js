@@ -42,3 +42,42 @@ test('an older chart cache cannot erase a real rating count returned by search',
  const service=new CatalogSearch({discovery:{registerCatalogItems(){},matchingCatalogItems:()=>[old]},fetcher:async()=>Response.json(payload)});
  assert.equal((await service.search('庆余年')).items[0].ratingCount,1);
 });
+
+test('query-specific login denial falls back to deduplicated public chart matches and preserves sorting metadata',async()=>{
+ let calls=0,registered=[];
+ const known={...normalizeCatalogSearch(payload)[0],title:'闹鬼酒店 第二季',ratingCount:12345};
+ const service=new CatalogSearch({discovery:{registerCatalogItems:items=>registered=items,matchingCatalogItems:query=>{
+  assert.equal(query,'闹鬼');return [known,known,...Array.from({length:35},(_,index)=>({...known,id:`douban-${1000+index}`})),
+   {...known,id:'untrusted'}, {...known,id:'douban-9000',imageUrl:'https://attacker.test/image'}];
+ }},fetcher:async url=>{calls++;assert.equal(new URL(url).hostname,'m.douban.com');return Response.json({msg:'need_login'},{status:403});}});
+ const [first,duplicate]=await Promise.all([service.search('闹鬼'),service.search('闹鬼')]);
+ assert.equal(calls,1);assert.deepEqual(first,duplicate);assert.equal(first.partial,true);assert.equal(first.items.length,30);
+ assert.equal(new Set(first.items.map(item=>item.id)).size,30);assert.equal(registered.length,30);
+ assert.equal(first.items[0].ratingCount,12345);assert.equal(first.items[0].rating,7.3);assert.equal(first.items[0].year,'2024');
+ assert.equal(first.items[0].imageUrl,undefined);assert.match(first.items[0].poster,/^\/api\/discovery\/posters\//);
+ assert.deepEqual(await service.search('闹鬼'),first);assert.equal(calls,1);assert.equal(service.pending.size,0);
+});
+
+test('partial chart fallback expires after thirty seconds and cannot mask recovered catalog search',async()=>{
+ let clock=100_000,calls=0,blocked=true;
+ const known=normalizeCatalogSearch(payload)[0];
+ const service=new CatalogSearch({now:()=>clock,discovery:{registerCatalogItems(){},matchingCatalogItems:()=>[known]},fetcher:async()=>{
+  calls++;return blocked?Response.json({msg:'need_login'},{status:403}):Response.json(payload);
+ }});
+ assert.equal((await service.search('庆余年')).partial,true);
+ blocked=false;clock+=29_999;assert.equal((await service.search('庆余年')).partial,true);assert.equal(calls,1);
+ clock+=1;const recovered=await service.search('庆余年');assert.equal(calls,2);assert.equal(recovered.partial,false);assert.equal(recovered.items.length,2);
+ clock+=30_001;assert.deepEqual(await service.search('庆余年'),recovered);assert.equal(calls,2);
+});
+
+test('login denial with no valid matching chart remains a retryable error and never caches a false empty result',async()=>{
+ let calls=0;
+ const known=normalizeCatalogSearch(payload)[0];
+ for(const matches of [[],[{...known,provider:'other'}],[{...known,imageUrl:'http://127.0.0.1/private'}],[{...known,title:''}]]) {
+  const service=new CatalogSearch({discovery:{registerCatalogItems(){assert.fail('must not register invalid fallback');},matchingCatalogItems:()=>matches},
+   fetcher:async()=>{calls++;return Response.json({msg:'need_login'},{status:403});}});
+  await assert.rejects(service.search('闹鬼'),{code:'CATALOG_UNAVAILABLE',statusCode:503});
+  assert.equal(service.cache.size,0);assert.equal(service.pending.size,0);
+ }
+ assert.equal(calls,4);
+});
