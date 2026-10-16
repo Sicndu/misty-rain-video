@@ -3,6 +3,7 @@ import { shareFailureCode } from './shareAvailability.js';
 import { createOpaqueId } from './http.js';
 import { resolveShareSelection, entriesInSelection } from './shareSelection.js';
 import { includeSubtitleCompanions, isSubtitleFile, isTextSubtitleFile, subtitleMatchesVideo, subtitleLanguage, decodeSubtitle, subtitleToVtt } from './subtitles.js';
+import { EmbeddedSubtitleReader } from './embeddedSubtitles.js';
 import { episodeKey, isAncillaryVideoPath, libraryVideoName, missingLibraryEpisodes, seasonNumber, validateSourceCandidate } from './libraryPolicy.js';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -268,7 +269,7 @@ const extractEpisodeNumber = fileName => {
   if (/^(?:19|20)\d{2}[\s._-]/.test(name)) return null;
 
   const bracketed = name.match(/[\[【(（]\s*(\d{1,4})\s*[\]】)）]/);
-  if (bracketed) return Number(bracketed[1]);
+  if (bracketed && !(Number(bracketed[1]) >= 1900 && Number(bracketed[1]) <= 2100)) return Number(bracketed[1]);
 
   const ignored = new Set([2160, 1440, 1080, 720, 576, 480, 360, 266, 265, 264]);
   const leading = name.match(/^\s*(\d{1,4})(?=\D|$)/);
@@ -1173,6 +1174,10 @@ export class QuarkGateway {
       audioTracks: normalized.audioTracks,
       subtitles,
       subtitleNotice,
+      embeddedSubtitleUrl: (() => {
+        const source = [...sources].reverse().find(item => !item.isHls && item.mimeType === 'video/mp4');
+        return source ? `/api/player/sessions/${encodeURIComponent(sessionId)}/embedded-subtitles/${encodeURIComponent(source.id)}` : '';
+      })(),
       transferred,
       expiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString()
     };
@@ -1251,6 +1256,27 @@ export class QuarkGateway {
       || (session.kind === 'share' && mediaFid)) {
       throw new QuarkApiError('播放记录与当前影片会话不一致', { code: 'HISTORY_MEDIA_MISMATCH', statusCode: 403 });
     }
+  }
+
+  async getEmbeddedSubtitles(sessionId, sourceId, time, user = SYSTEM_USER, { signal } = {}) {
+    const { session, source } = this.getStreamSource(sessionId, sourceId, user);
+    if (source.isHls || source.mimeType !== 'video/mp4') throw new QuarkApiError('当前画质不支持读取内嵌字幕', { statusCode: 422 });
+    session.embeddedReaders ||= new Map();
+    if (!session.embeddedReaders.has(sourceId)) {
+      session.embeddedReaders.set(sourceId, new EmbeddedSubtitleReader(async (range, readSignal) => {
+        let current = this.getStreamSource(sessionId, sourceId, user).source;
+        let response = await this.fetchMedia(current.upstreamUrl, range, current.requestProfile, current.requestCookie, { signal: readSignal });
+        if ([401, 403, 410, 412].includes(response.status)) {
+          await response.body?.cancel();
+          current = await this.refreshStreamSource(sessionId, sourceId, user);
+          response = await this.fetchMedia(current.upstreamUrl, range, current.requestProfile, current.requestCookie, { signal: readSignal });
+        }
+        return response;
+      }));
+      if (session.embeddedReaders.size > 2) session.embeddedReaders.delete(session.embeddedReaders.keys().next().value);
+    }
+    const timeout = AbortSignal.timeout(25_000);
+    return session.embeddedReaders.get(sourceId).read(time, signal ? AbortSignal.any([signal, timeout]) : timeout);
   }
 
   async getSubtitleContent(sessionId, subtitleId, user = SYSTEM_USER, { signal } = {}) {

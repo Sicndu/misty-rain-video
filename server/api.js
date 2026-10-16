@@ -746,6 +746,17 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
+    const embeddedMatch = pathname.match(/^\/api\/player\/sessions\/([^/]+)\/embedded-subtitles\/([^/]+)$/);
+    if (embeddedMatch && request.method === 'GET') {
+      const controller = createProxyRequestController(request, response);
+      try {
+        const result = await context.quarkGateway.getEmbeddedSubtitles(decodeURIComponent(embeddedMatch[1]), decodeURIComponent(embeddedMatch[2]), Number(url.searchParams.get('time') || 0), user, { signal: controller.signal });
+        response.setHeader('Cache-Control', 'no-store');
+        sendSuccess(response, result);
+      } finally { controller.cleanup(); }
+      return true;
+    }
+
     const subtitleMatch = pathname.match(/^\/api\/player\/sessions\/([^/]+)\/subtitles\/([^/]+)$/);
     if (subtitleMatch && request.method === 'GET') {
       const controller = createProxyRequestController(request, response);

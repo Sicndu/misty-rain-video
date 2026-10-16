@@ -6,7 +6,7 @@ import { QuarkGateway } from '../server/quarkGateway.js';
 test('SRT/VTT时间轴统一为WebVTT，文本与换行保留', () => {
   const srt = '1\r\n00:00:01,200 --> 00:00:03,400\r\n<b>你好</b> & 世界\r\n第二行\r\n';
   const vtt = subtitleToVtt(srt, 'demo.srt');
-  assert.equal(vtt, 'WEBVTT\n\n00:00:01.200 --> 00:00:03.400\n你好 &amp; 世界\n第二行\n');
+  assert.equal(vtt, 'WEBVTT\n\n00:00:01.200 --> 00:00:03.400 position:50%,center align:center size:90%\n你好 &amp; 世界\n第二行\n');
   assert.match(subtitleToVtt('WEBVTT\n\n00:01.200 --> 00:03.400\n字幕', 'demo.vtt'), /00:00:01.200/);
   assert.throws(() => subtitleToVtt('bad content'), error => error.code === 'SUBTITLE_FORMAT_UNSUPPORTED');
 });

@@ -20,6 +20,7 @@ import {
 import { useToast } from '../../composables/useToast';
 import { useDialog } from '../../composables/useDialog';
 import { useVideoFullscreen } from '../../composables/useVideoFullscreen';
+import { useEmbeddedSubtitles } from '../../composables/useEmbeddedSubtitles';
 import { PlaybackHistoryService } from '../../services/playbackHistoryService';
 
 const props = defineProps<{
@@ -145,6 +146,8 @@ const videoInstanceKey = ref(0);
 const isMobilePlaybackDevice = typeof window !== 'undefined'
   && (window.matchMedia('(max-width: 820px)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
 const { fullscreen: nativeFullscreen, error: fullscreenError, toggle: toggleFullscreen, exit: exitFullscreen } = useVideoFullscreen(videoRef);
+const embeddedSubtitles = useEmbeddedSubtitles(videoRef, () => playback.value?.embeddedSubtitleUrl);
+const mobileControlsVisible = ref(true);
 watch(fullscreenError, message => { if (message) { toast.show(message, '!'); announce(message); } });
 
 const soundEffectOptions: SoundEffectOption[] = [
@@ -156,6 +159,8 @@ const soundEffectOptions: SoundEffectOption[] = [
 
 const episodes = computed(() => session.value?.episodes || []);
 const currentEpisode = computed(() => episodes.value[currentEpisodeIndex.value] || null);
+const movieMode = computed(() => props.media?.category === 'movie');
+const fileLabel = (episode: { fileName: string }) => episode.fileName.replace(/\.[^.]+$/, '');
 const episodeGroupSize = 50;
 const episodeGroups = computed(() => {
   const groups: Array<{ start: number; end: number; label: string }> = [];
@@ -207,7 +212,7 @@ const visibleEpisodeEntries = computed(() => {
   return episodes.value.slice(group.start, group.end).map((episode, offset) => ({
     episode,
     index: group.start + offset,
-    isLatest: group.start + offset === latestEpisodeIndex.value
+    isLatest: !movieMode.value && episodes.value.length > 1 && group.start + offset === latestEpisodeIndex.value
   }));
 });
 const sources = computed(() => playback.value?.sources || []);
@@ -228,6 +233,7 @@ const audioSwitchable = computed(() => detectedAudioTracks.value.length > 1 || g
 const selectedSoundEffect = computed(() => soundEffectOptions.find(option => option.value === soundEffectMode.value));
 const episodeStatus = computed(() => {
   const episode = currentEpisode.value;
+  if (movieMode.value) return episodes.value.length > 1 ? `${episodes.value.length} 个视频` : '';
   if (!episode) return episodes.value.length ? `共 ${episodes.value.length} 集` : '';
   const currentLabel = episode.episodeNumber > 0 ? `第 ${episode.episodeNumber} 集` : episode.episodeTitle;
   return `${currentLabel} / 共 ${episodes.value.length} 集`;
@@ -1234,6 +1240,7 @@ defineExpose({ retry });
               :key="videoInstanceKey"
               ref="videoRef"
               class="video-element"
+              :class="{ 'native-fullscreen': nativeFullscreen }"
               :style="{ objectFit: pictureFit }"
               :controls="!isMobilePlaybackDevice || nativeFullscreen"
               controlslist="nodownload noremoteplayback"
@@ -1268,7 +1275,7 @@ defineExpose({ retry });
 
             <MobilePlaybackControls
               v-if="isMobilePlaybackDevice && !nativeFullscreen && videoRef && phase === 'ready' && !manualPlayRequired"
-              :video="videoRef" :hls="hlsRef" :username="username" :expanded="nativeFullscreen" @fullscreen="toggleFullscreen"
+              :video="videoRef" :expanded="nativeFullscreen" @fullscreen="toggleFullscreen" @visibility-change="mobileControlsVisible = $event"
             />
 
             <div v-if="phase === 'resolving' || phase === 'preparing'" class="stage-state loading-state" role="status" aria-live="polite">
@@ -1333,16 +1340,21 @@ defineExpose({ retry });
             </div>
           </div>
 
+          <div v-if="phase === 'ready' && videoRef" class="playback-tools" aria-label="播放工具">
+          <SubtitleControls :video="videoRef" :hls="hlsRef" :native-fullscreen="nativeFullscreen" :username="username" :notice="playback?.subtitleNotice" compact
+            :mobile-controls-visible="isMobilePlaybackDevice && mobileControlsVisible"
+            :loading="embeddedSubtitles.loading.value" :read-error="embeddedSubtitles.error.value" @retry-embedded="embeddedSubtitles.retry" />
           <DanmakuControls
             v-if="phase === 'ready' && videoRef && currentEpisode && media"
             :video="videoRef"
             :input="{ mediaKey: media.id, title: media.title, category: media.category, episodeNumber: currentEpisode.episodeNumber, episodeTitle: currentEpisode.episodeTitle }"
           />
+          </div>
 
         </main>
         <aside v-if="episodes.length || sources.length" class="player-panel">
           <nav class="player-toolbar" role="tablist" aria-label="播放器面板">
-            <button id="episodes-tab" type="button" role="tab" :aria-selected="activePanel === 'episodes'" aria-controls="episode-panel" @click="activePanel = 'episodes'"><ListVideo aria-hidden="true" />选集 <small>{{ episodes.length }}</small></button>
+            <button id="episodes-tab" type="button" role="tab" :aria-selected="activePanel === 'episodes'" aria-controls="episode-panel" @click="activePanel = 'episodes'"><ListVideo aria-hidden="true" />{{ movieMode ? '视频' : '选集' }} <small>{{ episodes.length }}</small></button>
             <button id="settings-tab" type="button" role="tab" :aria-selected="activePanel === 'settings'" aria-controls="playback-settings" :disabled="!sources.length" @click="activePanel = 'settings'"><SlidersHorizontal aria-hidden="true" />设置</button>
           </nav>
           <div class="panel-content">
@@ -1414,11 +1426,6 @@ defineExpose({ retry });
               </div>
             </div>
 
-            <div v-if="videoRef" class="setting-group subtitle-setting-group">
-              <div class="setting-heading"><span>字幕</span></div>
-              <SubtitleControls :video="videoRef" :hls="hlsRef" :native-fullscreen="nativeFullscreen" :username="username" :notice="playback?.subtitleNotice" />
-            </div>
-
             <div class="setting-group automation-setting-group">
               <div class="setting-heading">
                 <span>播放偏好</span>
@@ -1471,12 +1478,12 @@ defineExpose({ retry });
           <div class="episode-heading">
             <div class="episode-heading-title">
               <div class="episode-heading-main">
-                <strong>剧集</strong>
+                <strong>{{ movieMode ? '视频文件' : '剧集' }}</strong>
                 <span>{{ episodeStatus }}</span>
               </div>
               <small v-if="latestEpisodeUpdateLabel" class="episode-update-time">{{ latestEpisodeUpdateLabel }}</small>
             </div>
-            <small>最新在前</small>
+            <small v-if="!movieMode">最新在前</small>
           </div>
 
           <div v-if="episodeGroups.length > 1" class="episode-ranges" role="tablist" aria-label="剧集范围">
@@ -1493,7 +1500,7 @@ defineExpose({ retry });
             </button>
           </div>
 
-          <div class="episode-list" role="listbox" aria-label="剧集列表">
+          <div class="episode-list" :class="{ 'file-list': movieMode || episodes.some(item => !item.episodeNumber) }" role="listbox" :aria-label="movieMode ? '视频列表' : '剧集列表'">
             <button
               v-for="entry in visibleEpisodeEntries"
               :key="entry.episode.fid"
@@ -1503,17 +1510,17 @@ defineExpose({ retry });
               :class="{ active: currentEpisodeIndex === entry.index, latest: entry.isLatest }"
               role="option"
               :aria-selected="currentEpisodeIndex === entry.index"
-              :aria-label="`${entry.episode.episodeTitle}，${[entry.episode.durationFormatted, entry.episode.sizeFormatted].filter(Boolean).join('，')}`"
+              :aria-label="`${movieMode || !entry.episode.episodeNumber ? fileLabel(entry.episode) : entry.episode.episodeTitle}，${[entry.episode.durationFormatted, entry.episode.sizeFormatted].filter(Boolean).join('，')}`"
               :title="entry.episode.fileName"
               @click="selectEpisode(entry.index)"
             >
               <span class="episode-number">
-                <span>{{ entry.episode.episodeNumber > 0 ? entry.episode.episodeNumber : '•' }}</span>
+                <span>{{ !movieMode && entry.episode.episodeNumber > 0 ? entry.episode.episodeNumber : entry.index + 1 }}</span>
                 <small v-if="entry.isLatest" class="episode-latest">新</small>
                 <i v-if="currentEpisodeIndex === entry.index" class="episode-current-dot" aria-hidden="true"></i>
               </span>
               <span class="episode-copy">
-                <strong>{{ entry.episode.episodeTitle }}</strong>
+                <strong>{{ movieMode || !entry.episode.episodeNumber ? fileLabel(entry.episode) : entry.episode.episodeTitle }}</strong>
                 <small>{{ [entry.episode.durationFormatted, entry.episode.sizeFormatted].filter(Boolean).join(' · ') }}</small>
               </span>
             </button>
@@ -1537,6 +1544,9 @@ defineExpose({ retry });
 .skip-durations p { grid-column: 1 / -1; color: var(--text-tertiary); font-size: .72rem; line-height: 1.5; }
 .skip-durations .preferences-error { color: var(--danger); }
 .delivery-hint { margin-top: 9px; color: var(--text-tertiary); font-size: .73rem; line-height: 1.6; }
+.playback-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 12px; margin-top: 6px; }
+.playback-tools :deep(.danmaku-controls) { flex: 1 1 100px; }
+.playback-tools :deep(.danmaku-row) { padding-top: 0; }
 .player-backdrop { position: fixed; inset: 0; z-index: 1400; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / .58); opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s; }
 .player-backdrop.active { opacity: 1; visibility: visible; }
 .player-backdrop:not(.active) { display: none; }
@@ -1674,9 +1684,13 @@ defineExpose({ retry });
   .episode-item.active .episode-number { color: inherit; background: transparent; }
   .episode-latest { top: -5px; right: -4px; color: var(--accent-ink); border-radius: 9999px; }
   .episode-copy { display: none; }
+  .file-list { grid-template-columns: 1fr; }
+  .file-list .episode-item { grid-template-columns: 40px minmax(0, 1fr); padding: 8px; gap: 10px; text-align: left; }
+  .file-list .episode-copy { display: grid; }
 }
 @media (max-width: 360px) { .episode-list { grid-template-columns: repeat(4, minmax(0, 1fr)); } .player-toolbar button { gap: 5px; padding: 8px; } .player-toolbar button > svg { width: 17px; height: 17px; } }
 .video-element:fullscreen { width: 100vw; height: 100vh; background: #000; }
+.video-element:not(.native-fullscreen)::cue { font-size: clamp(14px, 1.8vw, 24px); }
 .video-element::-webkit-media-controls { color-scheme: dark; }
 
 @media (prefers-reduced-motion: reduce) { .player-backdrop, .loading-wave i, .playback-starting-pill svg, .setting-switch span, .setting-switch::before { transition: none; animation: none; } }

@@ -77,7 +77,7 @@ export const subtitleToVtt = (input, filename = '') => {
   const cues = [];
   const add = (start, end, content) => {
     const from = timestamp(start); const to = timestamp(end);
-    if (from !== null && to !== null && to > from && content.trim()) cues.push(`${clock(from)} --> ${clock(to)}\n${plainText(content).trim()}`);
+    if (from !== null && to !== null && to > from && content.trim()) cues.push(`${clock(from)} --> ${clock(to)} position:50%,center align:center size:90%\n${plainText(content).trim()}`);
   };
   if (/\.(?:ass|ssa)$/i.test(filename) || /^\s*\[Script Info\]/i.test(text)) {
     let format = ['layer', 'start', 'end', 'style', 'name', 'marginl', 'marginr', 'marginv', 'effect', 'text'];

@@ -240,3 +240,16 @@ test('TV 二维码会话绑定管理员，过期会话不能兑换令牌', async
   client.authSessions.get('qr').createdAt -= 6 * 60 * 1000;
   assert.deepEqual(await client.pollQrSession('qr', 'admin'), { state: 'expired' });
 });
+
+
+test('embedded subtitle reads require the session owner and valid time, without exposing stream URLs', async () => {
+  const gateway = makeGateway();
+  try {
+    const playback = await gateway.prepareEpisode('session', 'episode');
+    assert.match(playback.embeddedSubtitleUrl, /embedded-subtitles/);
+    const forbidden = await api({ gateway, url: playback.embeddedSubtitleUrl + '?time=0', user: { username: 'other', folder: 'other', role: 'user' } });
+    assert.equal(forbidden.statusCode, 403);
+    const invalid = await api({ gateway, url: playback.embeddedSubtitleUrl + '?time=-1' }); assert.equal(invalid.statusCode, 422);
+    assert.doesNotMatch(invalid.body, /private-cookie|private-token|media.example/);
+  } finally { clearInterval(gateway.cleanupTimer); }
+});

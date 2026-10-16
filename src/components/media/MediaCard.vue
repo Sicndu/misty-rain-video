@@ -33,7 +33,7 @@ const categoryLabels: Record<MediaItem['category'], string> = {
     <button
       type="button"
       class="card-play-target"
-      :aria-label="`播放《${media.title}》${media.latestEpisodeNumber ? `，更新至第 ${media.latestEpisodeNumber} 集` : ''}${updateFeedback ? `，${updateFeedback.label}` : ''}`"
+      :aria-label="`播放《${media.title}》${media.category !== 'movie' && media.latestEpisodeNumber ? `，更新至第 ${media.latestEpisodeNumber} 集` : ''}${updateFeedback ? `，${updateFeedback.label}` : ''}`"
       @click="emit('click-card', media)"
     >
       <span class="poster-viewport">
@@ -49,9 +49,9 @@ const categoryLabels: Record<MediaItem['category'], string> = {
       <span class="card-caption">
         <span class="media-title" :title="media.title">{{ media.title }}</span>
         <span class="media-subtitle" :title="updateFeedback?.detail" :class="{ 'has-update': (media.newEpisodeCount || 0) > 0 }">
-          <template v-if="(media.newEpisodeCount || 0) > 0">新增 {{ media.newEpisodeCount }} 集</template>
+          <template v-if="(media.newEpisodeCount || 0) > 0">新增 {{ media.newEpisodeCount }} {{ media.category === 'movie' ? '个视频' : '集' }}</template>
           <template v-else-if="updateFeedback">{{ updateFeedback.label }}</template>
-          <template v-else-if="media.latestEpisodeNumber">更新至 {{ media.latestEpisodeNumber }} 集</template>
+          <template v-else-if="media.category !== 'movie' && media.latestEpisodeNumber">更新至 {{ media.latestEpisodeNumber }} 集</template>
           <template v-else>{{ media.status || categoryLabels[media.category] }}</template>
         </span>
       </span>

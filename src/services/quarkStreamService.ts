@@ -83,6 +83,7 @@ export interface PreparedPlayback {
   audioTracks: PlaybackAudioTrack[];
   subtitles: PlaybackSubtitle[];
   subtitleNotice?: string;
+  embeddedSubtitleUrl?: string;
   transferred: boolean;
   expiresAt: string;
 }

@@ -214,3 +214,12 @@ test('多个季包含相同集号时，详情保留各季的文件与实际集�
   assert.equal(details.episodeCount, 4);
   assert.equal(details.entries.filter(entry => entry.episodeNumber === 1).length, 2);
 });
+
+
+test('movie years in brackets are not mistaken for thousands of episodes', async t => {
+  const { gateway, tree } = createGateway(t);
+  tree.set('0', [file('year', '潜伏6（2026）1080p.mkv'), file('episode', '动画 第2026集.mp4')]);
+  const details = await gateway.getShareDetails(shareInput);
+  assert.notEqual(details.entries.find(item => item.fid === 'year').episodeNumber, 2026);
+  assert.equal(details.entries.find(item => item.fid === 'episode').episodeNumber, 2026);
+});

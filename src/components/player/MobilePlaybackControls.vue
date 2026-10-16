@@ -1,20 +1,17 @@
 <script setup lang="ts">
-import type Hls from 'hls.js';
-import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
 import { onBeforeUnmount, ref, watch } from 'vue';
 import { Maximize, Minimize, Pause, Play, Volume2, VolumeX } from '@lucide/vue';
 
-const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; hls?: Hls | null; username?: string }>();
-const emit = defineEmits<{ (e: 'fullscreen'): void }>();
+const props = defineProps<{ video: HTMLVideoElement; expanded: boolean }>();
+const emit = defineEmits<{ (e: 'fullscreen'): void; (e: 'visibility-change', visible: boolean): void }>();
 const visible = ref(true);
+watch(visible, value => emit('visibility-change', value), { immediate: true });
 const paused = ref(true);
 const muted = ref(false);
 const time = ref(0);
 const duration = ref(0);
 const scrubbing = ref(false);
 const notice = ref('');
-const subtitles = ref<SubtitleTrackOption[]>([]);
-const subtitle = ref('off');
 let timer: ReturnType<typeof setTimeout> | undefined;
 let release = () => {};
 const clock = (value: number) => {
@@ -49,15 +46,8 @@ function toggleMute() {
   props.video.muted = !unmute;
   if (unmute && props.video.volume === 0) props.video.volume = 1;
 }
-function selectSubtitle(event: Event) {
-  const id = (event.target as HTMLSelectElement).value;
-  const option = subtitles.value.find(item => item.id === id);
-  try { localStorage.setItem(subtitlePreferenceKey(props.username), subtitlePreference(option)); } catch { /* Keep the selected track. */ }
-  selectSubtitleTrack(props.video, props.hls, id);
-  reveal();
-}
 
-watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
+watch(() => props.video, video => {
   release();
   scrubbing.value = false; notice.value = '';
   const sync = () => {
@@ -65,26 +55,17 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     duration.value = Number.isFinite(video.duration) ? video.duration : 0;
     if (!scrubbing.value) time.value = video.currentTime || 0;
   };
-  const syncTracks = () => {
-    subtitles.value = subtitleTrackOptions(video, hls);
-    subtitle.value = activeSubtitleTrack(video, hls);
-  };
   const playback = () => { sync(); reveal(); };
   const tap = () => { if (visible.value && !video.paused) visible.value = false; else reveal(); };
   const events = ['timeupdate', 'durationchange', 'loadedmetadata', 'volumechange', 'seeked'];
   events.forEach(event => video.addEventListener(event, sync));
   ['play', 'pause', 'ended'].forEach(event => video.addEventListener(event, playback));
-  ['addtrack', 'removetrack', 'change'].forEach(event => video.textTracks.addEventListener(event, syncTracks));
   video.addEventListener('click', tap);
-  const hlsEvents = hls ? subtitleEvents(hls) : [];
-  hlsEvents.forEach(event => hls?.on(event, syncTracks));
-  sync(); syncTracks(); reveal();
+  sync(); reveal();
   release = () => {
     events.forEach(event => video.removeEventListener(event, sync));
     ['play', 'pause', 'ended'].forEach(event => video.removeEventListener(event, playback));
-    ['addtrack', 'removetrack', 'change'].forEach(event => video.textTracks.removeEventListener(event, syncTracks));
     video.removeEventListener('click', tap);
-    hlsEvents.forEach(event => hls?.off(event, syncTracks));
     clearTimeout(timer);
   };
 }, { immediate: true });
@@ -101,7 +82,6 @@ onBeforeUnmount(() => release());
       <input type="range" aria-label="播放进度" :aria-valuetext="`${clock(time)} / ${clock(duration)}`" min="0" :max="duration || 1" step="0.1" :value="time" :disabled="!duration" @input="preview" @change="seek" @pointercancel="scrubbing = false; time = video.currentTime; reveal()" />
       <span class="time">{{ clock(duration) }}</span>
       <button type="button" :aria-label="muted ? '取消静音' : '静音'" @click="toggleMute"><VolumeX v-if="muted" /><Volume2 v-else /></button>
-      <select v-if="subtitles.length" aria-label="影片字幕" :value="subtitle" @change="selectSubtitle"><option value="off">字幕关</option><option v-for="track in subtitles" :key="track.id" :value="track.id">{{ track.label }}</option></select>
       <button type="button" :aria-label="expanded ? '退出全屏' : '全屏播放'" @click="emit('fullscreen')"><Minimize v-if="expanded" /><Maximize v-else /></button>
     </div>
   </div>
@@ -115,7 +95,6 @@ button { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height
 button svg { width: 21px; height: 21px; }
 input { flex: 1; min-width: 24px; height: 44px; margin: 0 5px; accent-color: #fff; touch-action: none; }
 .time { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-select { max-width: 80px; min-height: 44px; border: 0; color: #fff; background: #17191f; font-size: 12px; }
 p { margin: 0 12px; font-size: 12px; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
 @media (prefers-reduced-motion: reduce) { .mobile-controls { transition: none; } }

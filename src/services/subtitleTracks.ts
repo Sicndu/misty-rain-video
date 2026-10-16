@@ -1,15 +1,30 @@
 import type Hls from 'hls.js';
 export interface SubtitleTrackOption { id: string; label: string; language: string; origin: string; }
 const caption = (track: TextTrack) => track.kind === 'subtitles' || track.kind === 'captions';
+export const managedSubtitleTracks = new WeakMap<TextTrack, { active: boolean; origin: string }>();
+export const subtitleLanguageKey = (language: string) => /^(zh|chi|zho)/i.test(language) ? 'zh' : /^en(g)?$/i.test(language) ? 'en' : language.toLowerCase();
+export const centerSubtitleCue = (cue: VTTCue, line = -2) => {
+  if (cue.align !== 'center') cue.align = 'center';
+  if (cue.position !== 50) cue.position = 50;
+  if (cue.size !== 90) cue.size = 90;
+  if (!cue.snapToLines) cue.snapToLines = true;
+  if (cue.line !== line) cue.line = line;
+  if ('positionAlign' in cue && cue.positionAlign !== 'center') cue.positionAlign = 'center';
+};
 export const subtitleTrackOptions = (video: HTMLVideoElement, hls?: Hls | null): SubtitleTrackOption[] => {
   const options: SubtitleTrackOption[] = (hls?.subtitleTracks || []).map((track, index) => ({
     id: `hls:${index}`, label: `${track.name || track.lang || `字幕 ${index + 1}`} · 流媒体`, language: track.lang || '', origin: 'hls'
   }));
   Array.from(video.textTracks).forEach((track, index) => {
     if (!caption(track)) return;
+    const managed = managedSubtitleTracks.get(track);
+    if (managed?.active === false) return;
     const element = Array.from(video.querySelectorAll('track')).find(item => item.track === track);
+    // Prefer normalized text over the container's native tx3g positioning. The
+    // same available languages remain selectable, without duplicate entries.
+    if (!element && !managed && Array.from(video.textTracks).some(other => managedSubtitleTracks.get(other)?.active && subtitleLanguageKey(other.language) === subtitleLanguageKey(track.language))) return;
     if (!element?.dataset.subtitleOrigin && hls?.subtitleTracks.some(item => item.name === track.label && (item.lang || '') === track.language)) return;
-    options.push({ id: `native:${index}`, label: `${track.label || track.language || `字幕 ${index + 1}`} · ${element?.dataset.subtitleOrigin === 'sidecar' ? '字幕文件' : '内嵌 / 字幕轨道'}`, language: track.language || '', origin: element?.dataset.subtitleOrigin || 'embedded' });
+    options.push({ id: `native:${index}`, label: track.label || track.language || `字幕 ${index + 1}`, language: track.language || '', origin: managed?.origin || element?.dataset.subtitleOrigin || 'embedded' });
   });
   return options;
 };

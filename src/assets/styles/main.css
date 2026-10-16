@@ -39,7 +39,9 @@
 @supports (height: 100dvh) { :root { --app-viewport-height: 100dvh; } }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { width: 100%; min-height: var(--app-viewport-height); overflow-x: hidden; color: var(--text-primary); background: var(--liquid-canvas); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", -apple-system-subheadline, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; font-synthesis: none; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; line-height: 1.5; }
-body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+/* The document owns vertical scrolling; blocking the body traps wheel events. */
+html { overscroll-behavior-y: none; }
+body { -webkit-tap-highlight-color: transparent; }
 #app { min-height: var(--app-viewport-height); }
 button, input, textarea, select { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }

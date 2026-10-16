@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { ArrowUpRight, ChevronRight, RefreshCw, Star } from '@lucide/vue';
 import MediaPoster from '../common/MediaPoster.vue';
 import { loadDiscovery, type DiscoveryCategory, type DiscoveryItem, type DiscoverySection } from '../../services/discoveryService';
@@ -44,7 +44,12 @@ watch([() => props.active, category], ([active]) => {
   if (active) { sections.value = cache.get(category.value) || []; void read(); }
 }, { immediate: true });
 onBeforeUnmount(stop);
-const changeCategory = (value: DiscoveryCategory) => { category.value = value; };
+const changeCategory = async (value: DiscoveryCategory) => {
+  if (category.value === value) return;
+  category.value = value;
+  await nextTick();
+  window.scrollTo({ top: 0, behavior: 'instant' });
+};
 const visibleItems = (section: DiscoverySection) => section.id === 'calendar' ? section.items.filter(item => item.weekday === weekday.value) : category.value === 'all' ? section.items.slice(0, 10) : section.items;
 </script>
 

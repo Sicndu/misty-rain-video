@@ -39,7 +39,7 @@ const authSection = ref<HTMLElement | null>(null);
 const visibleHistory = computed(() => historyExpanded.value ? props.history : props.history.slice(0, 5));
 const historyProgress = (entry: PlaybackHistoryEntry) => entry.duration > 0 ? Math.max(0, Math.min(100, entry.position / entry.duration * 100)) : 0;
 const formatHistoryMeta = (entry: PlaybackHistoryEntry) => {
-  const episode = entry.episodeNumber > 0 ? `第 ${entry.episodeNumber} 集` : entry.episodeTitle;
+  const episode = entry.media.category === 'movie' ? '电影' : entry.episodeNumber > 0 ? `第 ${entry.episodeNumber} 集` : entry.episodeTitle;
   const minutes = Math.max(1, Math.floor(entry.position / 60));
   return `${episode || '影片'} · ${entry.completed ? '已看完' : `看到 ${minutes} 分钟`}`;
 };

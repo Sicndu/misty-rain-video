@@ -222,7 +222,7 @@ test('desktop library has one selected category and its library heading is not a
   } finally { app.unmount(); }
 });
 
-test('player tabs are mutually exclusive; settings contain one subtitle and two duration inputs', async t => {
+test('player tabs are mutually exclusive; captions remain beside video, settings have only playback preferences', async t => {
   mockApi(t);
   const app = mount(Player, { isOpen: true, media, username: 'fixture' });
   try {
@@ -236,6 +236,8 @@ test('player tabs are mutually exclusive; settings contain one subtitle and two 
     assert.notEqual(document.querySelector('#playback-settings').style.display, 'none');
     assert.equal(document.querySelector('#playback-settings').getAttribute('aria-hidden'), 'false');
     assert.equal(document.querySelectorAll('select[aria-label="选择影片字幕"]').length, 1);
+    assert.ok(document.querySelector('.playback-tools select'));
+    assert.equal(document.querySelector('#playback-settings select[aria-label="选择影片字幕"]'), null);
     assert.equal(document.querySelectorAll('.duration-input input').length, 2);
     assert.equal(document.querySelector('[aria-label="片头时长（秒）"]').value, '30');
     assert.equal(document.querySelector('[aria-label="片尾时长（秒）"]').value, '45');
@@ -246,6 +248,27 @@ test('player tabs are mutually exclusive; settings contain one subtitle and two 
     assert.equal(document.querySelectorAll('[role="option"][aria-selected="true"]').length, 1);
     assert.equal(document.querySelector('.rotated-player'), null);
   } finally { app.unmount(); }
+});
+
+
+test('new viewers get Chinese captions automatically; a manual off choice persists when tracks arrive later', async () => {
+  const video = document.createElement('video');
+  const props = reactive({ video, username: 'automatic-caption-fixture' });
+  const app = mount(Subtitles, props);
+  try {
+    await flush();
+    video.textTracks.push({ kind: 'subtitles', label: 'English', language: 'en', mode: 'disabled' }, { kind: 'subtitles', label: '中文', language: 'zh', mode: 'disabled' }, { kind: 'metadata', mode: 'hidden' });
+    video.textTracks.dispatchEvent(new window.Event('addtrack')); await nextTick();
+    assert.equal(video.textTracks[1].mode, 'showing'); assert.equal(video.textTracks[2].mode, 'hidden');
+    const picker = document.querySelector('select'); picker.value = 'off'; picker.dispatchEvent(new window.Event('change')); await nextTick();
+    video.dispatchEvent(new window.Event('subtitletracksupdated')); await nextTick();
+    assert.equal(video.textTracks[1].mode, 'disabled'); assert.equal(picker.value, 'off');
+  } finally { app.unmount(); }
+});
+
+test('movies display named files instead of an episode number or unlabeled dots', async t => {
+  mockApi(t); const app = mount(Player, { isOpen: true, media: { ...media, category: 'movie' }, username: 'movie-label-fixture' });
+  try { await flush(); assert.match(document.querySelector('#episodes-tab').textContent, /视频/); assert.match(document.querySelector('.episode-heading').textContent, /视频文件/); assert.doesNotMatch(document.querySelector('.title-copy').textContent, /第.*集/); assert.match(document.querySelector('.file-list .episode-copy strong').textContent, /1/); } finally { app.unmount(); }
 });
 
 test('native fullscreen subtitle choices are respected and retained after exiting', async () => {
@@ -269,6 +292,21 @@ test('native fullscreen subtitle choices are respected and retained after exitin
     video.textTracks.dispatchEvent(new window.Event('removetrack'));
     await nextTick();
     assert.equal(localStorage.getItem(key), choice, 'an unavailable track list is not a user choice to disable subtitles');
+  } finally { app.unmount(); }
+});
+
+test('captions arriving during native fullscreen start automatically, while a native off choice stays off', async () => {
+  const video = document.createElement('video');
+  const props = reactive({ video, username: 'late-native-caption-fixture', nativeFullscreen: true });
+  const app = mount(Subtitles, props);
+  try {
+    await flush();
+    video.textTracks.push({ kind: 'subtitles', label: '中文', language: 'zh', mode: 'hidden' });
+    video.textTracks.dispatchEvent(new window.Event('addtrack')); await nextTick();
+    assert.equal(video.textTracks[0].mode, 'showing');
+    video.textTracks[0].mode = 'disabled'; video.textTracks.dispatchEvent(new window.Event('change')); await nextTick();
+    video.dispatchEvent(new window.Event('subtitletracksupdated')); await nextTick();
+    assert.equal(video.textTracks[0].mode, 'disabled');
   } finally { app.unmount(); }
 });
 

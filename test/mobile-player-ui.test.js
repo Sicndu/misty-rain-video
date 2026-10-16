@@ -65,15 +65,12 @@ test('mobile controls play, pause, seek without time updates overriding a drag, 
     assert.ok(button('全屏播放'));
   } finally { view.app.unmount(); }
 });
-test('subtitle selection leaves metadata tracks alone; mute can restore zero volume', async () => {
+test('mute can restore zero volume without changing subtitle or metadata choices', async () => {
   const view = mount();
   try {
-    const select = document.querySelector('select');
-    select.value = 'off'; select.dispatchEvent(event('change')); await nextTick();
-    assert.equal(view.media.textTracks[0].mode, 'disabled');
-    assert.equal(view.media.textTracks[1].mode, 'hidden');
-    select.value = 'native:0'; select.dispatchEvent(event('change')); await nextTick();
+    assert.equal(document.querySelector('select'), null, 'captions have one shared entry beside the player');
     assert.equal(view.media.textTracks[0].mode, 'showing');
+    assert.equal(view.media.textTracks[1].mode, 'hidden');
     view.media.volume = 0; view.media.dispatchEvent(event('volumechange')); await nextTick();
     button('取消静音').click(); await nextTick();
     assert.equal(view.media.volume, 1); assert.equal(view.media.muted, false);
