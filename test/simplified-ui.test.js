@@ -281,6 +281,52 @@ test('player tabs are mutually exclusive; captions remain beside video, settings
 });
 
 
+test('Android player keeps one caption picker, pauses in background except PiP, and resumes without a blocking prompt', async t => {
+  const previousAgent = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
+  Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Android Chrome' });
+  mockApi(t);
+  const app = mount(Player, { isOpen: true, media, username: 'fixture' });
+  const video = document.querySelector('video');
+  let paused = false;
+  Object.defineProperty(video, 'paused', { configurable: true, get: () => paused });
+  video.pause = () => { paused = true; video.dispatchEvent(new window.Event('pause')); };
+  video.play = async () => { paused = false; video.dispatchEvent(new window.Event('play')); video.dispatchEvent(new window.Event('playing')); };
+  try {
+    await flush(); await video.play(); await flush();
+    assert.equal(document.querySelectorAll('select[aria-label="选择影片字幕"]').length, 1);
+    assert.ok(document.querySelector('.android-controls select[aria-label="选择影片字幕"]'));
+    Object.defineProperty(document, 'pictureInPictureElement', { configurable: true, value: video });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    document.dispatchEvent(new window.Event('visibilitychange')); await flush();
+    assert.equal(paused, false, 'PiP continues while owning page is hidden');
+    Object.defineProperty(document, 'pictureInPictureElement', { configurable: true, value: null });
+    video.dispatchEvent(new window.Event('leavepictureinpicture')); await flush();
+    assert.equal(paused, true, 'leaving PiP in background pauses playback');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    document.dispatchEvent(new window.Event('visibilitychange')); await flush();
+    document.querySelector('.stage-play-button').click(); await flush();
+    assert.equal(paused, false); assert.equal(document.querySelector('.play-prompt'), null);
+  } finally {
+    app.unmount();
+    if (previousAgent) Object.defineProperty(navigator, 'userAgent', previousAgent); else delete navigator.userAgent;
+    delete document.visibilityState; delete document.pictureInPictureElement;
+  }
+});
+
+test('Android settings offer browser installation guidance instead of an iOS profile', async () => {
+  const previousAgent = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
+  Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Android Chrome' });
+  const app = mount(Account, { user: user('user'), history: [] });
+  try {
+    assert.equal(document.querySelector('a[href*="mobileconfig"]'), null);
+    [...document.querySelectorAll('button')].find(button => button.textContent.includes('安装到桌面')).click(); await flush();
+    assert.match(document.querySelector('.install-hint').textContent, /Chrome/);
+  } finally {
+    app.unmount();
+    if (previousAgent) Object.defineProperty(navigator, 'userAgent', previousAgent); else delete navigator.userAgent;
+  }
+});
+
 test('new viewers get Chinese captions automatically; a manual off choice persists when tracks arrive later', async () => {
   const video = document.createElement('video');
   const props = reactive({ video, username: 'automatic-caption-fixture' });

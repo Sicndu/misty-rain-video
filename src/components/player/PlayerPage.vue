@@ -2,6 +2,9 @@
 import type Hls from 'hls.js';
 import DanmakuControls from './DanmakuControls.vue';
 import MobilePlaybackControls from './MobilePlaybackControls.vue';
+import AndroidPlaybackControls from './AndroidPlaybackControls.vue';
+import AndroidCaptions from './AndroidCaptions.vue';
+import { useAndroidMediaSession } from '../../composables/useAndroidMediaSession';
 import { playbackHealth } from '../../services/playbackHealth';
 import { configureVideoRequest, playbackSourceLabel, selectInitialPlaybackSource } from '../../services/playbackSource';
 import SubtitleControls from './SubtitleControls.vue';
@@ -55,6 +58,8 @@ interface SoundEffectOption {
 
 const toast = useToast();
 const videoRef = ref<HTMLVideoElement | null>(null);
+const playerContainer = ref<HTMLElement | null>(null);
+const androidControlsInset = ref(0);
 const hlsRef = shallowRef<Hls | null>(null);
 const phase = ref<PlayerPhase>('idle');
 const session = ref<QuarkPlaybackSession | null>(null);
@@ -145,7 +150,8 @@ let episodeCompletionHandled = false;
 const videoInstanceKey = ref(0);
 const isMobilePlaybackDevice = typeof window !== 'undefined'
   && (window.matchMedia('(max-width: 820px)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
-const { fullscreen: nativeFullscreen, error: fullscreenError, toggle: toggleFullscreen, exit: exitFullscreen } = useVideoFullscreen(videoRef);
+const isAndroidPlaybackDevice = /Android/i.test(navigator.userAgent);
+const { fullscreen, nativeFullscreen, error: fullscreenError, toggle: toggleFullscreen, exit: exitFullscreen } = useVideoFullscreen(videoRef, isAndroidPlaybackDevice ? playerContainer : undefined);
 const embeddedSubtitles = useEmbeddedSubtitles(videoRef, () => playback.value?.embeddedSubtitleUrl);
 watch(fullscreenError, message => { if (message) { toast.show(message, '!'); announce(message); } });
 
@@ -459,6 +465,7 @@ const restoreVideoAudioOutput = () => {
 };
 
 const resumeSoundEffect = () => {
+  if (isAndroidPlaybackDevice) hlsRef.value?.startLoad(-1);
   restoreVideoAudioOutput();
   // 即使已切回“原声”，旧媒体节点仍经过 AudioContext，也必须恢复它。
   if (audioContext || soundEffectMode.value !== 'original') void ensureSoundEffectGraph();
@@ -800,6 +807,8 @@ const handlePlaying = () => {
 const handleVisibilityChange = () => {
   if (!props.isOpen) return;
   const video = videoRef.value;
+  // PiP is a visible player even when its owning page is hidden.
+  if (isAndroidPlaybackDevice && video && document.pictureInPictureElement === video) return;
   if (document.visibilityState === 'hidden') {
     if (video && !video.paused) {
       backgroundResumeAt = Number.isFinite(video.currentTime) ? video.currentTime : 0;
@@ -814,8 +823,11 @@ const handleVisibilityChange = () => {
   if (!pageWasHidden) {
     hlsRef.value?.startLoad(-1);
     audioOutputNeedsReset = true;
-    if (phase.value === 'ready') manualPlayRequired.value = true;
+    if (phase.value === 'ready') manualPlayRequired.value = isAndroidPlaybackDevice ? Boolean(video?.paused) : true;
   }
+};
+const handleLeavePictureInPicture = () => {
+  if (document.visibilityState === 'hidden') handleVisibilityChange();
 };
 
 const handlePageHide = () => {
@@ -1186,6 +1198,15 @@ onMounted(() => {
   document.addEventListener('visibilitychange', handleVisibilityChange);
 });
 
+useAndroidMediaSession(videoRef, {
+  enabled: () => isAndroidPlaybackDevice && props.isOpen && phase.value === 'ready',
+  title: () => props.media?.title || '烟雨影视',
+  episode: () => currentEpisode.value?.episodeTitle || '',
+  nextAvailable: () => nextEpisodeIndex() >= 0,
+  next: () => { const index = nextEpisodeIndex(); if (index >= 0) void selectEpisode(index); },
+  play: startPlaybackFromPrompt,
+});
+
 defineExpose({ retry });
 </script>
 
@@ -1214,7 +1235,7 @@ defineExpose({ retry });
 
       <p v-if="session?.cachedOnly" class="cached-playback-note">原分享已失效，仍可播放已缓存的视频。其他集数可通过“换源”查找。</p>
       <div class="player-layout" :class="{ 'single-column': !episodes.length && !sources.length }">
-        <div class="video-column">
+        <div ref="playerContainer" class="video-column" :class="{ 'android-fullscreen': isAndroidPlaybackDevice && fullscreen && !nativeFullscreen }">
           <div class="video-stage" :class="{ 'has-mobile-transport': isMobilePlaybackDevice && !nativeFullscreen && phase === 'ready' && !manualPlayRequired }" :style="{ '--video-ratio': videoAspectRatio }">
             <video
               :key="videoInstanceKey"
@@ -1241,6 +1262,7 @@ defineExpose({ retry });
               @pause="handlePause"
               @ended="handleEnded"
               @error="handleVideoError"
+              @leavepictureinpicture="handleLeavePictureInPicture"
             >
               <track
                 v-for="subtitle in playback?.subtitles || []"
@@ -1252,9 +1274,7 @@ defineExpose({ retry });
                 :src="subtitle.url"
               />
             </video>
-
-
-
+            <AndroidCaptions v-if="isAndroidPlaybackDevice && videoRef && phase === 'ready'" :video="videoRef" :fit="pictureFit" :controls-inset="androidControlsInset" :native-fullscreen="nativeFullscreen" />
             <div v-if="phase === 'resolving' || phase === 'preparing'" class="stage-state loading-state" role="status" aria-live="polite">
               <img v-if="media.poster && !isMobilePlaybackDevice" class="stage-poster" :src="media.poster" alt="" aria-hidden="true" />
               <div class="loading-content">
@@ -1318,12 +1338,18 @@ defineExpose({ retry });
           </div>
 
             <MobilePlaybackControls
-              v-if="isMobilePlaybackDevice && !nativeFullscreen && videoRef && phase === 'ready' && !manualPlayRequired"
+              v-if="isMobilePlaybackDevice && !isAndroidPlaybackDevice && !nativeFullscreen && videoRef && phase === 'ready' && !manualPlayRequired"
               :video="videoRef" :expanded="nativeFullscreen" @fullscreen="toggleFullscreen"
             />
+            <AndroidPlaybackControls v-if="isAndroidPlaybackDevice && !nativeFullscreen && videoRef && phase === 'ready'"
+              :video="videoRef" :expanded="fullscreen" :title="media.title" :episodes="episodes" :current-index="currentEpisodeIndex"
+              @fullscreen="toggleFullscreen" @episode="selectEpisode" @inset="androidControlsInset = $event">
+              <SubtitleControls :video="videoRef" :hls="hlsRef" :username="username" :notice="playback?.subtitleNotice" compact
+                :loading="embeddedSubtitles.loading.value" :read-error="embeddedSubtitles.error.value" @retry-embedded="embeddedSubtitles.retry" />
+            </AndroidPlaybackControls>
 
           <div v-if="phase === 'ready' && videoRef" class="playback-tools" aria-label="播放工具">
-          <SubtitleControls :video="videoRef" :hls="hlsRef" :native-fullscreen="nativeFullscreen" :username="username" :notice="playback?.subtitleNotice" compact
+          <SubtitleControls v-if="!isAndroidPlaybackDevice || nativeFullscreen" :video="videoRef" :hls="hlsRef" :native-fullscreen="nativeFullscreen" :username="username" :notice="playback?.subtitleNotice" compact
             :loading="embeddedSubtitles.loading.value" :read-error="embeddedSubtitles.error.value" @retry-embedded="embeddedSubtitles.retry" />
           <DanmakuControls
             v-if="phase === 'ready' && videoRef && currentEpisode && media"
@@ -1676,4 +1702,12 @@ defineExpose({ retry });
 .video-element::-webkit-media-controls { color-scheme: dark; }
 
 @media (prefers-reduced-motion: reduce) { .loading-wave i, .playback-starting-pill svg, .setting-switch span, .setting-switch::before { transition: none; animation: none; } }
+</style>
+
+<style scoped>
+/* Real container fullscreen keeps captions, gestures and controls in the same coordinate space. */
+.video-column.android-fullscreen { position: relative; width: 100%; height: 100%; padding: 0; overflow: hidden; background: #000; }
+.android-fullscreen .video-stage { flex: 1 1 auto; height: 100%; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; }
+.android-fullscreen .playback-tools { display: none; }
+.stage-state, .play-prompt, .playback-starting { z-index: 5; }
 </style>

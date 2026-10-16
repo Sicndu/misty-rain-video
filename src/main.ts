@@ -3,7 +3,9 @@ import App from './App.vue';
 import './assets/styles/main.css';
 import './assets/styles/theme.css';
 import { initializeTheme } from './services/theme';
+import { initializeAndroidInstall } from './services/androidInstall';
 initializeTheme();
+initializeAndroidInstall();
 
 const navigatorWithStandalone = navigator as Navigator & { standalone?: boolean };
 const isWebClipLaunch = new URLSearchParams(window.location.search).get('webclip') === '1';
@@ -13,7 +15,7 @@ const isStandalone = isWebClipLaunch
 const isIosDevice = /iPhone|iPad|iPod/i.test(navigator.userAgent)
   || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-document.documentElement.classList.toggle('ios-standalone', isStandalone);
+document.documentElement.classList.toggle('ios-standalone', isStandalone && isIosDevice);
 
 const rootElement = document.documentElement;
 const visualViewport = window.visualViewport;
