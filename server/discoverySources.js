@@ -1,3 +1,4 @@
+import { catalogFacets } from './catalogFacets.js';
 export const DISCOVERY_FEEDS = [
   { id: 'tv', category: 'tv', title: '近期热播', collection: 'tv_hot', source: '豆瓣' },
   { id: 'movie', category: 'movie', title: '热门电影', collection: 'movie_hot_gaia', source: '豆瓣' },
@@ -33,7 +34,7 @@ export function normalizeDoubanFeed(payload, feed) {
     const id = subjectId(item?.id), title = text(item?.title, 120);
     if (!id || !title || (feed.category === 'movie' ? item.type !== 'movie' : item.type !== 'tv')) continue;
     const value = {
-      id: `douban-${id}`, provider: 'douban', title, category: feed.category,
+      id: `douban-${id}`, provider: 'douban', title, category: feed.category, ...catalogFacets(item),
       year: year(item.year), ratingCount: ratingCount(item.rating?.count), rating: item.rating?.count === 0 ? null : rating(item.rating?.value),
       subtitle: text(item.episodes_info, 60), description: text(item.card_subtitle),
       imageUrl: imageUrl(item.pic?.normal || item.cover?.url || item.pic?.large, 'douban'),

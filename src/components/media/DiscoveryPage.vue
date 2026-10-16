@@ -2,7 +2,9 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { ArrowUpRight, ChevronRight, RefreshCw, Star } from '@lucide/vue';
 import MediaPoster from '../common/MediaPoster.vue';
-import { loadDiscovery, type DiscoveryCategory, type DiscoveryItem, type DiscoverySection } from '../../services/discoveryService';
+import CatalogFilters from './CatalogFilters.vue';
+import { hasCatalogFilters, type CatalogFilters as FilterState } from '../../../server/catalogFacets.js';
+import { browseCatalog, loadDiscovery, type DiscoveryCategory, type DiscoveryItem, type DiscoverySection } from '../../services/discoveryService';
 
 import { catalogSortOptions, catalogSortDescription, sortCatalogItems, type CatalogSort } from '../../services/catalogSort';
 const sort = ref<CatalogSort>('recommended');
@@ -11,6 +13,34 @@ const emit = defineEmits<{ (event: 'select', item: DiscoveryItem): void; (event:
 const category = ref<DiscoveryCategory>('all');
 const animeMode = ref('anime');
 const weekday = ref(new Date().getDay() || 7);
+const filters = ref<FilterState>({ genre: '', country: '', year: '' });
+const isCalendar = computed(() => category.value === 'anime' && animeMode.value === 'calendar');
+const browsing = computed(() => hasCatalogFilters(filters.value) && !isCalendar.value);
+const browseItems = ref<DiscoveryItem[]>([]), browseLoading = ref(false), browseFailure = ref(''), browsePartial = ref(false);
+const nextStart = ref<number | null>(null);
+let browseController: AbortController | undefined, browseGeneration = 0, browseTimer: ReturnType<typeof setTimeout> | undefined;
+const stopBrowse = () => { browseGeneration++; browseController?.abort(); clearTimeout(browseTimer); browseLoading.value = false; };
+const readBrowse = async (more = false) => {
+  if (!props.active || !browsing.value || more && nextStart.value === null) return;
+  const start = more ? nextStart.value! : 0;
+  stopBrowse(); const generation = browseGeneration;
+  browseController = new AbortController(); browseLoading.value = true; browseFailure.value = '';
+  try {
+    const result = await browseCatalog(category.value, filters.value, sort.value, start, browseController.signal);
+    if (generation !== browseGeneration || !props.active) return;
+    browseItems.value = [...new Map([...(more ? browseItems.value : []), ...result.items].map(item => [item.id, item])).values()];
+    nextStart.value = result.nextStart; browsePartial.value = result.partial;
+  } catch { if (generation === browseGeneration) browseFailure.value = '豆瓣筛选暂时不可用，请稍后重试'; }
+  finally { if (generation === browseGeneration) browseLoading.value = false; }
+};
+watch([() => props.active, category, animeMode, filters, sort], () => {
+  stopBrowse();
+  if (!props.active || !browsing.value) return;
+  browseItems.value = []; nextStart.value = null; browseFailure.value = ''; browsePartial.value = false; browseLoading.value = true;
+  // Coalesce quick consecutive choices; abort and ignore superseded responses.
+  browseTimer = setTimeout(() => { void readBrowse(); }, 180);
+});
+onBeforeUnmount(stopBrowse);
 const categories: Array<{ id: DiscoveryCategory; label: string }> = [
   { id: 'all', label: '全部' }, { id: 'tv', label: '电视剧' }, { id: 'movie', label: '电影' },
   { id: 'anime', label: '动漫' }, { id: 'variety', label: '综艺' }
@@ -28,7 +58,7 @@ const updatedText = (section: DiscoverySection) => section.updatedAt
 
 const stop = () => { generation++; controller?.abort(); clearTimeout(timer); loading.value = false; };
 const read = async (poll = false) => {
-  if (!props.active) return;
+  if (!props.active || browsing.value) return;
   if (!poll) { stop(); pollCount = 0; }
   const current = ++generation, selected = category.value;
   controller = new AbortController(); loading.value = true; failure.value = '';
@@ -41,9 +71,9 @@ const read = async (poll = false) => {
     if (current === generation) failure.value = '推荐暂时无法加载，可以稍后重试。';
   } finally { if (current === generation) loading.value = false; }
 };
-watch([() => props.active, category], ([active]) => {
+watch([() => props.active, category, browsing], ([active]) => {
   stop();
-  if (active) { sections.value = cache.get(category.value) || []; void read(); }
+  if (active && !browsing.value) { sections.value = cache.get(category.value) || []; void read(); }
 }, { immediate: true });
 onBeforeUnmount(stop);
 const changeCategory = async (value: DiscoveryCategory) => {
@@ -60,13 +90,30 @@ const visibleItems = (section: DiscoverySection) => {
 
 <template>
   <div class="discovery-page">
-    <header class="discovery-heading"><h1>发现</h1><select v-model="sort" aria-label="发现排序" :title="catalogSortDescription[sort]"><option v-for="option in catalogSortOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></header>
+    <header class="discovery-heading"><h1>发现</h1><select v-model="sort" aria-label="发现排序" :title="browsing ? '豆瓣按所选方式检索' : catalogSortDescription[sort]"><option v-for="option in catalogSortOptions" :key="option.value" :value="option.value">{{ browsing && option.value === 'popularity' ? '热度 · 近期' : browsing && option.value === 'time' ? '时间 · 首映' : option.label }}</option></select></header>
     <nav class="discovery-categories" aria-label="发现分类">
       <button v-for="item in categories" :key="item.id" type="button" :aria-pressed="category === item.id" @click="changeCategory(item.id)">{{ item.label }}</button>
     </nav>
     <div v-if="category === 'anime'" class="anime-modes" aria-label="动漫榜单">
       <button type="button" :aria-pressed="animeMode === 'anime'" @click="animeMode = 'anime'">热门推荐</button><button type="button" :aria-pressed="animeMode === 'calendar'" @click="animeMode = 'calendar'">每周放送</button>
     </div>
+    <CatalogFilters v-if="!isCalendar" v-model="filters" />
+    <section v-if="browsing" class="discovery-section" aria-label="豆瓣筛选结果">
+      <header class="section-heading"><h2>筛选结果<span v-if="browseItems.length" class="browse-count">{{ browseItems.length }} 部</span></h2></header>
+      <p v-if="browsePartial" class="source-note" role="status">豆瓣暂时返回了部分结果</p>
+      <div v-if="browseItems.length" class="discovery-posters">
+        <button v-for="item in browseItems" :key="item.id" class="discovery-card" type="button" :aria-label="`${inLibrary.has(item.id) ? '播放' : '查找片源'}：${item.title}（${item.year || '年份未知'}）`" @click="emit('select', item)">
+          <span class="discovery-cover"><MediaPoster :src="item.poster" alt="" loading="lazy" /><span v-if="inLibrary.has(item.id)" class="library-badge">已收藏</span></span>
+          <strong class="discovery-title">{{ item.title }}</strong><span class="discovery-meta"><span>{{ item.year }}{{ item.countries?.length ? ` · ${item.countries.join(' / ')}` : '' }}</span><span v-if="item.rating !== null" class="discovery-rating"><Star aria-hidden="true" />{{ item.rating.toFixed(1) }}</span></span>
+        </button>
+      </div>
+      <div v-if="browseLoading" class="discovery-skeleton" role="status" aria-label="正在筛选影片"><div v-for="n in 4" :key="n"></div></div>
+      <div v-else-if="browseFailure" class="discovery-feedback" role="alert"><span>{{ browseFailure }}</span><button type="button" @click="readBrowse(browseItems.length > 0)">重试</button></div>
+      <div v-else-if="!browseItems.length" class="discovery-empty"><p>没有符合筛选条件的影片</p><button type="button" @click="filters = { genre: '', country: '', year: '' }">清空筛选</button></div>
+      <button v-else-if="nextStart !== null" type="button" class="browse-more" @click="readBrowse(true)">加载更多</button>
+      <p class="source-note">影片信息来自豆瓣</p>
+    </section>
+    <template v-else>
     <div v-if="failure" class="discovery-feedback" role="alert"><span>{{ failure }}</span><button type="button" :disabled="loading" @click="read()"><RefreshCw aria-hidden="true" />重试</button></div>
     <div v-if="loading && !sections.length" class="discovery-skeleton" role="status" aria-label="正在加载推荐"><div v-for="n in 6" :key="n"></div></div>
     <section v-for="section in shownSections" :key="section.id" class="discovery-section" :aria-labelledby="`discovery-${section.id}`">
@@ -86,10 +133,13 @@ const visibleItems = (section: DiscoverySection) => {
       <div v-else class="discovery-empty"><p>{{ section.id === 'calendar' && section.items.length ? '当天暂无放送安排' : '推荐暂时不可用，稍后再来看看' }}</p><button type="button" @click="emit('search')">搜索片名</button></div>
       <footer class="source-note"><a :href="section.sourceUrl" target="_blank" rel="noopener noreferrer">{{ section.source }}<ArrowUpRight aria-hidden="true" /></a><span>{{ section.stale ? '暂用上次推荐 · ' : '' }}{{ updatedText(section) }}</span><span v-if="section.refreshing">更新中</span></footer>
     </section>
+    </template>
   </div>
 </template>
 
 <style scoped>
+.browse-count { margin-left: 10px; color: var(--text-tertiary); font-size: .75rem; font-weight: 400; }
+.browse-more { display: block; min-height: 44px; margin: 24px auto 0; padding: 0 24px; border: 1px solid var(--divider); border-radius: 8px; color: var(--liquid-accent); background: var(--surface-2); }
 .discovery-heading, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .discovery-heading select { min-height: 40px; padding: 0 12px; border: 1px solid var(--divider); border-radius: 8px; color: var(--text-secondary); background: var(--surface-2); font-size: .8rem; }
 .discovery-heading h1 { font-size: 2rem; font-weight: 700; letter-spacing: -.035em; }

@@ -524,3 +524,65 @@ test('partial catalog displays an honest notice and refreshes when returning; co
   assert.equal(calls,2);assert.equal(document.querySelector('.catalog-notice'),null);
  }finally{app.unmount();}
 });
+
+const chooseFacet = async (label, value) => {
+ const select=document.querySelector(`select[aria-label="${label}"]`);assert.ok(select,label);
+ select.value=value;select.dispatchEvent(new window.Event('change',{bubbles:true}));await flush();
+};
+const settleBrowse = async () => { await new Promise(resolve=>setTimeout(resolve,210));await flush(); };
+test('search facets combine locally, show unknown metadata, clear on a new keyword and retain card identity',async t=>{
+ let calls=0,selected;const list=[
+  {...discovered,id:'douban-1',title:'目标电影',year:'2024',genres:['科幻'],countries:['美国','加拿大']},
+  {...discovered,id:'douban-2',title:'同类旧片',year:'2023',genres:['科幻'],countries:['美国']},
+  {...discovered,id:'douban-3',title:'其他类型',year:'2024',genres:['喜剧'],countries:['日本']},
+  {...discovered,id:'douban-4',title:'缺少资料',year:'2024',description:''}
+ ];
+ t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({code:0,data:{items:list}})});
+ const props=reactive({query:'测试',active:true,libraryCatalogIds:[],onSelect:item=>selected=item});const app=mount(Catalog,props);
+ try {
+  await flush();await chooseFacet('类型筛选','科幻');await chooseFacet('国家地区筛选','美国');await chooseFacet('年份筛选','2024');
+  assert.equal(document.querySelectorAll('.catalog-card').length,1);assert.match(document.body.textContent,/1 部影片缺少/);assert.equal(calls,1);
+  document.querySelector('.catalog-card').click();assert.equal(selected.id,'douban-1');
+  await chooseFacet('国家地区筛选','法国');assert.match(document.querySelector('.catalog-empty').textContent,/没有符合筛选/);
+  document.querySelector('.clear-filters').click();await flush();assert.equal(document.querySelectorAll('.catalog-card').length,4);
+  await chooseFacet('类型筛选','科幻');props.query='另一个片名';await flush();
+  assert.equal(document.querySelector('select[aria-label="类型筛选"]').value,'');assert.equal(document.querySelectorAll('.catalog-card').length,4);
+ }finally{app.unmount();}
+});
+test('discovery sends combined filters, cancels obsolete queries, appends deduplicated pages, and clears back to charts',async t=>{
+ const requests=[];let selected;
+ t.mock.method(globalThis,'fetch',(url,options)=>{
+  const address=new URL(String(url),'http://localhost');
+  if(address.pathname.endsWith('/discovery'))return Promise.resolve(Response.json({code:0,data:{sections:[discoverySection('movie')]}}));
+  return new Promise(resolve=>requests.push({address,options,resolve}));
+ });
+ const props=reactive({active:true,libraryCatalogIds:[],onSelect:item=>selected=item});const app=mount(Discovery,props);
+ try {
+  await flush();await chooseFacet('类型筛选','科幻');await chooseFacet('国家地区筛选','美国');await chooseFacet('年份筛选','2024');await settleBrowse();
+  assert.equal(requests.length,1);assert.equal(requests[0].address.searchParams.get('genre'),'科幻');assert.equal(requests[0].address.searchParams.get('country'),'美国');
+  await chooseFacet('年份筛选','2025');assert.equal(requests[0].options.signal.aborted,true);await settleBrowse();assert.equal(requests.length,2);
+  requests[1].resolve(Response.json({code:0,data:{items:[{...discovered,id:'douban-20',title:'新结果'}],partial:false,nextStart:24}}));await flush();
+  requests[0].resolve(Response.json({code:0,data:{items:[{...discovered,title:'过时结果'}],partial:false,nextStart:null}}));await flush();
+  assert.match(document.querySelector('.discovery-title').textContent,/新结果/);assert.doesNotMatch(document.body.textContent,/过时结果/);
+  document.querySelector('.browse-more').click();await flush();assert.equal(requests[2].address.searchParams.get('start'),'24');
+  requests[2].resolve(Response.json({code:0,data:{items:[{...discovered,id:'douban-20',title:'新结果'},{...discovered,id:'douban-21',title:'下一页'}],partial:false,nextStart:null}}));await flush();
+  assert.equal(document.querySelectorAll('.discovery-card').length,2);assert.equal(document.querySelector('.browse-more'),null);
+  [...document.querySelectorAll('.discovery-card')].find(card=>card.textContent.includes('下一页')).click();assert.equal(selected.id,'douban-21');
+  document.querySelector('.clear-filters').click();await flush();assert.match(document.body.textContent,/热门电影/);assert.equal(document.querySelector('[aria-label="豆瓣筛选结果"]'),null);
+  await chooseFacet('类型筛选','科幻');await settleBrowse();const last=requests.at(-1);props.active=false;await flush();assert.equal(last.options.signal.aborted,true);
+  last.resolve(Response.json({code:0,data:{items:[{...discovered,title:'后台旧结果'}],partial:false,nextStart:null}}));await flush();assert.doesNotMatch(document.body.textContent,/后台旧结果/);
+ }finally{app.unmount();}
+});
+test('browse empty and failed states provide recovery without discarding a loaded page',async t=>{
+ let mode='empty';t.mock.method(globalThis,'fetch',async url=>{
+  if(String(url).includes('/api/discovery'))return Response.json({code:0,data:{sections:[]}});
+  if(mode==='error')return Response.json({code:503},{status:503});
+  return Response.json({code:0,data:{items:mode==='empty'?[]:[discovered],partial:false,nextStart:mode==='empty'?null:24}});
+ });
+ const app=mount(Discovery,{active:true,libraryCatalogIds:[]});
+ try {
+  await flush();await chooseFacet('类型筛选','科幻');await settleBrowse();assert.match(document.body.textContent,/没有符合筛选/);
+  mode='loaded';await chooseFacet('国家地区筛选','美国');await settleBrowse();assert.ok(document.querySelector('.browse-more'));
+  mode='error';document.querySelector('.browse-more').click();await flush();assert.ok(document.querySelector('.discovery-card'));assert.match(document.querySelector('[role="alert"]').textContent,/暂时不可用/);
+ }finally{app.unmount();}
+});

@@ -13,6 +13,7 @@ import { ShareAvailability } from './shareAvailability.js';
 import { TvPlaybackClient } from './tvPlaybackClient.js';
 import { DiscoveryService } from './discoveryService.js';
 import { CatalogSearch } from './catalogSearch.js';
+import { CatalogBrowse } from './catalogBrowse.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -62,6 +63,7 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
   context.libraryMaintenance = new LibraryMaintenance(context);
   context.discovery = new DiscoveryService({ dataDir, posterService: context.posterService });
   context.catalogSearch = new CatalogSearch({ discovery: context.discovery });
+  context.catalogBrowse = new CatalogBrowse({ catalogSearch: context.catalogSearch });
   return context;
 };
 
@@ -281,6 +283,10 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
+    if (pathname === '/api/catalog/browse' && request.method === 'GET') {
+      sendSuccess(response, await context.catalogBrowse.get(Object.fromEntries(url.searchParams)));
+      return true;
+    }
     if (pathname === '/api/catalog/search' && request.method === 'GET') {
       sendSuccess(response, await context.catalogSearch.search(url.searchParams.get('q')));
       return true;

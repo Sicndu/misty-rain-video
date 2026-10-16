@@ -1,3 +1,4 @@
+import { catalogFacets } from './catalogFacets.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,7 +41,7 @@ export class DiscoveryService {
           && /^(douban|bangumi)-\d{1,13}$/.test(item.id) && item.category === feed.category
           && ['douban', 'bangumi'].includes(item.provider) && item.id.startsWith(`${item.provider}-`)
           && (!item.imageUrl || isDiscoveryImageUrl(item.imageUrl, item.provider))).slice(0, feed.id === 'calendar' ? 210 : 30)
-          .map(item => ({ ...item, ratingCount: ratingCount(item.ratingCount), rating: typeof item.rating === 'number' && item.rating > 0 && item.rating <= 10 ? item.rating : null,
+          .map(item => ({ ...item, ...catalogFacets(item), ratingCount: ratingCount(item.ratingCount), rating: typeof item.rating === 'number' && item.rating > 0 && item.rating <= 10 ? item.rating : null,
             year: /^(19|20)\d{2}$/.test(String(item.year || '')) ? String(item.year) : '',
             subtitle: typeof item.subtitle === 'string' ? item.subtitle.slice(0, 60) : '',
             description: typeof item.description === 'string' ? item.description.slice(0, 180) : '',

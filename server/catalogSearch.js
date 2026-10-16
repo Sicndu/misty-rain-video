@@ -1,3 +1,4 @@
+import { catalogFacets } from './catalogFacets.js';
 import { isDiscoveryImageUrl, ratingCount } from './discoverySources.js';
 import { catalogSearchKeyword, catalogTitleRelevance } from './catalogTitle.js';
 
@@ -16,7 +17,7 @@ export function normalizeCatalogSearch(payload) {
       : type === 'tv' && /真人秀|脱口秀|综艺/.test(description) ? 'variety' : type;
     const imageUrl = text(item.cover_url, 2048).replace(/^http:/, 'https:');
     const score = Number(item.rating?.value);
-    const entry = { id: `douban-${item.id}`, provider: 'douban', title, category,
+    const entry = { id: `douban-${item.id}`, provider: 'douban', title, category, ...catalogFacets(item),
       ratingCount: ratingCount(item.rating?.count),
       year: /^(19|20)\d{2}$/.test(String(item.year)) ? String(item.year) : '',
       rating: score > 0 && score <= 10 && item.rating?.count !== 0 ? Math.round(score * 10) / 10 : null,
@@ -41,7 +42,7 @@ export function normalizeCatalogSuggestions(payload) {
     items.set(id, { id, provider: 'douban', title, aliases: alias && alias !== title ? [alias] : [],
       category: Number(row.episode) > 0 ? 'tv' : 'movie',
       year: /^(19|20)\d{2}$/.test(String(row.year)) ? String(row.year) : '',
-      rating: null, ratingCount: null, subtitle: '', description: alias !== title ? alias : '',
+      rating: null, ratingCount: null, genres: [], countries: [], subtitle: '', description: alias !== title ? alias : '',
       imageUrl: isDiscoveryImageUrl(imageUrl, 'douban') ? imageUrl : '',
       sourceUrl: `https://movie.douban.com/subject/${row.id}/` });
   }
@@ -54,6 +55,8 @@ function mergeItems(primary, suggestions, known, query) {
     const previous = metadata.get(item.id);
     metadata.set(item.id, { ...previous, ...item,
       aliases: [...new Set([...(previous?.aliases || []), ...(item.aliases || [])])],
+      genres: item.genres?.length ? item.genres : previous?.genres || [],
+      countries: item.countries?.length ? item.countries : previous?.countries || [],
       rating: item.ratingCount === 0 ? null : item.rating ?? previous?.rating ?? null,
       ratingCount: item.ratingCount ?? previous?.ratingCount ?? null,
       imageUrl: item.imageUrl || previous?.imageUrl || '',

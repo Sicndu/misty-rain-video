@@ -160,7 +160,7 @@ test('发现数据和海报均要求登录，直接播放失败也记住已取�
     userContext: () => ({}), discovery: { get: () => { reads++; return { sections: [] }; }, poster: () => { reads++; } },
     quarkGateway: { createPlaybackSession: async () => { throw Object.assign(new Error('cancelled'), { code: 'QUARK_SHARE_UNAVAILABLE', statusCode: 422 }); } },
     shareAvailability: { markUnavailable: url => removed.push(url) } };
-  for (const url of ['/api/discovery', '/api/discovery/posters/douban-1']) {
+  for (const url of ['/api/discovery', '/api/discovery/posters/douban-1', '/api/catalog/browse?genre=科幻']) {
     const res = response(); await handleApiRequest({ method: 'GET', url, headers: { host: 'localhost' } }, res, context); assert.equal(res.statusCode, 401);
   }
   assert.equal(reads, 0);
