@@ -292,7 +292,8 @@ test('one player control bar owns captions, episodes and settings without a dupl
     assert.equal(document.querySelector('[aria-label="片尾时长（秒）"]').value, '45');
     menu.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})); await nextTick();
     assert.equal(menu.style.display, 'none'); assert.equal(document.activeElement,button);
-    assert.equal(document.querySelectorAll('[aria-label="选集与片源"]').length, 1);
+    assert.equal(document.querySelector('[aria-label="选集与片源"]'), null);
+    assert.ok(document.querySelector('.watch-details .episode-source-panel'));
     assert.ok(document.querySelector('main.player-page'));
     assert.equal(document.querySelector('[aria-modal="true"]'), null);
     assert.equal(document.querySelector('.rotated-player'), null);
@@ -364,10 +365,10 @@ test('new viewers get Chinese captions automatically; a manual off choice persis
 test('movies display named files instead of an episode number or unlabeled dots', async t => {
   mockApi(t); const app = mount(Player, { isOpen: true, media: { ...media, category: 'movie' }, username: 'movie-label-fixture' });
   try {
-    await flush(); document.querySelector('[aria-label="选集与片源"]').click(); await nextTick();
+    await flush();
     assert.ok(document.querySelector('[aria-label="视频列表"]'));
     assert.doesNotMatch(document.querySelector('.title-copy').textContent, /第.*集/);
-    assert.match(document.querySelector('.episodes.files button').textContent, /1.mp4/);
+    assert.match(document.querySelector('.episodes button').textContent, /1.mp4/);
   } finally { app.unmount(); }
 });
 
@@ -444,19 +445,26 @@ test('searching new content updates the save title; replacing an existing source
 
 test.after(() => { dom.window.close(); fs.rmSync(folder, { recursive: true, force: true }); });
 
-test('episode panel sorting preserves exact episode selection and separates current/all collection', async t => {
+test('three episode views retain sort and current identity, with only whole-series collection', async t => {
   mockApi(t); const collected=[];
-  const app=mount(Player,{isOpen:true,media:{...media,quarkFid:undefined,quarkShareUrl:'https://pan.quark.cn/s/fixture'},username:'panel-fixture',collect:async(_media,fids)=>collected.push(fids)});
+  const item={...media,quarkFid:undefined,quarkShareUrl:'https://pan.quark.cn/s/fixture'};
+  const app=mount(Player,{isOpen:true,media:item,username:'panel-fixture',collect:async value=>collected.push(value)});
   try {
-    await flush();document.querySelector('[aria-label="选集与片源"]').click();await flush();
-    const order=document.querySelector('[aria-label="选集排序"]');order.value='desc';order.dispatchEvent(new window.Event('change'));await nextTick();
-    assert.match(document.querySelector('.episodes button').textContent,/2/);
-    assert.match(document.querySelector('.episodes [aria-selected="true"]').textContent,/1/);
-    const buttons=document.querySelectorAll('.episode-actions button');buttons[0].click();await flush();buttons[1].click();await flush();
-    assert.deepEqual(collected,[['ep1'],undefined]);
-    assert.ok(document.querySelector('.section-heading').closest('.player-controls'));
-    assert.equal(document.querySelector('.header-actions'),null);
-  } finally {app.unmount();localStorage.removeItem('misty_rain_episode_order');}
+    await flush();
+    const panel=document.querySelector('.watch-details .episode-source-panel');assert.ok(panel);
+    assert.equal(document.querySelector('.episode-actions'),null);assert.doesNotMatch(panel.textContent,/收藏本集/);
+    assert.equal(panel.querySelectorAll('.resource-thumbnail').length,2);
+    panel.querySelector('[aria-label="紧凑列表"]').click();await nextTick();
+    assert.equal(panel.querySelector('.resource-thumbnail'),null);assert.ok(panel.querySelector('.view-compact'));
+    panel.querySelector('[aria-label="数字格"]').click();await nextTick();
+    assert.equal(panel.querySelector('.resource-thumbnail'),null);assert.equal(panel.querySelector('.episodes button').textContent,'1');
+    const order=panel.querySelector('[aria-label="选集排序"]');order.value='desc';order.dispatchEvent(new window.Event('change'));await nextTick();
+    assert.equal(panel.querySelector('.episodes button').textContent,'2');
+    assert.equal(panel.querySelector('.episodes [aria-selected="true"]').textContent,'1');
+    assert.equal(localStorage.getItem('misty_rain_episode_view'),'numbers');
+    document.querySelector('.watch-summary .collect-series').click();await flush();
+    assert.deepEqual(collected,[item]);
+  } finally {app.unmount();localStorage.removeItem('misty_rain_episode_order');localStorage.removeItem('misty_rain_episode_view');}
 });
 
 const { findPlaybackCandidates } = await compile('src/services/playbackCandidates.ts','playback-candidates');
@@ -488,4 +496,21 @@ test('background source prefetch aborts a stalled request at its twenty-second d
  t.mock.method(globalThis,'fetch',(_url,{signal})=>new Promise((_resolve,reject)=>{requestSignal=signal;signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true})}));
  const task=findPlaybackCandidates('测试剧','',new AbortController().signal,()=>assert.fail('no late publication'));
  t.mock.timers.tick(20_001);await task;assert.equal(requestSignal.aborted,true);
+});
+
+test('fullscreen moves the same episode panel and restores its compact view when exiting', async t => {
+  mockApi(t);
+  const original=document.exitFullscreen;
+  const originalRequest=window.HTMLElement.prototype.requestFullscreen;
+  window.HTMLElement.prototype.requestFullscreen=async function(){Object.defineProperty(document,'fullscreenElement',{configurable:true,value:this});document.dispatchEvent(new window.Event('fullscreenchange'));};
+  document.exitFullscreen=async()=>{Object.defineProperty(document,'fullscreenElement',{configurable:true,value:null});document.dispatchEvent(new window.Event('fullscreenchange'));};
+  const app=mount(Player,{isOpen:true,media,username:'fullscreen-layout'});
+  try{
+    await flush();const video=document.querySelector('video');Object.defineProperty(video,'readyState',{configurable:true,value:1});
+    const panel=document.querySelector('.episode-source-panel');panel.querySelector('[aria-label="紧凑列表"]').click();await flush();
+    document.querySelector('[aria-label="全屏播放"]').click();await flush();
+    assert.equal(document.querySelectorAll('.episode-source-panel').length,1);assert.ok(panel.closest('.settings-menu'));
+    document.querySelector('[aria-label="选集与片源"]').click();await flush();assert.notEqual(document.querySelector('.settings-menu').style.display,'none');
+    await document.exitFullscreen();await flush();assert.equal(document.querySelector('.watch-details .episode-source-panel'),panel);assert.ok(panel.querySelector('.view-compact'));assert.equal(panel.querySelectorAll('[aria-selected="true"]').length,1);
+  }finally{app.unmount();document.exitFullscreen=original;window.HTMLElement.prototype.requestFullscreen=originalRequest;localStorage.removeItem('misty_rain_episode_view');}
 });

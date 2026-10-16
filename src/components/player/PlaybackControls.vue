@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { ChevronLeft, PictureInPicture2, Settings2, X, ListVideo } from '@lucide/vue';
+import { ChevronLeft, PictureInPicture2, X, ListVideo } from '@lucide/vue';
 import MobilePlaybackControls from './MobilePlaybackControls.vue';
 
 const props = defineProps<{
-  video: HTMLVideoElement; expanded: boolean; title: string;
+  video: HTMLVideoElement; expanded: boolean; title: string; nativeFullscreen?: boolean;
   episodes: Array<{ fid: string; episodeTitle: string }>; currentIndex: number;
 }>();
 const emit = defineEmits<{
   (event: 'fullscreen'): void;
-  (event: 'episode', index: number): void;
   (event: 'inset', pixels: number): void;
 }>();
 const root = ref<HTMLElement | null>(null);
@@ -94,6 +93,7 @@ async function togglePip() {
   } catch { tell('当前无法进入画中画'); reveal(); }
 }
 const changeRate = (event: Event) => { props.video.playbackRate = Number((event.target as HTMLSelectElement).value); };
+watch(() => props.expanded, expanded => { if (!expanded) episodesOpen.value = false; });
 watch([() => props.expanded, visible, settingsOpen, episodesOpen], () => { measure(); scheduleHide(); }, { flush: 'post' });
 watch([() => props.video, root], ([video, element]) => {
   release(); cancelGesture(); feedback.value = ''; visible.value = true;
@@ -114,20 +114,21 @@ watch([() => props.video, root], ([video, element]) => {
 onBeforeUnmount(() => { release(); cancelGesture(); clearTimeout(feedbackTimer); emit('inset', 0); });
 </script>
 <template>
-  <Teleport v-if="video.parentElement" :to="video.parentElement">
+  <Teleport v-if="video.parentElement && !nativeFullscreen" :to="video.parentElement">
     <div class="player-gesture" aria-hidden="true" @pointerdown="pointerDown" @pointerup="pointerUp" @pointercancel="cancelGesture" @pointermove="$event.pointerType === 'mouse' && reveal()" />
     <span v-if="feedback" class="gesture-feedback" role="status">{{ feedback }}</span>
     <div v-if="expanded && visible" class="fullscreen-heading"><button type="button" aria-label="退出全屏" @click="emit('fullscreen')"><ChevronLeft /></button><span>{{ title }}</span></div>
   </Teleport>
-  <div ref="root" class="player-controls" aria-label="播放器控制栏" @keydown="panelKeydown" :class="{ expanded, concealed: expanded && !visible }" :inert="expanded && !visible" @pointerdown="reveal" @pointermove="$event.pointerType === 'mouse' && reveal()" @focusin="reveal" @focusout="scheduleHide">
-    <MobilePlaybackControls :video="video" :expanded="expanded" @fullscreen="emit('fullscreen')" />
-    <div class="secondary-controls">
-      <slot />
-      <button ref="episodesButton" type="button" aria-label="选集与片源" :aria-expanded="episodesOpen" aria-controls="player-settings-menu" @click="episodesOpen = !episodesOpen; settingsOpen = false; reveal()"><ListVideo /></button>
-      <select aria-label="播放速度" :value="rate" @change="changeRate"><option v-for="speed in [.5, .75, 1, 1.25, 1.5, 2]" :key="speed" :value="speed">{{ speed }}×</option></select>
-      <button ref="settingsButton" type="button" aria-label="播放设置" :aria-expanded="settingsOpen" aria-controls="player-settings-menu" @click="toggleSettings"><Settings2 /></button>
-      <button v-if="canPip" type="button" :aria-label="pip ? '退出画中画' : '画中画'" @click="togglePip"><PictureInPicture2 /></button>
-    </div>
+  <div v-show="!nativeFullscreen" ref="root" class="player-controls" aria-label="播放器控制栏" @keydown="panelKeydown" :class="{ expanded, concealed: expanded && !visible }" :inert="expanded && !visible" @pointerdown="reveal" @pointermove="$event.pointerType === 'mouse' && reveal()" @focusin="reveal" @focusout="scheduleHide">
+    <MobilePlaybackControls :video="video" :expanded="expanded" @fullscreen="emit('fullscreen')">
+      <div class="transport-tools">
+        <slot />
+        <button v-if="expanded" ref="episodesButton" type="button" aria-label="选集与片源" :aria-expanded="episodesOpen" aria-controls="player-settings-menu" @click="episodesOpen = !episodesOpen; settingsOpen = false; reveal()"><ListVideo /></button>
+        <select aria-label="播放速度" :value="rate" @change="changeRate"><option v-for="speed in [.5,.75,1,1.25,1.5,2]" :key="speed" :value="speed">{{ speed }}×</option></select>
+        <button ref="settingsButton" type="button" class="quality-button" aria-label="播放设置" title="画质与播放设置" :aria-expanded="settingsOpen" aria-controls="player-settings-menu" @click="toggleSettings">画质</button>
+        <button v-if="canPip" type="button" :aria-label="pip ? '退出画中画' : '画中画'" @click="togglePip"><PictureInPicture2 /></button>
+      </div>
+    </MobilePlaybackControls>
     <section v-show="settingsOpen || episodesOpen" id="player-settings-menu" class="settings-menu" :aria-label="episodesOpen ? '选集与片源' : '播放设置'" :inert="!settingsOpen && !episodesOpen" :style="{ maxHeight: `${panelMaxHeight}px` }">
       <header><strong>{{ episodesOpen ? '选集与片源' : '播放设置' }}</strong><button type="button" aria-label="关闭播放设置" @click="closeSettings"><X /></button></header>
       <div class="settings-body"><div v-show="settingsOpen"><slot name="settings" /></div><div v-show="episodesOpen"><slot name="episodes" :active="episodesOpen" /></div></div>
@@ -135,36 +136,26 @@ onBeforeUnmount(() => { release(); cancelGesture(); clearTimeout(feedbackTimer);
   </div>
 </template>
 <style scoped>
-.player-controls { position: relative; --text-secondary: #ddd; --liquid-accent-subtle: #28374b; --switch-track: #555; --switch-knob: #fff; --accent-ink: #15243a; --surface-1: #202024; --text-primary: #fff; --text-tertiary: #c6c6cc; --surface-2: #242428; --divider: #444; --liquid-accent: #a8c8ff; flex: 0 0 auto; background: #151518; color: white; border-radius: 0 0 12px 12px; }
-.player-controls.expanded { position: absolute; z-index: 7; bottom: 0; left: 0; right: 0; border-radius: 0; padding: 8px max(16px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); background: linear-gradient(transparent, #000d); }
-.player-controls.expanded :deep(.mobile-controls) { background: transparent; }
-.concealed { opacity: 0; pointer-events: none; }
-.secondary-controls { display: flex; gap: 4px; align-items: center; padding: 0 4px 4px; }
-.secondary-controls > :deep(.subtitle-controls) { flex: 1; min-width: 0; }
-.secondary-controls :deep(select), .secondary-controls > select { color-scheme: dark; color: white; background: transparent; border: 0; border-radius: 6px; height: 44px; min-width: 0; max-width: 100%; font-size: 14px; }
-.secondary-controls > select { padding: 0 8px; max-width: 28%; }
-.secondary-controls :deep(option) { background: #151518; color: white; }
-.secondary-controls :deep(p) { margin: 4px 8px; }
-button { width: 44px; height: 44px; flex-shrink: 0; display: grid; place-items: center; padding: 10px; border: 0; color: inherit; background: transparent; }
-button svg { width: 22px; height: 22px; }
-button:focus-visible, select:focus-visible { outline: 2px solid white; outline-offset: -2px; }
-.player-gesture { position: absolute; inset: 0; z-index: 2; touch-action: pan-y; }
-.gesture-feedback { position: absolute; z-index: 8; left: 50%; top: 45%; transform: translate(-50%, -50%); padding: 8px 14px; border-radius: 8px; background: #000b; color: white; font-size: 14px; pointer-events: none; }
-.fullscreen-heading { position: absolute; z-index: 6; inset: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: env(safe-area-inset-top) 16px 16px max(8px, env(safe-area-inset-left)); color: white; background: linear-gradient(#0009, transparent); }
-.fullscreen-heading span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-</style>
-
-<style scoped>
-.settings-menu { position: absolute; z-index: 12; right: 4px; bottom: 4px; display: flex; flex-direction: column; width: min(360px,calc(100% - 8px)); overflow: hidden; border: 1px solid #48484c; border-radius: 12px; background: #202024; color: #fff; box-shadow: 0 8px 28px #0006; color-scheme: dark; }
-.settings-menu header { display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; min-height: 44px; padding-left: 16px; border-bottom: 1px solid #444; }
-.settings-menu strong { font-size: 14px; font-weight: 600; }
-.settings-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.secondary-controls > :deep(.subtitle-controls) { overflow: hidden; }
-@media(min-width:821px) { .secondary-controls > :deep(.subtitle-controls) { flex: 0 1 220px; margin-right: auto; } }
-</style>
-
-<style scoped>
-@media(max-width:820px) {
-  .player-controls:not(.expanded) .settings-menu { position: fixed; left: 8px; right: 8px; bottom: max(8px,env(safe-area-inset-bottom)); width: auto; max-height: min(520px,calc(100dvh - 120px)) !important; }
-}
+.player-controls { position:relative; flex:0 0 auto; color:#fff; background:#101114; border-radius:0 0 10px 10px; }
+.player-controls.expanded { position:absolute; z-index:7; bottom:0; left:0; right:0; border-radius:0; padding:8px max(12px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left)); background:linear-gradient(transparent,#000d); }
+.concealed { opacity:0; pointer-events:none; }
+.transport-tools { display:flex; gap:2px; align-items:center; flex-shrink:0; }
+.transport-tools :deep(.subtitle-controls) { width:36px; flex:0 0 36px; }
+.transport-tools :deep(.subtitle-picker>svg) { color:#ddd; }
+.transport-tools>select { appearance:auto; color-scheme:dark; color:white; background:transparent; border:0; border-radius:6px; height:40px; width:52px; padding:0 2px; font-size:12px; }
+.transport-tools>select option { background:#151518; color:white; }
+button { width:36px; height:40px; flex-shrink:0; display:grid; place-items:center; padding:8px; border:0; color:inherit; background:transparent; cursor:pointer; }
+button svg { width:20px; height:20px; }
+.quality-button { width:40px; padding:0; font-size:12px; }
+button:focus-visible,select:focus-visible { outline:2px solid currentColor; outline-offset:-2px; }
+.player-gesture { position:absolute; inset:0; z-index:2; touch-action:pan-y; }
+.gesture-feedback { position:absolute; z-index:8; left:50%; top:45%; transform:translate(-50%,-50%); padding:8px 14px; border-radius:8px; background:#000b; color:white; font-size:14px; pointer-events:none; }
+.fullscreen-heading { position:absolute; z-index:6; inset:0 0 auto; display:flex; align-items:center; gap:8px; padding:env(safe-area-inset-top) 16px 16px max(8px,env(safe-area-inset-left)); color:white; background:linear-gradient(#0009,transparent); }
+.fullscreen-heading span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.settings-menu { position:absolute; z-index:12; right:4px; bottom:4px; display:flex; flex-direction:column; width:min(380px,calc(100% - 8px)); overflow:hidden; border:1px solid var(--divider); border-radius:12px; background:var(--surface-elevated,var(--surface-1)); color:var(--text-primary); box-shadow:0 8px 28px #0003; color-scheme:inherit; }
+.settings-menu header { display:flex; justify-content:space-between; align-items:center; flex-shrink:0; min-height:44px; padding-left:16px; border-bottom:1px solid var(--divider); }
+.settings-menu strong { font-size:14px; font-weight:600; }
+.settings-body { min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+@media(max-width:820px) { .player-controls:not(.expanded) .settings-menu { position:fixed; left:8px; right:8px; bottom:max(8px,env(safe-area-inset-bottom)); width:auto; max-height:min(520px,calc(100dvh - 120px)) !important; } }
+@media(max-width:360px) { .transport-tools>select { width:46px; } .transport-tools button,.transport-tools :deep(.subtitle-controls) { width:32px; flex-basis:32px; } }
 </style>

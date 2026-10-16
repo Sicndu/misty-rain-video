@@ -101,8 +101,7 @@ function touch(target, type, x, y = 40, extras = {}) {
 }
 test('Android gestures seek by double tap, ignore swipes/multitouch, retain scrubbing and quick episode controls', async () => {
   const media = video(); media.currentTime = 60;
-  let selected = -1;
-  const view = mount(Controls, { video: markRaw(media), expanded: false, title: 'Test', episodes: [{ fid: 'a', episodeTitle: '第 1 集' }, { fid: 'b', episodeTitle: '第 2 集' }], currentIndex: 0, onEpisode: index => { selected = index; } });
+  const view = mount(Controls, { video: markRaw(media), expanded: false, title: 'Test', episodes: [{ fid: 'a', episodeTitle: '第 1 集' }, { fid: 'b', episodeTitle: '第 2 集' }], currentIndex: 0 });
   try {
     await tick(); const surface = document.querySelector('.player-gesture'); surface.getBoundingClientRect = () => ({ width: 300, left: 0 });
     for (let i = 0; i < 2; i++) { touch(surface, 'pointerdown', 280); touch(surface, 'pointerup', 280); }
@@ -115,7 +114,8 @@ test('Android gestures seek by double tap, ignore swipes/multitouch, retain scru
     const slider = document.querySelector('input[type="range"]'); slider.value = '90'; slider.dispatchEvent(event('input'));
     media.currentTime = 65; media.dispatchEvent(event('timeupdate')); await tick(); assert.equal(slider.value, '90');
     slider.dispatchEvent(event('change')); assert.equal(media.currentTime, 90);
-    const picker = document.querySelector('[aria-label="选集与片源"]'); picker.click(); await tick(); assert.equal(picker.getAttribute('aria-expanded'),'true');
+    assert.equal(document.querySelector('[aria-label="选集与片源"]'),null,'inline episodes are in the page');
+    view.props.expanded=true;await tick();const picker=document.querySelector('[aria-label="选集与片源"]');picker.click();await tick();assert.equal(picker.getAttribute('aria-expanded'),'true');
     const speed = document.querySelector('[aria-label="播放速度"]'); speed.value = '1.5'; speed.dispatchEvent(event('change')); assert.equal(media.playbackRate, 1.5);
   } finally { view.app.unmount(); }
 });

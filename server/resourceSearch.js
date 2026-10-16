@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { resourceSearchKeyword } from './searchTitle.js';
 
 const DEFAULT_SEARCH_URLS = [
   'http://127.0.0.1:8888/api/search',
@@ -17,7 +18,7 @@ const ENDPOINT_FAILURE_BASE_COOLDOWN_MS = 8 * 1000;
 const ENDPOINT_FAILURE_MAX_COOLDOWN_MS = 2 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 120;
 const MAX_RESULTS = 100;
-const SEARCH_CACHE_REVISION = 4;
+const SEARCH_CACHE_REVISION = 5;
 const COMPLETION_TIMEOUT_MS = 30_000;
 const FOLLOW_UP_DELAYS_MS = [5_000, 15_000];
 
@@ -312,7 +313,7 @@ export class ResourceSearchService {
 
   async #fetchEndpoint(channel, keyword, { timeoutMs = this.timeoutMs, refresh = false } = {}) {
     const url = new URL(channel.endpoint);
-    url.searchParams.set('kw', keyword);
+    url.searchParams.set('kw', resourceSearchKeyword(keyword) || keyword);
     url.searchParams.set('res', 'merge');
     url.searchParams.set('src', channel.source);
     url.searchParams.set('cloud_types', 'quark');

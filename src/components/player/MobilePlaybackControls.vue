@@ -59,24 +59,24 @@ onBeforeUnmount(() => release());
 <template>
   <div class="mobile-controls">
     <p v-if="notice" role="status">{{ notice }}</p>
+    <input type="range" aria-label="播放进度" :aria-valuetext="`${clock(time)} / ${clock(duration)}`" min="0" :max="duration || 1" step="0.1" :value="time" :disabled="!duration" @input="preview" @change="seek" @pointercancel="scrubbing = false; time = video.currentTime" />
     <div class="transport">
       <button type="button" :aria-label="paused ? '播放' : '暂停'" @click="togglePlay"><Play v-if="paused" /><Pause v-else /></button>
-      <span class="time">{{ clock(time) }}</span>
-      <input type="range" aria-label="播放进度" :aria-valuetext="`${clock(time)} / ${clock(duration)}`" min="0" :max="duration || 1" step="0.1" :value="time" :disabled="!duration" @input="preview" @change="seek" @pointercancel="scrubbing = false; time = video.currentTime" />
-      <span class="time">{{ clock(duration) }}</span>
-      <button type="button" :aria-label="muted ? '取消静音' : '静音'" @click="toggleMute"><VolumeX v-if="muted" /><Volume2 v-else /></button>
+      <span class="time">{{ clock(time) }} / {{ clock(duration) }}</span>
+      <button class="volume-button" type="button" :aria-label="muted ? '取消静音' : '静音'" @click="toggleMute"><VolumeX v-if="muted" /><Volume2 v-else /></button>
+      <slot />
       <button type="button" :aria-label="expanded ? '退出全屏' : '全屏播放'" @click="emit('fullscreen')"><Minimize v-if="expanded" /><Maximize v-else /></button>
     </div>
   </div>
 </template>
-
 <style scoped>
-.mobile-controls { flex: 0 0 auto; padding: 2px 4px; border-radius: 0 0 14px 14px; color: #fff; background: #151518; }
-.transport { display: flex; align-items: center; gap: 4px; }
-button { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 10px; border: 0; background: transparent; color: inherit; }
-button svg { width: 21px; height: 21px; }
-input { flex: 1; min-width: 24px; height: 44px; margin: 0 5px; accent-color: #fff; touch-action: none; }
-.time { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-p { margin: 0 12px; font-size: 12px; }
-button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+.mobile-controls { flex:0 0 auto; padding:0 10px 4px; color:#fff; background:transparent; }
+.transport { display:flex; align-items:center; gap:4px; }
+button { display:grid; place-items:center; flex:0 0 36px; width:36px; height:40px; padding:8px; border:0; background:transparent; color:inherit; }
+button svg { width:21px; height:21px; }
+input { display:block; width:100%; min-width:24px; height:24px; margin:0; accent-color:#fff; touch-action:none; }
+.time { margin-right:auto; font-size:11px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+p { margin:0 12px; font-size:12px; }
+button:focus-visible,input:focus-visible { outline:2px solid #fff; outline-offset:-2px; }
+@media(max-width:480px) { .volume-button { display:none; } .transport { gap:2px; } .mobile-controls { padding:0 6px 3px; } }
 </style>

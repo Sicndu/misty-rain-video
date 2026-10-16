@@ -8,6 +8,7 @@ import type { MediaItem, CategoryType } from '../../types/media';
 import type { ResourceItem } from '../../types/search';
 import type { LibrarySaveFeedback } from '../../services/libraryFeedback';
 import { useDialog } from '../../composables/useDialog';
+import { resourceTitleRelevance } from '../../../server/searchTitle.js';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -61,10 +62,6 @@ const cleanTitle = (title: string) => title
   .replace(/\s+/g, ' ')
   .trim();
 
-const titleKey = (title: string) => cleanTitle(title)
-  .toLocaleLowerCase('zh-CN')
-  .replace(/[\s\p{P}\p{S}]+/gu, '');
-
 const canonicalShareUrl = (url: string) => {
   const match = url.match(/^https:\/\/pan\.quark\.cn\/s\/([a-zA-Z0-9]+)/i);
   return match ? `https://pan.quark.cn/s/${match[1]}` : '';
@@ -92,13 +89,7 @@ const isExcludedResource = (resource: ResourceItem) => {
 const resourceScore = (resource: ResourceItem) => {
   const title = cleanTitle(resource.title);
   const keyword = props.searchKeyword?.trim() || props.media?.title.trim() || '';
-  const normalizedTitle = titleKey(title);
-  const normalizedKeyword = titleKey(keyword);
-  let score = 0;
-  if (normalizedTitle === normalizedKeyword) score += 120;
-  else if (normalizedTitle.startsWith(normalizedKeyword)) score += 90;
-  else if (normalizedTitle.includes(normalizedKeyword)) score += 65;
-  else score -= 80;
+  let score = (resource.relevance ?? resourceTitleRelevance(keyword, title)) * 10;
   if (resource.is4k || /4k/i.test(title)) score += 30;
   if (/hdr|dv|杜比视界/i.test(title)) score += 10;
   if (/60\s*(?:fps|帧)/i.test(title)) score += 8;

@@ -20,7 +20,7 @@ const mockFetch = (t, handler) => t.mock.method(globalThis, 'fetch', async (url,
 });
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-test('首批、缓存补齐和公共补充均按片名边界匹配，剔除剑仙逆世并保留年番与剧场版', async t => {
+test('首批、缓存补齐和公共补充允许片名前缀模糊匹配，但排除嵌在无关短片名中的字符', async t => {
   const titles = [
     '剑仙归来：谁让这剑仙逆世重修的？ 第七季（89集）',
     '剑仙归来：谁让这剑仙逆世重修的？ 第六季（200集）',
@@ -38,8 +38,8 @@ test('首批、缓存补齐和公共补充均按片名边界匹配，剔除剑�
   mockFetch(t, async () => Response.json({ code: 0, data: { total: rows.length, merged_by_type: { quark: rows } } }));
   const service = new SilentSearchEngine();
   for (const result of [await service.search('《仙逆》'), await service.readCached('仙逆'), await service.supplement('仙逆')]) {
-    assert.equal(result.total, 6);
-    assert.deepEqual(result.items.map(item => item.title), titles.slice(5));
+    assert.equal(result.total, 7);
+    assert.deepEqual(result.items.map(item => item.title), [titles[3], ...titles.slice(5)]);
     assert.deepEqual(result.quarkItems, result.items);
   }
 });

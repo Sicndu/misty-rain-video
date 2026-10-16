@@ -9,6 +9,7 @@ export const DISCOVERY_FEEDS = [
 const text = (value, limit = 180) => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, limit) : '';
 const subjectId = value => /^[1-9]\d{0,12}$/.test(String(value || '')) ? String(value) : '';
 const year = value => /^(?:19|20)\d{2}$/.test(String(value)) ? String(value) : '';
+export const ratingCount = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
 const rating = value => Number(value) > 0 && Number(value) <= 10 ? Math.round(Number(value) * 10) / 10 : null;
 
 export function isDiscoveryImageUrl(value, provider) {
@@ -33,7 +34,7 @@ export function normalizeDoubanFeed(payload, feed) {
     if (!id || !title || (feed.category === 'movie' ? item.type !== 'movie' : item.type !== 'tv')) continue;
     const value = {
       id: `douban-${id}`, provider: 'douban', title, category: feed.category,
-      year: year(item.year), rating: item.rating?.count === 0 ? null : rating(item.rating?.value),
+      year: year(item.year), ratingCount: ratingCount(item.rating?.count), rating: item.rating?.count === 0 ? null : rating(item.rating?.value),
       subtitle: text(item.episodes_info, 60), description: text(item.card_subtitle),
       imageUrl: imageUrl(item.pic?.normal || item.cover?.url || item.pic?.large, 'douban'),
       sourceUrl: `https://movie.douban.com/subject/${id}/`
@@ -55,7 +56,7 @@ export function normalizeBangumiCalendar(payload) {
       const id = subjectId(item?.id), title = text(item?.name_cn || item?.name, 120);
       if (!id || !title || item.type !== 2 || item.nsfw === true) continue;
       const value = { id: `bangumi-${id}`, provider: 'bangumi', title, category: 'anime',
-        year: year(String(item.air_date || '').slice(0, 4)), rating: rating(item.rating?.score), weekday,
+        year: year(String(item.air_date || '').slice(0, 4)), ratingCount: ratingCount(item.rating?.total), rating: rating(item.rating?.score), weekday,
         subtitle: `周${'一二三四五六日'[weekday - 1]}播出`, description: '',
         imageUrl: imageUrl(item.images?.common || item.images?.large, 'bangumi'), sourceUrl: `https://bgm.tv/subject/${id}` };
       unique.set(value.id, value); count++;

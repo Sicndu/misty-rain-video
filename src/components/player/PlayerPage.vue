@@ -12,7 +12,7 @@ import { configureVideoRequest, playbackSourceLabel, selectInitialPlaybackSource
 import SubtitleControls from './SubtitleControls.vue';
 import { PlayerPreferencesService } from '../../services/playerPreferencesService';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { CircleAlert, LoaderCircle, Play, RefreshCw, ChevronLeft } from '@lucide/vue';
+import { CircleAlert, LoaderCircle, Play, RefreshCw, ChevronLeft, Bookmark, BookmarkCheck } from '@lucide/vue';
 import type { MediaItem, PlaybackHistoryEntry, PlaybackHistoryUpdate } from '../../types/media';
 import {
   QuarkServiceError,
@@ -36,7 +36,7 @@ const props = defineProps<{
   historyEntry?: PlaybackHistoryEntry | null;
   initialSession?: QuarkPlaybackSession;
   collection?: MediaItem;
-  collect?: (media: MediaItem, selectedFids?: string[]) => Promise<void>;
+  collect?: (media: MediaItem) => Promise<void>;
   switchSource?: (resource: ResourceItem, episode: QuarkEpisode, position: number, signal: AbortSignal) => Promise<void>;
 }>();
 
@@ -67,6 +67,9 @@ const toast = useToast();
 const videoRef = ref<HTMLVideoElement | null>(null);
 const playerContainer = ref<HTMLElement | null>(null);
 const androidControlsInset = ref(0);
+const inlineEpisodesHost = ref<HTMLElement | null>(null);
+const fullscreenEpisodesHost = ref<HTMLElement | null>(null);
+const episodeTarget = computed(() => fullscreen.value && !nativeFullscreen.value && fullscreenEpisodesHost.value ? fullscreenEpisodesHost.value : inlineEpisodesHost.value);
 const hlsRef = shallowRef<Hls | null>(null);
 const phase = ref<PlayerPhase>('idle');
 const session = ref<QuarkPlaybackSession | null>(null);
@@ -1160,7 +1163,7 @@ useAndroidMediaSession(videoRef, {
 const candidateSources = ref<ResourceItem[]>([]), searchingSources = ref(false), sourceError = ref('');
 const switchingSource = ref(false), collecting = ref(false), collectError = ref('');
 const collectedAll = computed(() => Boolean(props.media?.quarkFid || props.collection && props.collection.quarkSelectionFids === undefined));
-const collectedCurrent = computed(() => collectedAll.value || Boolean(currentEpisode.value && props.collection?.quarkShareUrl === props.media?.quarkShareUrl && props.collection?.quarkSelectionFids?.includes(currentEpisode.value.fid)));
+
 let candidateController: AbortController | undefined, switchController: AbortController | undefined;
 let candidateTimer: ReturnType<typeof setTimeout> | undefined;
 let searchedMedia = '';
@@ -1184,10 +1187,10 @@ const switchCandidate = async (resource: ResourceItem) => {
   catch (error) { if (!controller.signal.aborted) sourceError.value = error instanceof Error ? error.message : '换源失败'; else sourceError.value = '换源超时，请重试'; }
   finally { clearTimeout(timer); switchingSource.value = false; }
 };
-const collectEpisode = async (all: boolean) => {
+const collectSeries = async () => {
   if (collecting.value || !props.media || !currentEpisode.value || !props.collect) return;
   collecting.value = true; collectError.value = '';
-  try { await props.collect(props.media,all ? undefined : [currentEpisode.value.fid]); }
+  try { await props.collect(props.media); }
   catch (error) { collectError.value = error instanceof Error ? error.message : '收藏失败，请重试'; }
   finally { collecting.value = false; }
 };
@@ -1214,7 +1217,7 @@ defineExpose({ retry });
 
       </header>
 
-      <p v-if="session?.cachedOnly" class="cached-playback-note">原分享已失效，仍可播放已缓存的视频。其他集数可通过“换源”查找。</p>
+      <p v-if="session?.cachedOnly" class="cached-playback-note">原分享已失效，仍可播放已缓存的视频。其他集数可在片源栏查找。</p>
       <div class="player-layout">
         <div ref="playerContainer" class="video-column" :class="{ 'player-fullscreen': fullscreen && !nativeFullscreen }">
           <div class="video-stage" :class="{ 'has-player-controls': !nativeFullscreen && phase === 'ready' }" :style="{ '--video-ratio': videoAspectRatio }">
@@ -1318,12 +1321,12 @@ defineExpose({ retry });
             </div>
           </div>
 
-          <PlaybackControls v-if="videoRef && phase === 'ready'" v-show="!nativeFullscreen"
+          <PlaybackControls v-if="videoRef && phase === 'ready'" :native-fullscreen="nativeFullscreen"
             :video="videoRef" :expanded="fullscreen && !nativeFullscreen" :title="media.title" :episodes="episodes" :current-index="currentEpisodeIndex"
             @fullscreen="toggleFullscreen" @inset="androidControlsInset = $event">
-            <SubtitleControls :video="videoRef" :hls="hlsRef" :native-fullscreen="nativeFullscreen" :username="username" :notice="playback?.subtitleNotice" compact
+            <SubtitleControls :video="videoRef" :hls="hlsRef" :native-fullscreen="nativeFullscreen" :username="username" :notice="playback?.subtitleNotice" compact icon-only
               :loading="embeddedSubtitles.loading.value" :read-error="embeddedSubtitles.error.value" @retry-embedded="embeddedSubtitles.retry" />
-            <template #episodes="{ active }"><EpisodeSourcePanel :episodes="episodes" :current-index="currentEpisodeIndex" :movie="movieMode" :active="active" :candidates="candidateSources" :searching="searchingSources" :switching="switchingSource" :source-error="sourceError" :collecting="collecting" :collected-current="collectedCurrent" :collected-all="collectedAll" :collect-error="collectError" @episode="selectEpisode" @source="switchCandidate" @retry="searchCandidates" @search="emit('re-search',media)" @collect="collectEpisode" /></template>
+            <template #episodes><div class="fullscreen-episode-panel"><button type="button" class="collect-series" :disabled="collecting || collectedAll" @click="collectSeries"><BookmarkCheck v-if="collectedAll" /><Bookmark v-else />{{ collectedAll ? '已收藏' : collecting ? '收藏中…' : '收藏整部' }}</button><div ref="fullscreenEpisodesHost"></div></div></template>
             <template #settings><div class="playback-settings" id="playback-settings">
             <div class="setting-group">
               <div class="setting-heading"><span>画面比例</span><small></small></div>
@@ -1436,6 +1439,13 @@ defineExpose({ retry });
             </div></template>
           </PlaybackControls>
         </div>
+        <section v-show="!fullscreen" class="watch-details">
+          <header class="watch-summary"><div><h2>{{ media.title }}</h2><p>{{ episodeStatus }}</p></div><button type="button" class="collect-series" :disabled="collecting || collectedAll || !episodes.length" @click="collectSeries"><BookmarkCheck v-if="collectedAll" /><Bookmark v-else />{{ collectedAll ? '已收藏' : collecting ? '收藏中…' : '收藏整部' }}</button></header>
+          <p v-if="collectError" class="collect-error" role="alert">{{ collectError }}</p>
+          <div ref="inlineEpisodesHost"></div>
+          <div v-if="!episodes.length" class="episode-placeholder">{{ phase === 'error' || phase === 'auth-required' ? '影片连接后显示选集' : '正在读取剧集…' }}</div>
+        </section>
+        <Teleport v-if="episodeTarget && episodes.length" :to="episodeTarget"><EpisodeSourcePanel :episodes="episodes" :current-index="currentEpisodeIndex" :movie="movieMode" active :candidates="candidateSources" :searching="searchingSources" :switching="switchingSource" :source-error="sourceError" @episode="selectEpisode" @source="switchCandidate" @retry="searchCandidates" @search="emit('re-search',media)" /></Teleport>
       </div>
 
       <p class="sr-status" aria-live="polite">{{ statusMessage }}</p>
@@ -1452,12 +1462,12 @@ defineExpose({ retry });
 .skip-durations p { grid-column: 1 / -1; color: var(--text-tertiary); font-size: .72rem; line-height: 1.5; }
 .skip-durations .preferences-error { color: var(--danger); }
 .delivery-hint { margin-top: 9px; color: var(--text-tertiary); font-size: .73rem; line-height: 1.6; }
-.player-page { position: relative; z-index: 1; width: 100%; min-height: 100dvh; color: var(--text-primary); background: var(--liquid-canvas); }
+.player-page { position: relative; z-index: 1; width: 100%; min-height: 100dvh; color: var(--text-primary); background: var(--surface-1); }
 .player-window { display: flex; flex-direction: column; width: 100%; height: 100dvh; min-height: 0; overflow: hidden; }
 .back-to-content { display: flex; align-items: center; gap: 4px; min-height: 44px; flex-shrink: 0; padding: 0; border: 0; color: var(--text-secondary); background: transparent; font-size: .85rem; }
 .back-to-content svg { width: 20px; height: 20px; }
 .cached-playback-note { padding: 10px 24px; color: var(--text-secondary); font-size: .8rem; }
-.player-header { display: flex; flex-shrink: 0; min-height: 80px; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 24px; border-bottom: 1px solid var(--divider); background: transparent; }
+.player-header { display:flex; flex-shrink:0; min-height:60px; align-items:center; gap:16px; padding:10px 24px; border-bottom:1px solid var(--divider); background:var(--surface-1); }
 .title-block, .header-actions { display: flex; align-items: center; gap: 12px; }
 .title-block, .title-copy { min-width: 0; }
 .title-block { flex: 1; }
@@ -1470,8 +1480,8 @@ defineExpose({ retry });
 .icon-button { display: grid; width: 44px; flex-shrink: 0; place-items: center; border-radius: 50%; }
 .icon-button svg { width: 19px; height: 19px; }
 .text-action:hover, .icon-button:hover { background: var(--glass-bg-active); }
-.player-layout { display: flex; min-height: 0; flex: 1; overflow-y: auto; }
-.video-column { position: relative; display: flex; width: min(1200px,100%); min-width: 0; margin: 0 auto; flex-direction: column; align-self: flex-start; padding: 18px; }
+.player-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(320px,380px); gap:24px; min-height:0; flex:1; overflow-y:auto; padding:24px; align-items:start; }
+.video-column { position:sticky; top:0; display:flex; width:100%; min-width:0; flex-direction:column; align-self:start; }
 /* Only the stage owns dark tokens. Playback pixels are never blurred or tinted. */
 .video-stage { --text-primary: #f6f8ff; --text-secondary: #d0daea; --text-tertiary: #b7c4d9; --liquid-accent: #b6ceff; --liquid-accent-strong: #91b3f7; position: relative; display: grid; width: 100%; min-height: 220px; aspect-ratio: var(--video-ratio, 16 / 9); flex: 0 0 auto; place-items: center; overflow: hidden; border: var(--glass-border); border-radius: 14px; color: var(--text-primary); background: #000; color-scheme: dark; }
 .video-element { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; object-fit: contain; background: #000; }
@@ -1529,14 +1539,14 @@ defineExpose({ retry });
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes loading-wave { 0%, 100% { opacity: .45; transform: scaleY(.45); } 50% { opacity: 1; transform: scaleY(1); } }
 @media (max-width: 820px) {
-  .player-header { min-height: calc(72px + var(--safe-area-top)); padding: calc(10px + var(--safe-area-top)) calc(18px + var(--safe-area-right)) 10px calc(18px + var(--safe-area-left)); }
+  .player-header { min-height:calc(52px + var(--safe-area-top)); padding:calc(6px + var(--safe-area-top)) 16px 6px; }
   .source-badge { display: none; }
   .title-copy h1 { font-size: 1.06rem; }
   .title-copy p { font-size: .71rem; }
   .header-actions { gap: 6px; }
   .text-action { padding: 0 13px; }
-  .player-layout { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-  .video-column { flex: 0 0 auto; overflow: visible; padding: 12px calc(var(--mobile-gutter) + var(--safe-area-right)) 0 calc(var(--mobile-gutter) + var(--safe-area-left)); }
+  .player-layout { display:flex; flex-direction:column; gap:0; padding:0; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  .video-column { flex:0 0 auto; position:sticky; top:0; z-index:6; overflow:visible; padding:0; background:#000; }
   .video-stage { min-height: 0; aspect-ratio: var(--video-ratio, 16 / 9); border-radius: 14px; border: 0; }
   .video-stage:last-child { margin-bottom: 12px; }
   .stage-state { gap: 7px; padding: 12px; background: radial-gradient(ellipse at 50% 10%, #222831, #0c1016 75%); }
@@ -1558,7 +1568,21 @@ defineExpose({ retry });
 
 <style scoped>
 /* Real container fullscreen keeps captions, gestures and controls in the same coordinate space. */
-.video-column.player-fullscreen { max-width: none; align-self: stretch; position: relative; width: 100%; height: 100%; padding: 0; overflow: hidden; background: #000; }
+.video-column.player-fullscreen { position:relative; top:auto; z-index:auto; width:100%; height:100%; padding:0; overflow:hidden; background:#000; }
 .player-fullscreen .video-stage { flex: 1 1 auto; height: 100%; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; }
 .stage-state, .play-prompt, .playback-starting { z-index: 5; }
+</style>
+
+<style scoped>
+.watch-details { min-width:0; padding:0 2px 24px; }
+.watch-summary { display:flex; align-items:center; gap:12px; padding:4px 0 18px; border-bottom:1px solid var(--divider); }
+.watch-summary>div { flex:1; min-width:0; }.watch-summary h2 { font-size:20px; font-weight:650; line-height:1.35; overflow-wrap:anywhere; }.watch-summary p { margin-top:6px; color:var(--text-tertiary); font-size:13px; }
+.collect-series { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:40px; flex-shrink:0; padding:0 6px; border:0; color:var(--text-primary); background:transparent; font:inherit; font-size:13px; cursor:pointer; }.collect-series svg { width:20px; height:20px; }.collect-series:disabled { color:var(--text-tertiary); cursor:default; }
+.collect-error { font-size:12px; color:var(--danger); margin:8px 0; }.episode-placeholder { padding:36px 12px; color:var(--text-tertiary); font-size:13px; text-align:center; }
+.fullscreen-episode-panel { padding:4px 14px 16px; }.fullscreen-episode-panel>.collect-series { display:flex; margin-left:auto; }
+@media(max-width:820px) { .watch-details { width:100%; flex:1; padding:18px 16px calc(24px + var(--safe-area-bottom)); } .watch-summary h2 { font-size:19px; } .video-stage { border-radius:0; } .video-column :deep(.player-controls) { border-radius:0; } .player-header .title-copy h1 { font-size:15px; } .player-header .title-copy p { display:none; } }
+</style>
+
+<style scoped>
+:global(html[data-theme='dark']) .player-page { --liquid-accent:#8fb8f1; --liquid-accent-strong:#a9c9f5; --liquid-accent-subtle:rgb(143 184 241 / .14); --accent-ink:#122039; }
 </style>

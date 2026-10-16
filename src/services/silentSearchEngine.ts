@@ -2,6 +2,7 @@ import type { ResourceItem, SearchResult, ShareValidationResult } from '../types
 import { apiUrl } from './appUrl';
 import { authFetch } from './authService';
 import { parseLibraryInput } from './libraryFeedback';
+import { resourceSearchKeyword, resourceTitleRelevance } from '../../server/searchTitle.js';
 
 const SEARCH_THROTTLE_MS = 300;
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -9,16 +10,6 @@ const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_SEARCH_CACHE_ENTRIES = 40;
 const PUBLIC_SEARCH_URL = 'https://so.252035.xyz/api/search';
 const PUBLIC_TIMEOUT_MS = 10_000;
-
-// Match a title rather than characters embedded in another title or subtitle
-// (e.g. 搜“仙逆”不能命中“剑仙逆世”). Keep common season and edition suffixes.
-const searchTitlePattern = (keyword: string): RegExp | null => {
-  const key = keyword.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[\s\p{P}\p{S}\p{Cf}]+/gu, '');
-  if (!key) return null;
-  const name = [...key].join('[\\s\\p{P}\\p{S}\\p{Cf}]*');
-  const edition = '年番|剧场版|特别篇|番外|外传|合集|全集|完结|更新|更(?:新|至|第|[0-9])|全[0-9一二三四五六七八九十百]+集|第[0-9一二三四五六七八九十百]+[季集部]|s[0-9]+|国语|中字|高清|超清|蓝光|臻彩|杜比';
-  return new RegExp(`(?:^|[^\\p{L}])${name}(?=$|[^\\p{L}]|${edition})`, 'iu');
-};
 
 /**
  * =========================================================================
@@ -100,7 +91,7 @@ export class SilentSearchEngine {
       let result: SearchResult;
       try {
         const url = new URL(PUBLIC_SEARCH_URL);
-        url.search = new URLSearchParams({ kw: clean, res: 'merge', src: 'all', cloud_types: 'quark' }).toString();
+        url.search = new URLSearchParams({ kw: resourceSearchKeyword(clean), res: 'merge', src: 'all', cloud_types: 'quark' }).toString();
         const response = await fetch(url, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer',
           headers: { Accept: 'application/json' } });
         if (!response.ok) throw new Error('备用来源暂不可用');
@@ -206,16 +197,18 @@ export class SilentSearchEngine {
   private normalizeResponse(data: any, sourceMode: 'direct' | 'cors_proxy', keyword: string): SearchResult {
     const items: ResourceItem[] = [];
     const seen = new Set<string>();
-    const titlePattern = searchTitlePattern(keyword);
     const list = Array.isArray(data?.merged_by_type?.quark) ? data.merged_by_type.quark : [];
     list.forEach((raw: any) => {
       const item = this.parseSingleItem(raw);
-      if (!item || !titlePattern?.test(item.title.normalize('NFKC').replace(/\p{Cf}/gu, '')) || seen.has(item.url)) return;
+      if (!item || seen.has(item.url)) return;
+      const relevance = resourceTitleRelevance(keyword, item.title);
+      if (!relevance) return;
+      item.relevance = relevance;
       seen.add(item.url);
       items.push(item);
     });
 
-    items.sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
+    items.sort((a, b) => (b.relevance || 0) - (a.relevance || 0) || (Date.parse(b.datetime) || 0) - (Date.parse(a.datetime) || 0));
 
     return {
       success: true,

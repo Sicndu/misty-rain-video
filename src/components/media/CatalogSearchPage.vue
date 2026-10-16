@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { ArrowLeft, Search, Star } from '@lucide/vue';
 import MediaPoster from '../common/MediaPoster.vue';
 import { searchCatalog, type DiscoveryItem } from '../../services/discoveryService';
+import { catalogSortOptions, catalogSortDescription, sortCatalogItems, type CatalogSort } from '../../services/catalogSort';
+const sort = ref<CatalogSort>('recommended');
 const props = defineProps<{ query: string; active: boolean; libraryCatalogIds: string[] }>();
 const emit = defineEmits<{ (e: 'select', item: DiscoveryItem): void; (e: 'search-resources', query: string): void; (e: 'back'): void }>();
 const items = ref<DiscoveryItem[]>([]), loading = ref(false), error = ref('');
+const visibleItems = computed(() => sortCatalogItems(items.value, sort.value));
 const categories = { movie: '电影', tv: '电视剧', anime: '动漫', variety: '综艺' };
 let controller: AbortController | undefined, sequence = 0, loadedQuery = '';
 const search = async () => {
@@ -27,10 +30,10 @@ onBeforeUnmount(() => { controller?.abort(); sequence++; });
 </script>
 <template>
   <section class="catalog-search" aria-label="影片搜索结果">
-    <header class="catalog-heading"><button type="button" class="back" @click="emit('back')"><ArrowLeft aria-hidden="true" />返回</button><h1>“{{ query }}”</h1><span v-if="!loading && items.length">{{ items.length }} 部影片</span></header>
+    <header class="catalog-heading"><button type="button" class="back" @click="emit('back')"><ArrowLeft aria-hidden="true" />返回</button><h1>“{{ query }}”</h1><span v-if="!loading && items.length">{{ items.length }} 部影片</span><label v-if="items.length" class="catalog-sort"><select v-model="sort" aria-label="影片排序" :title="catalogSortDescription[sort]"><option v-for="option in catalogSortOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label></header>
     <div v-if="loading" class="catalog-grid" role="status" aria-label="正在搜索影片"><div v-for="n in 6" :key="n" class="skeleton"></div></div>
     <div v-else-if="items.length" class="catalog-grid">
-      <button v-for="item in items" :key="item.id" class="catalog-card" type="button" :aria-label="`${libraryCatalogIds.includes(item.id) ? '播放' : '查找片源'}：${item.title}（${item.year || '年份未知'}）`" @click="emit('select', item)">
+      <button v-for="item in visibleItems" :key="item.id" class="catalog-card" type="button" :aria-label="`${libraryCatalogIds.includes(item.id) ? '播放' : '查找片源'}：${item.title}（${item.year || '年份未知'}）`" @click="emit('select', item)">
         <span class="poster"><MediaPoster :src="item.poster" alt="" loading="lazy" /><span v-if="libraryCatalogIds.includes(item.id)" class="saved">已收藏</span></span>
         <strong>{{ item.title }}</strong><span class="meta">{{ item.year }} · {{ categories[item.category] }}<span v-if="item.rating !== null"><Star aria-hidden="true" />{{ item.rating.toFixed(1) }}</span></span>
         <small>{{ item.subtitle || item.description }}</small>
@@ -42,6 +45,8 @@ onBeforeUnmount(() => { controller?.abort(); sequence++; });
 </template>
 <style scoped>
 .catalog-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin-bottom: 24px; }
+.catalog-sort { margin-left: auto; }
+.catalog-sort select { min-height: 40px; padding: 0 12px; border: 1px solid var(--divider); border-radius: 8px; color: var(--text-secondary); background: var(--surface-2); font-size: .8rem; }
 .catalog-heading h1 { font-size: 1.4rem; font-weight: 650; overflow-wrap: anywhere; }
 .catalog-heading > span, .meta, .catalog-card small, .catalog-fallback { color: var(--text-tertiary); font-size: .8rem; }
 .back { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0; border: 0; color: var(--text-secondary); background: transparent; }

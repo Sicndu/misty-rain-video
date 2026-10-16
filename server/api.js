@@ -416,6 +416,17 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
+    const episodeThumbnail = pathname.match(/^\/api\/player\/sessions\/([^/]+)\/episodes\/([^/]+)\/thumbnail$/);
+    if (episodeThumbnail && ['GET','HEAD'].includes(request.method)) {
+      const asset = await context.quarkGateway.getEpisodeThumbnail(decodeURIComponent(episodeThumbnail[1]),decodeURIComponent(episodeThumbnail[2]),user);
+      response.statusCode = 200;
+      response.setHeader('Content-Type',asset.contentType);
+      response.setHeader('Content-Length',asset.bytes.length);
+      response.setHeader('Cache-Control','private, no-store');
+      response.end(request.method === 'HEAD' ? undefined : asset.bytes);
+      return true;
+    }
+
     if (pathname === '/api/media-cards') {
       if (request.method === 'GET') {
         sendSuccess(response, await readLibrary(context, user, userData));

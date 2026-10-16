@@ -1,6 +1,7 @@
 export type DriveType = 'quark' | 'aliyun' | 'baidu' | 'xunlei' | '115' | 'uc' | 'tianyi' | 'mobile' | 'other';
 
 export interface ResourceItem {
+  relevance?: number;
   linkStatus?: 'available' | 'restricted' | 'unknown';
   id: string;
   title: string;

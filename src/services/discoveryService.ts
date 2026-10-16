@@ -6,7 +6,7 @@ import type { ResourceItem } from '../types/search';
 export type DiscoveryCategory = CategoryType | 'all';
 export interface DiscoveryItem {
   id: string; provider: 'douban' | 'bangumi'; title: string; category: CategoryType;
-  poster: string; year: string; rating: number | null; subtitle: string; description: string;
+  poster: string; year: string; rating: number | null; ratingCount?: number | null; subtitle: string; description: string;
   sourceUrl: string; weekday?: number;
 }
 export interface DiscoverySection {

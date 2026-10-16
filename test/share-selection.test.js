@@ -238,3 +238,21 @@ test('details expose actual thumbnails, aggregate folder sizes and dates; an exp
   assert.ok(selected.episodes.some(e=>e.fid==='low'));assert.ok(!selected.episodes.some(e=>e.fid==='high'));
   await assert.rejects(gateway.createPlaybackSession({...shareInput,episodeFid:'foreign'}),{code:'EPISODE_NOT_FOUND'});
 });
+
+test('playback episodes expose owner-scoped renewable thumbnails without extra directory scans or transfers',async t=>{
+ const f=createGateway(t);
+ f.tree.get('s1')[0].big_thumbnail='https://cdn.example.test/episode.png?private-signature=secret';
+ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/qcoAAAAASUVORK5CYII=','base64');
+ let imageReads=0;f.gateway.fetchMedia=async()=>{imageReads++;return new Response(png)};
+ const session=await f.gateway.createPlaybackSession({shareUrl:'https://pan.quark.cn/s/fixture',title:'测试剧'});
+ const episode=session.episodes.find(item=>item.fid==='e1');assert.match(episode.thumbnail,/\/episodes\/e1\/thumbnail$/);assert.doesNotMatch(JSON.stringify(session),/private-signature|cdn.example/);
+ const reads=f.listReads.length;
+ assert.equal((await f.gateway.getEpisodeThumbnail(session.sessionId,'e1')).contentType,'image/png');
+ await f.gateway.getEpisodeThumbnail(session.sessionId,'e1');assert.equal(imageReads,1);assert.equal(f.listReads.length,reads);assert.equal(f.writes.length,0);
+ await assert.rejects(f.gateway.getEpisodeThumbnail(session.sessionId,'e1',{username:'other',role:'user',folder:'other'}),{statusCode:403});
+ f.gateway.sessions.get(session.sessionId).thumbnailHandles.get('e1').expires=0;
+ await f.gateway.getEpisodeThumbnail(session.sessionId,'e1');assert.equal(imageReads,2);
+ f.gateway.shareThumbnails.remove(f.gateway.sessions.get(session.sessionId).thumbnailHandles.get('e1').id);
+ await f.gateway.getEpisodeThumbnail(session.sessionId,'e1');assert.equal(imageReads,3);
+ await assert.rejects(f.gateway.getEpisodeThumbnail(session.sessionId,'missing'),{statusCode:404});
+});

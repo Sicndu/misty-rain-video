@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DISCOVERY_FEEDS, fetchDiscoveryFeed, isDiscoveryImageUrl } from './discoverySources.js';
+import { DISCOVERY_FEEDS, fetchDiscoveryFeed, isDiscoveryImageUrl, ratingCount } from './discoverySources.js';
+import { resourceTitleRelevance } from './searchTitle.js';
 
 const TTL = 6 * 60 * 60_000;
 const RETRY_DELAY = 15 * 60_000;
@@ -32,19 +33,20 @@ export class DiscoveryService {
     this.load = limiter(2); this.loadImage = limiter(3); this.controllers = new Set(); this.stopped = false;
     try {
       const cache = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
-      if (cache.version === 1) for (const feed of DISCOVERY_FEEDS) {
+      if ([1, 2].includes(cache.version)) for (const feed of DISCOVERY_FEEDS) {
         const snapshot = cache.feeds?.[feed.id];
         if (!snapshot || !Array.isArray(snapshot.items) || !Number.isFinite(snapshot.updatedAt)) continue;
         const items = snapshot.items.filter(item => typeof item?.title === 'string' && item.title.length <= 120
           && /^(douban|bangumi)-\d{1,13}$/.test(item.id) && item.category === feed.category
           && ['douban', 'bangumi'].includes(item.provider) && item.id.startsWith(`${item.provider}-`)
           && (!item.imageUrl || isDiscoveryImageUrl(item.imageUrl, item.provider))).slice(0, feed.id === 'calendar' ? 210 : 30)
-          .map(item => ({ ...item, rating: typeof item.rating === 'number' && item.rating > 0 && item.rating <= 10 ? item.rating : null,
+          .map(item => ({ ...item, ratingCount: ratingCount(item.ratingCount), rating: typeof item.rating === 'number' && item.rating > 0 && item.rating <= 10 ? item.rating : null,
             year: /^(19|20)\d{2}$/.test(String(item.year || '')) ? String(item.year) : '',
             subtitle: typeof item.subtitle === 'string' ? item.subtitle.slice(0, 60) : '',
             description: typeof item.description === 'string' ? item.description.slice(0, 180) : '',
             sourceUrl: item.provider === 'douban' ? `https://movie.douban.com/subject/${item.id.slice(7)}/` : `https://bgm.tv/subject/${item.id.slice(8)}` }));
-        if (items.length || snapshot.failed) this.snapshots[feed.id] = { items, updatedAt: snapshot.updatedAt, retryAt: Number(snapshot.retryAt) || 0, failed: Boolean(snapshot.failed) };
+        if (items.length || snapshot.failed) this.snapshots[feed.id] = { items, updatedAt: snapshot.updatedAt,
+          needsRefresh: cache.version === 1 || Boolean(snapshot.needsRefresh), retryAt: Number(snapshot.retryAt) || 0, failed: Boolean(snapshot.failed) };
       }
     } catch { /* A missing or corrupt cache is rebuilt from the providers. */ }
   }
@@ -52,14 +54,14 @@ export class DiscoveryService {
   #save() {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     const temporary = `${this.filePath}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify({ version: 1, feeds: this.snapshots }), { mode: 0o600 });
+    fs.writeFileSync(temporary, JSON.stringify({ version: 2, feeds: this.snapshots }), { mode: 0o600 });
     fs.renameSync(temporary, this.filePath);
   }
 
   #refresh(feed) {
     if (this.pending.has(feed.id)) return this.pending.get(feed.id);
     const snapshot = this.snapshots[feed.id];
-    if (this.stopped || (snapshot?.retryAt > this.now()) || (snapshot?.items.length && this.now() - snapshot.updatedAt < this.ttlMs)) return Promise.resolve();
+    if (this.stopped || (snapshot?.retryAt > this.now()) || (snapshot?.items.length && !snapshot.needsRefresh && this.now() - snapshot.updatedAt < this.ttlMs)) return Promise.resolve();
     const task = this.load(async () => {
       if (this.stopped) return;
       const controller = new AbortController(); this.controllers.add(controller);
@@ -70,7 +72,7 @@ export class DiscoveryService {
         if (!Array.isArray(items) || !items.length) throw new Error('DISCOVERY_EMPTY_RESPONSE');
         this.snapshots[feed.id] = { items, updatedAt: this.now(), retryAt: 0, failed: false };
       } catch {
-        if (!this.stopped) this.snapshots[feed.id] = { items: snapshot?.items || [], updatedAt: snapshot?.updatedAt || 0,
+        if (!this.stopped) this.snapshots[feed.id] = { items: snapshot?.items || [], updatedAt: snapshot?.updatedAt || 0, needsRefresh: Boolean(snapshot?.needsRefresh),
           retryAt: this.now() + this.retryMs, failed: true };
       } finally { clearTimeout(timer); this.controllers.delete(controller); }
       if (!this.stopped) this.#save();
@@ -89,7 +91,7 @@ export class DiscoveryService {
       return { id: feed.id, category: feed.category, title: feed.title, source: feed.source,
         sourceUrl: feed.collection ? `https://m.douban.com/subject_collection/${feed.collection}` : 'https://bgm.tv/calendar',
         updatedAt: snapshot?.updatedAt ? new Date(snapshot.updatedAt).toISOString() : '',
-        stale: Boolean(snapshot?.items.length && this.now() - snapshot.updatedAt >= this.ttlMs),
+        stale: Boolean(snapshot?.items.length && (snapshot.needsRefresh || this.now() - snapshot.updatedAt >= this.ttlMs)),
         refreshing: this.pending.has(feed.id), failed: Boolean(snapshot?.failed),
         items: (snapshot?.items || []).map(({ imageUrl, ...item }) => ({ ...item,
           poster: imageUrl ? `/api/discovery/posters/${item.id}` : '' })) };
@@ -104,10 +106,8 @@ export class DiscoveryService {
   }
 
   matchingCatalogItems(query) {
-    const normalize = value => value.normalize('NFKC').toLowerCase().replace(/[\s\p{P}]+/gu, '');
-    const keyword = normalize(query); if (!keyword) return [];
     return Object.values(this.snapshots).flatMap(snapshot => snapshot.items)
-      .filter(item => item.provider === 'douban' && normalize(item.title).includes(keyword));
+      .filter(item => item.provider === 'douban' && resourceTitleRelevance(query, item.title) > 0);
   }
 
   async poster(id) {

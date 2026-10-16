@@ -1,6 +1,7 @@
 import { authFetch } from './authService';
 
 export interface QuarkEpisode {
+  thumbnail?: string;
   fid: string;
   fileName: string;
   episodeNumber: number;
@@ -188,7 +189,7 @@ export class QuarkStreamService {
       method: 'POST', signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input)
-    });
+    }).then(session => ({ ...session, episodes:session.episodes.map(episode => ({ ...episode, thumbnail:episode.thumbnail ? withAppBase(episode.thumbnail) : '' })) }));
   }
 
   static prepareEpisode(sessionId: string, episodeFid: string, capabilities: { nativeHls: boolean } = { nativeHls: false }): Promise<PreparedPlayback> {
@@ -197,6 +198,7 @@ export class QuarkStreamService {
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(capabilities) }
     ).then(playback => ({
       ...playback,
+      episode: { ...playback.episode, thumbnail:playback.episode.thumbnail ? withAppBase(playback.episode.thumbnail) : '' },
       sources: playback.sources.map(source => ({
         ...source,
         url: withAppBase(source.url),

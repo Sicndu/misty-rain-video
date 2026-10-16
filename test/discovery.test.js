@@ -23,8 +23,41 @@ test('当前豆瓣榜单兼容两种海报字段，去重且不把未评分或�
     { id: '125', title: '非电影', type: 'tv' }, { id: '../bad', title: '非法', type: 'movie' }
   ] }, feed);
   assert.equal(items.length, 2); assert.equal(items[0].rating, null); assert.equal(items[1].rating, 8.1);
+  assert.equal(items[0].ratingCount, 0); assert.equal(items[1].ratingCount, 20);
   assert.ok(items.every(item => item.imageUrl)); assert.equal(items[0].year, '2026');
   assert.equal('playable' in items[0], false); assert.equal('has_linewatch' in items[0], false);
+});
+
+test('old discovery cache stays visible while new rating-count metadata is refreshed once', async t => {
+  const dir = temp(t); let calls = 0;
+  fs.writeFileSync(path.join(dir, 'discovery-cache.json'), JSON.stringify({ version: 1, feeds: { movie: {
+    items: [record()], updatedAt: 999_000, failed: false
+  } } }));
+  const service = new DiscoveryService({ dataDir: dir, posterService: {}, now: () => 1_000_000,
+    loadFeed: async () => { calls++; return [{ ...record(), ratingCount: 123 }]; } });
+  t.after(() => service.stop());
+  assert.equal(service.snapshots.movie.items[0].ratingCount, null);
+  await service.get('movie'); await settle(service);
+  assert.equal(calls, 1); assert.equal((await service.get('movie')).sections[0].items[0].ratingCount, 123);
+  const restored = new DiscoveryService({ dataDir: dir, posterService: {}, now: () => 1_000_000,
+    loadFeed: async () => { calls++; return []; } });
+  t.after(() => restored.stop());
+  assert.equal((await restored.get('movie')).sections[0].items[0].ratingCount, 123); assert.equal(calls, 1);
+});
+
+test('failed metadata upgrade retains the old chart and retries after cooldown instead of waiting six hours', async t => {
+  const dir = temp(t); let clock = 1_000_000, fail = true, calls = 0;
+  fs.writeFileSync(path.join(dir, 'discovery-cache.json'), JSON.stringify({ version: 1, feeds: { movie: {
+    items: [record()], updatedAt: clock - 1000, failed: false
+  } } }));
+  const service = new DiscoveryService({ dataDir: dir, posterService: {}, now: () => clock, retryMs: 100,
+    loadFeed: async () => { calls++; if (fail) throw new Error('429'); return [{ ...record(), ratingCount: 234 }]; } });
+  t.after(() => service.stop());
+  await service.get('movie'); await settle(service);
+  assert.equal((await service.get('movie')).sections[0].items.length, 1); assert.equal(calls, 1);
+  clock += 101; fail = false;
+  await service.get('movie'); await settle(service);
+  assert.equal(calls, 2); assert.equal(service.snapshots.movie.items[0].ratingCount, 234);
 });
 
 test('Bangumi 放送按日期分组，中文名优先，规范化 HTTPS 图片并过滤非动画条目', () => {

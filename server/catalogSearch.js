@@ -1,4 +1,4 @@
-import { isDiscoveryImageUrl } from './discoverySources.js';
+import { isDiscoveryImageUrl, ratingCount } from './discoverySources.js';
 
 const text = (value, max = 180) => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : '';
 const failure = () => Object.assign(new Error('影片信息暂时无法加载，可以直接搜索资源'), { code: 'CATALOG_UNAVAILABLE', statusCode: 503 });
@@ -16,6 +16,7 @@ export function normalizeCatalogSearch(payload) {
     const imageUrl = text(item.cover_url, 2048).replace(/^http:/, 'https:');
     const score = Number(item.rating?.value);
     const entry = { id: `douban-${item.id}`, provider: 'douban', title, category,
+      ratingCount: ratingCount(item.rating?.count),
       year: /^(19|20)\d{2}$/.test(String(item.year)) ? String(item.year) : '',
       rating: score > 0 && score <= 10 && item.rating?.count !== 0 ? Math.round(score * 10) / 10 : null,
       subtitle: item.null_rating_reason === '尚未播出' ? '尚未播出' : '', description,
@@ -40,7 +41,12 @@ export class CatalogSearch {
     if (this.pending.size >= 4) throw failure();
     const task = this.load(keyword).then(results => {
       // The public search can lag a current season already in Douban's charts.
-      const items = [...new Map([...results, ...(this.discovery.matchingCatalogItems?.(keyword) || [])].map(item => [item.id, item])).values()].slice(0, 30);
+      const merged = new Map();
+      for (const item of [...results, ...(this.discovery.matchingCatalogItems?.(keyword) || [])]) {
+        const previous = merged.get(item.id);
+        merged.set(item.id, { ...previous, ...item, ratingCount: item.ratingCount ?? previous?.ratingCount ?? null });
+      }
+      const items = [...merged.values()].slice(0, 30);
       this.cache.delete(key); this.cache.set(key, { items, until: this.now() + 10 * 60_000 });
       if (this.cache.size > 100) this.cache.delete(this.cache.keys().next().value);
       this.discovery.registerCatalogItems(items);

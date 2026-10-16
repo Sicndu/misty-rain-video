@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type Hls from 'hls.js';
 import { Captions, ChevronDown } from '@lucide/vue';
 import { activeSubtitleTrack, selectSubtitleTrack, setSubtitleDefaults, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleLanguageKey, managedSubtitleTracks, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
-const props = defineProps<{ video: HTMLVideoElement; hls?: Hls | null; compact?: boolean; notice?: string; username?: string; nativeFullscreen?: boolean; loading?: boolean; readError?: string }>();
+const props = defineProps<{ video: HTMLVideoElement; hls?: Hls | null; compact?: boolean; iconOnly?: boolean; notice?: string; username?: string; nativeFullscreen?: boolean; loading?: boolean; readError?: string }>();
 const emit = defineEmits<{ (event: 'retry-embedded'): void }>();
 const options = ref<SubtitleTrackOption[]>([]);
 const selected = ref('off');
@@ -110,17 +110,17 @@ watch([() => props.video, () => props.hls] as const, async ([video, hls]) => {
 onBeforeUnmount(() => { generation += 1; release(); });
 </script>
 <template>
-  <div class="subtitle-controls" :class="{ compact }">
+  <div class="subtitle-controls" :class="{ compact, 'icon-only':iconOnly }">
     <div class="subtitle-picker"><Captions class="captions-icon" aria-hidden="true" /><select aria-label="选择影片字幕" :value="selected" @change="choose">
       <option value="auto">{{ loading ? '正在读取字幕…' : options.length ? `自动 · ${automaticOption?.label || '字幕'}` : '字幕 · 暂无可用轨道' }}</option>
       <option value="off">字幕关闭</option>
       <option v-for="option in options" :key="option.id" :value="option.id">{{ option.label }}</option>
     </select><ChevronDown aria-hidden="true" /></div>
-    <template>
+    <div v-if="notice || error || readError" class="subtitle-status">
       <p v-if="notice" role="status">{{ notice }}</p>
       <p v-if="error" role="alert">{{ error }} <button type="button" @click="retry">重试字幕</button></p>
       <p v-if="readError" role="status">{{ readError }} <button type="button" @click="emit('retry-embedded')">重试</button></p>
-    </template>
+    </div>
   </div>
 </template>
 <style scoped>
@@ -132,4 +132,8 @@ p { margin-top: 8px; color: var(--text-tertiary); font-size: .73rem; line-height
 button { border: 0; padding: 4px; color: var(--liquid-accent); background: transparent; }
 .compact select { max-width: 220px; border-color: transparent; background: transparent; font-size: 13px; }
 @media (max-width: 820px) { select { font-size: 16px; } }
+</style>
+
+<style scoped>
+.icon-only { position:relative; }.icon-only .subtitle-picker { width:36px; height:40px; }.icon-only select { width:36px; max-width:36px; height:40px; padding:0; opacity:0; cursor:pointer; }.icon-only .subtitle-picker>.captions-icon { top:11px; left:8px; width:20px; height:20px; }.icon-only .subtitle-picker>svg:not(.captions-icon) { display:none; }.icon-only:focus-within { outline:2px solid white; outline-offset:-2px; border-radius:4px; }.icon-only .subtitle-status { position:absolute; left:0; bottom:100%; z-index:14; width:min(260px,65vw); padding:8px 12px; border:1px solid var(--divider); border-radius:8px; color:var(--text-primary); background:var(--surface-elevated,var(--surface-1)); }
 </style>

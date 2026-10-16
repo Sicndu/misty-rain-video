@@ -549,12 +549,11 @@ const openDiscoveryItem = (item: DiscoveryItem) => {
   setAppHistoryLayer('transfer');
 };
 const playingCollection = computed(() => allMediaList.value.find(item => embedPlayingMedia.value && sameMediaIdentity(item,embedPlayingMedia.value)));
-const collectPlayingMedia = async (media: MediaItem, selectedFids?: string[]) => {
+const collectPlayingMedia = async (media: MediaItem) => {
   const existing = allMediaList.value.find(item => sameMediaIdentity(item,media));
   if (media.quarkFid || existing && existing.quarkSelectionFids === undefined) return;
   if (existing?.quarkShareUrl && existing.quarkShareUrl !== media.quarkShareUrl) throw new Error('已收藏其他片源，可在收藏中管理');
-  const selection = selectedFids && existing?.quarkSelectionFids ? [...new Set([...existing.quarkSelectionFids,...selectedFids])] : selectedFids;
-  await saveMedia({ ...media, quarkFid: undefined, startEpisodeFid: undefined, quarkSelectionFids: selection });
+  await saveMedia({ ...media, quarkFid: undefined, startEpisodeFid: undefined, quarkSelectionFids: undefined });
 };
 const switchPlayingSource = async (resource: ResourceItem, episode: QuarkEpisode, position: number, signal: AbortSignal) => {
   const media = embedPlayingMedia.value, key = playbackPageKey.value;

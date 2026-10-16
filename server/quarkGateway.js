@@ -410,12 +410,13 @@ const normalizeFileTimestamp = (...values) => {
   return '';
 };
 
+const episodeThumbnails = new WeakMap();
 const serializeEpisode = item => {
   const episodeNumber = extractEpisodeNumber(item.file_name) ?? 0;
   const part = String(item.file_name || '').match(/\d{1,4}\s*(?:[集话期]\s*)?[（(]?([上中下])(?=\D|$)/)?.[1] || '';
   const season = seasonNumber(item.file_name)
     || String(item.source_path || '').split('/').reverse().map(seasonNumber).find(Boolean) || 0;
-  return {
+  const episode = {
     fid: item.fid,
     shareFidToken: item.share_fid_token,
     parentFid: item.pdir_fid || '0',
@@ -442,6 +443,9 @@ const serializeEpisode = item => {
     maxResolution: item.video_max_resolution || '',
     previewUrl: item.preview_url || ''
   };
+  const thumbnail = [item.big_thumbnail,item.thumbnail].find(value => typeof value === 'string' && value.startsWith('https://'));
+  if (thumbnail) episodeThumbnails.set(episode,thumbnail);
+  return episode;
 };
 
 const preferEpisode = (left, right) => {
@@ -943,7 +947,7 @@ export class QuarkGateway {
       this.sessions.set(id, { id, ownerUsername: principal.username, kind: 'cached-share', pwdId, title: title || '已缓存视频', episodes,
         sources: new Map(), assets: new Map(), assetIndex: new Map(), createdAt: Date.now(), touchedAt: Date.now() });
       return { sessionId: id, title: title || '已缓存视频', cachedOnly: true,
-        episodes: episodes.map(({ shareFidToken, parentFid, previewUrl, ...episode }) => episode) };
+        episodes: episodes.map(episode => this.#publicEpisode(this.sessions.get(id),episode)) };
     }
   }
 
@@ -1058,7 +1062,7 @@ export class QuarkGateway {
     return {
       sessionId,
       title: session.title,
-      episodes: episodes.map(({ shareFidToken, parentFid, previewUrl, ...episode }) => episode)
+      episodes: episodes.map(episode => this.#publicEpisode(session,episode))
     };
   }
 
@@ -1096,8 +1100,30 @@ export class QuarkGateway {
     return {
       sessionId,
       title: session.title,
-      episodes: episodes.map(({ shareFidToken, parentFid, previewUrl, ...episode }) => episode)
+      episodes: episodes.map(episode => this.#publicEpisode(session,episode))
     };
+  }
+
+  #publicEpisode(session, episode) {
+    const { shareFidToken, parentFid, previewUrl, ...data } = episode;
+    if (episodeThumbnails.has(episode)) data.thumbnail = `/api/player/sessions/${encodeURIComponent(session.id)}/episodes/${encodeURIComponent(episode.fid)}/thumbnail`;
+    return data;
+  }
+
+  async getEpisodeThumbnail(sessionId, episodeFid, user = SYSTEM_USER) {
+    const principal = normalizeUser(user);
+    const session = this.#getSession(sessionId, principal);
+    const episode = session.episodes.find(item => item.fid === episodeFid);
+    const url = episode && episodeThumbnails.get(episode);
+    if (!url) throw new QuarkApiError('暂无视频缩略图', { statusCode:404, code:'THUMBNAIL_NOT_FOUND' });
+    const handles = session.thumbnailHandles ||= new Map();
+    let handle = handles.get(episodeFid);
+    if (!handle || handle.expires <= Date.now() || !this.shareThumbnails.entries.has(handle.id)) {
+      const path = this.shareThumbnails.register(url,principal.username);
+      handle = { id:path.split('/').pop(), expires:Date.now()+9*60_000 };
+      handles.set(episodeFid,handle);
+    }
+    return this.shareThumbnails.read(handle.id,principal.username);
   }
 
   async prepareEpisode(sessionId, episodeFid, user = SYSTEM_USER, playbackCache = this.playbackCache, capabilities = {}) {
@@ -1210,7 +1236,7 @@ export class QuarkGateway {
       .map(subtitle => this.#registerSubtitle(session, episode.fid, subtitle));
 
     return {
-      episode: (({ shareFidToken, parentFid, previewUrl, ...publicEpisode }) => publicEpisode)(episode),
+      episode: this.#publicEpisode(session,episode),
       sources,
       audioTracks: normalized.audioTracks,
       subtitles,

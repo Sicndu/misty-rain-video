@@ -4,6 +4,8 @@ import { ArrowUpRight, ChevronRight, RefreshCw, Star } from '@lucide/vue';
 import MediaPoster from '../common/MediaPoster.vue';
 import { loadDiscovery, type DiscoveryCategory, type DiscoveryItem, type DiscoverySection } from '../../services/discoveryService';
 
+import { catalogSortOptions, catalogSortDescription, sortCatalogItems, type CatalogSort } from '../../services/catalogSort';
+const sort = ref<CatalogSort>('recommended');
 const props = defineProps<{ active: boolean; libraryCatalogIds: string[] }>();
 const emit = defineEmits<{ (event: 'select', item: DiscoveryItem): void; (event: 'search'): void }>();
 const category = ref<DiscoveryCategory>('all');
@@ -50,12 +52,15 @@ const changeCategory = async (value: DiscoveryCategory) => {
   await nextTick();
   window.scrollTo({ top: 0, behavior: 'instant' });
 };
-const visibleItems = (section: DiscoverySection) => section.id === 'calendar' ? section.items.filter(item => item.weekday === weekday.value) : category.value === 'all' ? section.items.slice(0, 10) : section.items;
+const visibleItems = (section: DiscoverySection) => {
+  const items = sortCatalogItems(section.id === 'calendar' ? section.items.filter(item => item.weekday === weekday.value) : section.items, sort.value);
+  return category.value === 'all' ? items.slice(0, 10) : items;
+};
 </script>
 
 <template>
   <div class="discovery-page">
-    <header class="discovery-heading"><h1>发现</h1></header>
+    <header class="discovery-heading"><h1>发现</h1><select v-model="sort" aria-label="发现排序" :title="catalogSortDescription[sort]"><option v-for="option in catalogSortOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></header>
     <nav class="discovery-categories" aria-label="发现分类">
       <button v-for="item in categories" :key="item.id" type="button" :aria-pressed="category === item.id" @click="changeCategory(item.id)">{{ item.label }}</button>
     </nav>
@@ -86,6 +91,7 @@ const visibleItems = (section: DiscoverySection) => section.id === 'calendar' ? 
 
 <style scoped>
 .discovery-heading, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.discovery-heading select { min-height: 40px; padding: 0 12px; border: 1px solid var(--divider); border-radius: 8px; color: var(--text-secondary); background: var(--surface-2); font-size: .8rem; }
 .discovery-heading h1 { font-size: 2rem; font-weight: 700; letter-spacing: -.035em; }
 .discovery-categories { display: flex; gap: 24px; overflow-x: auto; margin: 18px 0 28px; border-bottom: 1px solid var(--divider); }
 .discovery-categories button { position: relative; flex: 0 0 auto; min-height: 48px; padding: 0 2px 10px; border: 0; color: var(--text-tertiary); background: transparent; font-size: .86rem; font-weight: 500; }
