@@ -147,7 +147,6 @@ const isMobilePlaybackDevice = typeof window !== 'undefined'
   && (window.matchMedia('(max-width: 820px)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
 const { fullscreen: nativeFullscreen, error: fullscreenError, toggle: toggleFullscreen, exit: exitFullscreen } = useVideoFullscreen(videoRef);
 const embeddedSubtitles = useEmbeddedSubtitles(videoRef, () => playback.value?.embeddedSubtitleUrl);
-const mobileControlsVisible = ref(true);
 watch(fullscreenError, message => { if (message) { toast.show(message, '!'); announce(message); } });
 
 const soundEffectOptions: SoundEffectOption[] = [
@@ -1235,7 +1234,7 @@ defineExpose({ retry });
 
       <div class="player-layout" :class="{ 'single-column': !episodes.length && !sources.length }">
         <main class="video-column">
-          <div class="video-stage" :style="{ '--video-ratio': videoAspectRatio }">
+          <div class="video-stage" :class="{ 'has-mobile-transport': isMobilePlaybackDevice && !nativeFullscreen && phase === 'ready' && !manualPlayRequired }" :style="{ '--video-ratio': videoAspectRatio }">
             <video
               :key="videoInstanceKey"
               ref="videoRef"
@@ -1273,10 +1272,7 @@ defineExpose({ retry });
               />
             </video>
 
-            <MobilePlaybackControls
-              v-if="isMobilePlaybackDevice && !nativeFullscreen && videoRef && phase === 'ready' && !manualPlayRequired"
-              :video="videoRef" :expanded="nativeFullscreen" @fullscreen="toggleFullscreen" @visibility-change="mobileControlsVisible = $event"
-            />
+
 
             <div v-if="phase === 'resolving' || phase === 'preparing'" class="stage-state loading-state" role="status" aria-live="polite">
               <img v-if="media.poster && !isMobilePlaybackDevice" class="stage-poster" :src="media.poster" alt="" aria-hidden="true" />
@@ -1340,9 +1336,13 @@ defineExpose({ retry });
             </div>
           </div>
 
+            <MobilePlaybackControls
+              v-if="isMobilePlaybackDevice && !nativeFullscreen && videoRef && phase === 'ready' && !manualPlayRequired"
+              :video="videoRef" :expanded="nativeFullscreen" @fullscreen="toggleFullscreen"
+            />
+
           <div v-if="phase === 'ready' && videoRef" class="playback-tools" aria-label="播放工具">
           <SubtitleControls :video="videoRef" :hls="hlsRef" :native-fullscreen="nativeFullscreen" :username="username" :notice="playback?.subtitleNotice" compact
-            :mobile-controls-visible="isMobilePlaybackDevice && mobileControlsVisible"
             :loading="embeddedSubtitles.loading.value" :read-error="embeddedSubtitles.error.value" @retry-embedded="embeddedSubtitles.retry" />
           <DanmakuControls
             v-if="phase === 'ready' && videoRef && currentEpisode && media"
@@ -1689,6 +1689,7 @@ defineExpose({ retry });
   .file-list .episode-copy { display: grid; }
 }
 @media (max-width: 360px) { .episode-list { grid-template-columns: repeat(4, minmax(0, 1fr)); } .player-toolbar button { gap: 5px; padding: 8px; } .player-toolbar button > svg { width: 17px; height: 17px; } }
+.video-stage.has-mobile-transport { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .video-element:fullscreen { width: 100vw; height: 100vh; background: #000; }
 .video-element:not(.native-fullscreen)::cue { font-size: clamp(14px, 1.8vw, 24px); }
 .video-element::-webkit-media-controls { color-scheme: dark; }

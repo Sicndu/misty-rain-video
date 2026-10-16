@@ -3,7 +3,7 @@ import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type Hls from 'hls.js';
 import { Captions, ChevronDown } from '@lucide/vue';
 import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleLanguageKey, centerSubtitleCue, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
-const props = defineProps<{ video: HTMLVideoElement; hls?: Hls | null; compact?: boolean; notice?: string; username?: string; nativeFullscreen?: boolean; loading?: boolean; readError?: string; mobileControlsVisible?: boolean }>();
+const props = defineProps<{ video: HTMLVideoElement; hls?: Hls | null; compact?: boolean; notice?: string; username?: string; nativeFullscreen?: boolean; loading?: boolean; readError?: string }>();
 const emit = defineEmits<{ (event: 'retry-embedded'): void }>();
 const options = ref<SubtitleTrackOption[]>([]);
 const selected = ref('off');
@@ -18,18 +18,15 @@ let lastActive = 'off';
 const positionCues = () => {
   for (const track of Array.from(props.video.textTracks)) {
     if (!['subtitles', 'captions'].includes(track.kind) || track.mode !== 'showing') continue;
-    let changed = false;
     for (const item of Array.from(track.activeCues || [])) {
       if (!('position' in item)) continue;
       const cue = item as VTTCue;
-      changed = centerSubtitleCue(cue, props.mobileControlsVisible && !props.nativeFullscreen ? -5 : -2) || changed;
+      centerSubtitleCue(cue);
     }
-    // Chromium can retain the old cue box after pausing. Refresh only changed
-    // inline captions; preserve the selected track and native fullscreen picker.
-    if (changed && props.video.paused && !props.nativeFullscreen) { track.mode = 'hidden'; track.mode = 'showing'; }
+
   }
 };
-watch([() => props.mobileControlsVisible, () => props.nativeFullscreen], positionCues);
+watch(() => props.nativeFullscreen, positionCues);
 const rememberNativeChoice = () => {
   const id = activeSubtitleTrack(props.video, props.hls);
   selected.value = id;

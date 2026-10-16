@@ -4,15 +4,12 @@ const caption = (track: TextTrack) => track.kind === 'subtitles' || track.kind =
 export const managedSubtitleTracks = new WeakMap<TextTrack, { active: boolean; origin: string }>();
 export const subtitleLanguageKey = (language: string) => /^(zh|chi|zho)/i.test(language) ? 'zh' : /^en(g)?$/i.test(language) ? 'en' : language.toLowerCase();
 export const centerSubtitleCue = (cue: VTTCue, line = -2) => {
-  const changed = cue.align !== 'center' || cue.position !== 50 || cue.size !== 90 || !cue.snapToLines || cue.line !== line
-    || ('positionAlign' in cue && cue.positionAlign !== 'center');
   if (cue.align !== 'center') cue.align = 'center';
   if (cue.position !== 50) cue.position = 50;
   if (cue.size !== 90) cue.size = 90;
   if (!cue.snapToLines) cue.snapToLines = true;
   if (cue.line !== line) cue.line = line;
   if ('positionAlign' in cue && cue.positionAlign !== 'center') cue.positionAlign = 'center';
-  return changed;
 };
 export const subtitleTrackOptions = (video: HTMLVideoElement, hls?: Hls | null): SubtitleTrackOption[] => {
   const options: SubtitleTrackOption[] = (hls?.subtitleTracks || []).map((track, index) => ({

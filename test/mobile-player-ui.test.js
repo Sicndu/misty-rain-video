@@ -76,24 +76,14 @@ test('mute can restore zero volume without changing subtitle or metadata choices
     assert.equal(view.media.volume, 1); assert.equal(view.media.muted, false);
   } finally { view.app.unmount(); }
 });
-test('playing fades controls, tapping the video reveals them, and pausing keeps controls visible', async () => {
-  const originalTimeout = globalThis.setTimeout;
-  let hide;
-  globalThis.setTimeout = (callback, delay, ...args) => {
-    if (delay === 3500) { hide = callback; return 0; }
-    return originalTimeout(callback, delay, ...args);
-  };
+test('inline mobile controls remain available while playing and paused', async () => {
   const view = mount();
   try {
     button('播放').click(); await nextTick();
-    assert.equal(typeof hide, 'function'); hide(); await nextTick();
-    assert.ok(document.querySelector('.mobile-controls').classList.contains('concealed'));
-    view.media.dispatchEvent(event('click')); await nextTick();
-    assert.ok(!document.querySelector('.mobile-controls').classList.contains('concealed'));
-    hide = null; button('暂停').click(); await nextTick();
-    assert.equal(hide, null);
-    assert.ok(!document.querySelector('.mobile-controls').classList.contains('concealed'));
-  } finally { view.app.unmount(); globalThis.setTimeout = originalTimeout; }
+    assert.ok(button('暂停')); assert.equal(document.querySelector('.concealed'), null);
+    button('暂停').click(); await nextTick();
+    assert.ok(button('播放')); assert.equal(document.querySelector('.concealed'), null);
+  } finally { view.app.unmount(); }
 });
 test('play rejection is visible and replaced video no longer controls the UI', async () => {
   const view = mount();

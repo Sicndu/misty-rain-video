@@ -237,6 +237,8 @@ test('player tabs are mutually exclusive; captions remain beside video, settings
     assert.equal(document.querySelector('#playback-settings').getAttribute('aria-hidden'), 'false');
     assert.equal(document.querySelectorAll('select[aria-label="选择影片字幕"]').length, 1);
     assert.ok(document.querySelector('.playback-tools select'));
+    assert.equal(document.querySelector('.video-stage .mobile-controls'), null, 'controls never cover video captions');
+    assert.ok(document.querySelector('.video-column > .mobile-controls'));
     assert.equal(document.querySelector('#playback-settings select[aria-label="选择影片字幕"]'), null);
     assert.equal(document.querySelectorAll('.duration-input input').length, 2);
     assert.equal(document.querySelector('[aria-label="片头时长（秒）"]').value, '30');
@@ -292,22 +294,6 @@ test('native fullscreen subtitle choices are respected and retained after exitin
     video.textTracks.dispatchEvent(new window.Event('removetrack'));
     await nextTick();
     assert.equal(localStorage.getItem(key), choice, 'an unavailable track list is not a user choice to disable subtitles');
-  } finally { app.unmount(); }
-});
-
-test('paused mobile captions reflow above controls without changing the selected track', async () => {
-  const video = document.createElement('video'), changes = [];
-  const cue = { position: 50, align: 'center', size: 90, line: -2, snapToLines: true };
-  let mode = 'showing';
-  video.textTracks.push({ kind: 'subtitles', label: '中文', language: 'zh', activeCues: [cue], get mode() { return mode; }, set mode(value) { changes.push(value); mode = value; } });
-  const props = reactive({ video, username: 'paused-caption-fixture', mobileControlsVisible: false });
-  const app = mount(Subtitles, props);
-  try {
-    await flush(); changes.length = 0;
-    props.mobileControlsVisible = true; await nextTick();
-    assert.equal(cue.line, -5); assert.deepEqual(changes, ['hidden', 'showing']);
-    changes.length = 0; video.dispatchEvent(new window.Event('subtitletracksupdated')); await nextTick();
-    assert.deepEqual(changes, [], 'unchanged layout does not repeatedly toggle track mode');
   } finally { app.unmount(); }
 });
 
