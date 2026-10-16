@@ -8,6 +8,8 @@ import DesktopSidebar from './components/layout/DesktopSidebar.vue';
 import MobileTabBar, { type MobileTab as MobileDockTab } from './components/layout/MobileTabBar.vue';
 import CategoryTabs from './components/media/CategoryTabs.vue';
 import MediaGrid from './components/media/MediaGrid.vue';
+import DiscoveryPage from './components/media/DiscoveryPage.vue';
+import { discoveryMedia, resourcePlaybackMedia, type DiscoveryItem } from './services/discoveryService';
 import DeleteMediaConfirm from './components/media/DeleteMediaConfirm.vue';
 import CategoryPickerSheet from './components/media/CategoryPickerSheet.vue';
 import MediaActionSheet from './components/media/MediaActionSheet.vue';
@@ -95,12 +97,14 @@ const displayHistory = computed(() => history.value.map(entry => {
   return media ? { ...entry, media: { ...entry.media, ...media } } : entry;
 }));
 type MobileTab = MobileDockTab | 'search';
-const mobileTab = ref<MobileTab>('library');
+const mobileTab = ref<MobileTab>('discover');
+const lastContentTab = ref<'discover' | 'library'>('discover');
+const currentPage = computed(() => mobileTab.value === 'search' ? lastContentTab.value : mobileTab.value);
 const selectedHistoryEntry = ref<PlaybackHistoryEntry | null>(null);
 const isCheckingUpdates = ref(false);
 const isApplyingUpdates = ref(false);
 let autoCheckedUsername = '';
-type MobileHistoryLayer = 'library' | 'search' | 'account' | 'player' | 'transfer' | 'delete' | 'category' | 'actions' | 'title';
+type MobileHistoryLayer = 'discover' | 'library' | 'search' | 'account' | 'player' | 'transfer' | 'delete' | 'category' | 'actions' | 'title';
 let handlingPopState = false;
 
 const mobileHistoryEnabled = () => typeof window !== 'undefined' && (window.matchMedia('(max-width: 640px)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
@@ -129,21 +133,25 @@ const closeCurrentMobileLayer = () => {
   else if (categoryMedia.value) categoryMedia.value = null;
   else if (titleMedia.value) titleMedia.value = null;
   else if (actionMedia.value) actionMedia.value = null;
-  else if (mobileTab.value !== 'library') mobileTab.value = 'library';
 };
 
-const handleMobilePopState = () => {
+const handleMobilePopState = (event: PopStateEvent) => {
   if (isSavingTransfer.value || isDeletingMedia.value || isSavingCategory.value || isSavingTitle.value) {
     setMobileHistoryLayer(isSavingTitle.value ? 'title' : isSavingTransfer.value && isTransferOpen.value ? 'transfer' : isDeletingMedia.value ? 'delete' : isSavingCategory.value ? 'category' : 'library');
     return;
   }
   handlingPopState = true;
   closeCurrentMobileLayer();
+  const layer = event.state?.mistyRainLayer;
+  if (['discover', 'library', 'account', 'search'].includes(layer)) {
+    mobileTab.value = layer;
+    if (layer === 'discover' || layer === 'library') lastContentTab.value = layer;
+  }
   nextTick(() => { handlingPopState = false; });
 };
 
 onMounted(() => {
-  if (mobileHistoryEnabled()) setMobileHistoryLayer('library', true);
+  if (mobileHistoryEnabled()) setMobileHistoryLayer('discover', true);
   window.addEventListener('popstate', handleMobilePopState);
 });
 
@@ -156,7 +164,8 @@ watch(user, () => {
   isEmbedPlayerOpen.value = false;
   embedPlayingMedia.value = null;
   isTransferOpen.value = false;
-  mobileTab.value = 'library';
+  mobileTab.value = 'discover';
+  lastContentTab.value = 'discover';
   deletingMedia.value = null;
   categoryMedia.value = null;
   actionMedia.value = null;
@@ -167,7 +176,7 @@ watch(user, () => {
   saveError.value = null;
   failedResourceId.value = '';
   autoCheckedUsername = '';
-  setMobileHistoryLayer('library', true);
+  setMobileHistoryLayer('discover', true);
 });
 
 const checkLibraryUpdates = async (force = false, notify = false) => {
@@ -229,9 +238,7 @@ watch(
 const handleSelectMedia = (media: MediaItem) => {
   if (isSavingTransfer.value) { toast.show('正在添加影片，请稍候', '↻'); return; }
   embedPlayingMedia.value = media;
-  selectedHistoryEntry.value = history.value.find(entry =>
-    (media.quarkFid && entry.media.quarkFid === media.quarkFid) || entry.media.id === media.id
-  ) || null;
+  selectedHistoryEntry.value = history.value.find(entry => sameMediaIdentity(entry.media, media)) || null;
   isEmbedPlayerOpen.value = true;
   setMobileHistoryLayer('player');
 };
@@ -266,7 +273,7 @@ const handleReSearch = (media: MediaItem) => {
 // 搜索影视
 const handleSearchMedia = (kw: string) => {
   const replaceHistory = currentHistoryLayer() === 'search';
-  mobileTab.value = 'library';
+  mobileTab.value = lastContentTab.value;
   const existing = mediaList.value.find(m => m.title.includes(kw));
   if (existing) {
     openTransferModal(existing);
@@ -308,7 +315,10 @@ const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRe
     await saveMedia(cardToSave);
     currentCategory.value = cat;
     mobileTab.value = 'library';
-    if (isTransferOpen.value) requestLayerClose('transfer', closeTransferModal);
+    lastContentTab.value = 'library';
+    const replaceLayer = isTransferOpen.value || currentHistoryLayer() === 'search';
+    closeTransferModal();
+    setMobileHistoryLayer('library', replaceLayer);
     return true;
   } catch (error) {
     if (bestRes && error && typeof error === 'object' && 'code' in error && error.code === 'QUARK_SHARE_UNAVAILABLE') rejectResource(bestRes.url);
@@ -457,6 +467,7 @@ const handleLogout = async () => {
 };
 
 const focusMobileSearch = () => {
+  if (currentPage.value !== 'account') lastContentTab.value = currentPage.value;
   mobileTab.value = 'search';
   setMobileHistoryLayer('search');
   nextTick(() => navbarRef.value?.focusSearch());
@@ -464,40 +475,48 @@ const focusMobileSearch = () => {
 
 const finishMobileSearch = () => {
   if (mobileTab.value === 'search') {
-    requestLayerClose('search', () => { mobileTab.value = 'library'; });
+    requestLayerClose('search', () => { mobileTab.value = lastContentTab.value; });
   }
 };
 
-const showMobileLibrary = () => {
-  if (mobileTab.value === 'account') {
-    requestLayerClose('account', () => { mobileTab.value = 'library'; });
-  } else if (mobileTab.value === 'search') {
-    requestLayerClose('search', () => { mobileTab.value = 'library'; });
-  } else {
-    mobileTab.value = 'library';
-  }
+const navigateContent = (tab: 'discover' | 'library') => {
+  if (isSavingTransfer.value) return;
+  mobileTab.value = tab;
+  lastContentTab.value = tab;
+  setMobileHistoryLayer(tab);
   nextTick(() => navbarRef.value?.scrollToTop());
 };
-
+const showMobileLibrary = () => navigateContent('library');
+const showDiscovery = () => navigateContent('discover');
 const showDesktopLibrary = (category?: CategoryType) => {
   if (category) currentCategory.value = category;
   showMobileLibrary();
 };
-
 const showMobileAccount = () => {
   if (isSavingTransfer.value) return;
-  const replaceHistory = currentHistoryLayer() === 'search';
+  if (currentPage.value !== 'account') lastContentTab.value = currentPage.value;
   mobileTab.value = 'account';
-  setMobileHistoryLayer('account', replaceHistory);
+  setMobileHistoryLayer('account', currentHistoryLayer() === 'search');
   window.scrollTo({ top: 0, behavior: 'smooth' });
 };
-
-const navigateMobileTab = (tab: MobileDockTab) => {
-  if (tab === 'account') {
-    showMobileAccount();
-    return;
-  }
-  showMobileLibrary();
+const navigateMobileTab = (tab: MobileDockTab) => tab === 'account' ? showMobileAccount() : navigateContent(tab);
+const openDiscoveryItem = (item: DiscoveryItem) => {
+  if (isSavingTransfer.value) return;
+  const saved = allMediaList.value.find(media => media.catalogId === item.id);
+  if (saved) { handleSelectMedia(saved); return; }
+  openTransferModal(discoveryMedia(item));
+  setMobileHistoryLayer('transfer');
+};
+const playResource = (media: MediaItem, resource: ResourceItem, category: CategoryType) => {
+  if (isSavingTransfer.value) return;
+  try {
+    const playable = resourcePlaybackMedia(media, resource, category);
+    closeTransferModal();
+    embedPlayingMedia.value = playable;
+    selectedHistoryEntry.value = history.value.find(entry => sameMediaIdentity(entry.media, playable)) || null;
+    isEmbedPlayerOpen.value = true;
+    setMobileHistoryLayer('player', true);
+  } catch (error) { toast.show(error instanceof Error ? error.message : '无法打开资源', '!'); }
 };
 </script>
 
@@ -514,9 +533,9 @@ const navigateMobileTab = (tab: MobileDockTab) => {
   />
 
   <template v-else-if="user">
-    <DesktopSidebar :active-page="mobileTab === 'account' ? 'account' : 'library'" :category="currentCategory"
+    <DesktopSidebar :active-page="currentPage" :category="currentCategory"
       :counts="categoryCounts" :user="user" :disabled="isSavingTransfer"
-      @library="showDesktopLibrary" @account="showMobileAccount" />
+      @library="showDesktopLibrary" @account="showMobileAccount" @discover="showDiscovery" />
     <!-- 片库页面 -->
     <Navbar
       v-if="mobileTab !== 'account'"
@@ -535,8 +554,11 @@ const navigateMobileTab = (tab: MobileDockTab) => {
       @open-account="showMobileAccount"
     />
 
+    <main v-show="currentPage === 'discover'" class="page-container discovery-container">
+      <DiscoveryPage :active="currentPage === 'discover' && !isEmbedPlayerOpen && !isTransferOpen" :library-catalog-ids="allMediaList.map(item => item.catalogId || '').filter(Boolean)" @select="openDiscoveryItem" @search="focusMobileSearch" />
+    </main>
     <!-- 核心主区域 -->
-    <main v-if="mobileTab !== 'account'" class="page-container">
+    <main v-if="currentPage === 'library'" class="page-container">
     <header class="library-intro">
       <div class="library-title">
         <h1>我的片库</h1>
@@ -594,11 +616,12 @@ const navigateMobileTab = (tab: MobileDockTab) => {
       @edit-category="openCategoryPicker"
       @open-actions="openMediaActions"
       @start-search="focusMobileSearch"
+      @discover="showDiscovery"
     />
     </main>
 
     <AccountPage
-      v-else
+      v-if="currentPage === 'account'"
       ref="accountPageRef"
       :user="user"
       :history="displayHistory"
@@ -609,13 +632,13 @@ const navigateMobileTab = (tab: MobileDockTab) => {
       @auth-updated="handlePlaybackAuthUpdated"
       @play-history="continuePlayback"
       @delete-history="removeHistory"
-      @back="showMobileLibrary"
+      @back="navigateContent(lastContentTab)"
       @logout="handleLogout"
     />
 
     <MobileTabBar
-      v-if="!isEmbedPlayerOpen && !isTransferOpen && !deletingMedia && !categoryMedia && !actionMedia"
-      :active-tab="mobileTab === 'account' ? 'account' : 'library'"
+      v-if="!isEmbedPlayerOpen && !isTransferOpen && !deletingMedia && !categoryMedia && !actionMedia && !titleMedia"
+      :active-tab="currentPage"
       :disabled="isSavingTransfer"
       @navigate="navigateMobileTab"
     />
@@ -655,6 +678,7 @@ const navigateMobileTab = (tab: MobileDockTab) => {
     @search="refreshResources"
     @resource-unavailable="rejectResource"
     @save-to-cards="handleSaveCard"
+    @play-resource="playResource"
     />
 
     <DeleteMediaConfirm

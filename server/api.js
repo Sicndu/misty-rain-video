@@ -11,6 +11,7 @@ import { isGenericPoster, PosterService } from './posterService.js';
 import { ResourceSearchService } from './resourceSearch.js';
 import { ShareAvailability } from './shareAvailability.js';
 import { TvPlaybackClient } from './tvPlaybackClient.js';
+import { DiscoveryService } from './discoveryService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,6 +59,7 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
     quarkGateway
   };
   context.libraryMaintenance = new LibraryMaintenance(context);
+  context.discovery = new DiscoveryService({ dataDir, posterService: context.posterService });
   return context;
 };
 
@@ -141,9 +143,13 @@ const importLibraryShare = async (context, card, user) => {
   }
 };
 
-const persistablePoster = value => isGenericPoster(value) || /\/api\/media-posters\//.test(value) ? '' : value;
+const persistablePoster = value => isGenericPoster(value) || /\/api\/(?:media-posters|discovery\/posters)\//.test(value) ? '' : value;
 
-const historyMedia = (media, userData) => {
+const historyMedia = (media, userData, metadata) => {
+  if (media.catalogId && !media.quarkFid) {
+    const saved = (metadata || userData.mediaRepository?.all?.() || []).find(item => item.catalogId === media.catalogId && item.quarkFid);
+    if (saved) media = { ...media, ...saved, poster: media.poster || saved.poster };
+  }
   const fid = media.quarkFid || (String(media.id || '').startsWith('quark:') ? media.id.slice(6) : '');
   const title = userData.libraryViewRepository?.titleFor?.(fid) || media.title;
   return { ...media, title, poster: isGenericPoster(media.poster) || title !== media.title ? '' : media.poster };
@@ -151,8 +157,9 @@ const historyMedia = (media, userData) => {
 
 const readHistory = async (context, user, userData) => {
   const entries = userData.playbackHistory.all();
+  const metadata = userData.mediaRepository?.all?.() || [];
   // History is a snapshot of progress; title and cover use current library metadata.
-  const media = await context.posterService.enrich(entries.map(entry => historyMedia(entry.media, userData)), user);
+  const media = await context.posterService.enrich(entries.map(entry => historyMedia(entry.media, userData, metadata)), user);
   return entries.map((entry, index) => ({ ...entry, media: media[index] }));
 };
 
@@ -348,6 +355,24 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
+    if (pathname === '/api/discovery' && request.method === 'GET') {
+      sendSuccess(response, await context.discovery.get(url.searchParams.get('category') || 'all'));
+      return true;
+    }
+    const discoveryPosterMatch = pathname.match(/^\/api\/discovery\/posters\/([^/]+)$/);
+    if (discoveryPosterMatch && ['GET', 'HEAD'].includes(request.method)) {
+      const poster = await context.discovery.poster(decodeURIComponent(discoveryPosterMatch[1]));
+      const asset = context.posterService.getAsset(path.basename(poster.poster));
+      if (!asset) throw Object.assign(new Error('封面暂时不可用'), { statusCode: 503 });
+      response.statusCode = 200;
+      response.setHeader('Content-Type', asset.contentType);
+      response.setHeader('Content-Length', asset.size);
+      response.setHeader('Cache-Control', 'private, max-age=86400');
+      if (request.method === 'HEAD') response.end();
+      else fs.createReadStream(asset.filePath).pipe(response);
+      return true;
+    }
+
     const posterMatch = pathname.match(/^\/api\/media-posters\/([^/]+)$/);
     if (posterMatch && (request.method === 'GET' || request.method === 'HEAD')) {
       const asset = context.posterService.getAsset(decodeURIComponent(posterMatch[1]));
@@ -388,6 +413,7 @@ export const handleApiRequest = async (request, response, context) => {
         }
         if (/pan\.quark\.cn\/s\/[a-zA-Z0-9]+/i.test(item.quarkShareUrl || '')) {
           const imported = await importLibraryShare(context, item, user);
+          if (typeof item.catalogId === 'string') await context.discovery.poster(item.catalogId).catch(() => {});
           if (imported.replacedFid) {
             userData.mediaRepository.removeFid(imported.replacedFid);
             userData.playbackHistory.removeByMediaFid(imported.replacedFid);
@@ -422,9 +448,11 @@ export const handleApiRequest = async (request, response, context) => {
           throw error;
         }
         if (quarkFid) {
+          const catalogId = userData.mediaRepository.all?.().find(item => item.quarkFid === quarkFid)?.catalogId;
           const result = await context.quarkGateway.trashLibraryItem(quarkFid, user);
           userData.mediaRepository.removeFid(quarkFid);
           userData.playbackHistory.removeByMediaFid(quarkFid);
+          if (catalogId) userData.playbackHistory.removeUnlinkedCatalog(catalogId);
           sendSuccess(response, result, '当前影片目录已移入回收站');
         } else {
           userData.mediaRepository.remove(id);
@@ -544,7 +572,8 @@ export const handleApiRequest = async (request, response, context) => {
           quarkShareUrl: String(media.quarkShareUrl || '').slice(0, 2048),
           quarkPasscode: String(media.quarkPasscode || '').slice(0, 32),
           quarkFid: String(media.quarkFid || '').slice(0, 240),
-          quarkQuality: String(media.quarkQuality || '').slice(0, 120)
+          quarkQuality: String(media.quarkQuality || '').slice(0, 120),
+          catalogId: String(media.catalogId || '').slice(0, 80)
         };
         if (body.playbackSessionId !== undefined) {
           if (typeof body.playbackSessionId !== 'string' || !body.playbackSessionId || body.playbackSessionId.length > 240) {
@@ -643,8 +672,11 @@ export const handleApiRequest = async (request, response, context) => {
 
     if ((pathname === '/api/player/sessions' || pathname === '/api/quark/resolve') && request.method === 'POST') {
       const body = await readRequestBody(request);
-      const session = await context.quarkGateway.createPlaybackSession(body, user);
-      sendSuccess(response, session);
+      try { sendSuccess(response, await context.quarkGateway.createPlaybackSession(body, user)); }
+      catch (error) {
+        if (error?.code === 'QUARK_SHARE_UNAVAILABLE' && body.shareUrl) context.shareAvailability?.markUnavailable(body.shareUrl);
+        throw error;
+      }
       return true;
     }
 

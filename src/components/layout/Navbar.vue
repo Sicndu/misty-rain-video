@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue';
-import { Settings2, Search, X } from '@lucide/vue';
+import { Search, X } from '@lucide/vue';
 import type { MediaItem, CategoryType } from '../../types/media';
 import type { AppUser } from '../../services/authService';
 import BrandMark from '../common/BrandMark.vue';
@@ -208,17 +208,6 @@ defineExpose({ focusSearch, scrollToTop });
         </div>
       </form>
 
-      <!-- 右侧账户入口 -->
-      <div class="trailing-unit">
-        <button
-          class="account-capsule-btn"
-          aria-label="打开设置"
-          :disabled="busy"
-          @click="emit('open-account')"
-        >
-          <Settings2 aria-hidden="true" />
-        </button>
-      </div>
     </div>
   </header>
 </template>

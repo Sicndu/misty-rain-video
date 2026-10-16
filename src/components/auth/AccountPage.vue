@@ -110,7 +110,7 @@ defineExpose({ focusAuth, refreshStatus });
 <template>
   <main class="account-page">
     <header class="page-heading">
-      <button type="button" class="back-button" :aria-label="advancedConfiguration ? '返回设置' : '返回片库'" @click="back"><ChevronLeft aria-hidden="true" /></button>
+      <button type="button" class="back-button" :aria-label="advancedConfiguration ? '返回设置' : '返回上一页'" @click="back"><ChevronLeft aria-hidden="true" /></button>
       <h1>{{ advancedConfiguration ? '高级配置' : '设置' }}</h1>
     </header>
     <template v-if="!advancedConfiguration">

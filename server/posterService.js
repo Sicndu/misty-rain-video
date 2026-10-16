@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { isDiscoveryImageUrl } from './discoverySources.js';
 
 export const LEGACY_DEFAULT_POSTER = 'https://images.unsplash.com/photo-1578836537282-3171d77f8632?w=600&q=80';
 
@@ -112,7 +113,7 @@ export class PosterService {
     this.posterDirectory = path.resolve(dataDir, 'posters');
     this.cachePath = path.resolve(dataDir, 'media_posters.json');
     this.cache = readJson(this.cachePath, { version: CACHE_VERSION, entries: {} });
-    if (!this.cache || this.cache.version !== CACHE_VERSION || typeof this.cache.entries !== 'object') {
+    if (!this.cache || this.cache.version !== CACHE_VERSION || !this.cache.entries || typeof this.cache.entries !== 'object' || Array.isArray(this.cache.entries)) {
       this.cache = { version: CACHE_VERSION, entries: {} };
     }
     this.inFlight = new Map();
@@ -126,6 +127,8 @@ export class PosterService {
     const unresolved = [];
 
     for (const card of cards) {
+      const catalog = card.catalogId && this.catalogPoster(card.catalogId);
+      if (catalog) { Object.assign(card, catalog); continue; }
       if (!isGenericPoster(card.poster)) continue;
       const key = this.#cacheKey(card);
       const cached = this.#cachedPoster(key);
@@ -191,6 +194,28 @@ export class PosterService {
         : extension === '.gif' ? 'image/gif'
           : 'image/jpeg';
     return { filePath, contentType, size: fs.statSync(filePath).size };
+  }
+
+  catalogPoster(id) {
+    return this.#cachedPoster(crypto.createHash('sha256').update(`catalog\0${id}`).digest('hex').slice(0, 24));
+  }
+
+  async resolveCatalogPoster(item) {
+    if (!/^(douban|bangumi)-\d{1,13}$/.test(item.id) || !isDiscoveryImageUrl(item.imageUrl, item.provider)) throw new Error('INVALID_CATALOG_POSTER');
+    const cached = this.catalogPoster(item.id);
+    if (cached) return cached;
+    const key = crypto.createHash('sha256').update(`catalog\0${item.id}`).digest('hex').slice(0, 24);
+    if (this.inFlight.has(key)) return this.inFlight.get(key);
+    const task = (async () => {
+      const asset = await this.#downloadPoster({ ...item, referer: item.provider === 'douban' ? 'https://movie.douban.com/' : 'https://bgm.tv/',
+        validateUrl: url => isDiscoveryImageUrl(url, item.provider) }, key);
+      const entry = { status: 'ready', fileName: asset.fileName, provider: item.provider, providerId: item.id,
+        matchedTitle: item.title, updatedAt: new Date().toISOString() };
+      this.cache.entries[key] = entry; this.#persistCache();
+      return this.#serializePoster(entry);
+    })().finally(() => this.inFlight.delete(key));
+    this.inFlight.set(key, task);
+    return task;
   }
 
   async #resolveAndCache(item, key) {
@@ -279,17 +304,25 @@ export class PosterService {
 
   async #downloadPoster(candidate, key, thumbnail = false) {
     const signal = AbortSignal.timeout(IMAGE_TIMEOUT_MS);
+    const fetchImage = async () => {
+      let url = candidate.imageUrl;
+      for (let redirects = 0; redirects <= 3; redirects++) {
+        if (candidate.validateUrl && !candidate.validateUrl(url)) throw new Error('INVALID_POSTER_URL');
+        const result = await fetch(url, { signal, redirect: candidate.validateUrl ? 'manual' : 'follow', headers: {
+          Accept: 'image/webp,image/png,image/jpeg,image/*;q=0.8', Referer: candidate.referer, 'User-Agent': USER_AGENT
+        } });
+        if (candidate.validateUrl && [301, 302, 303, 307, 308].includes(result.status)) {
+          const location = result.headers.get('location'); await result.body?.cancel();
+          if (!location) throw new Error('INVALID_POSTER_REDIRECT');
+          url = new URL(location, url).toString(); continue;
+        }
+        return result;
+      }
+      throw new Error('TOO_MANY_POSTER_REDIRECTS');
+    };
     const response = thumbnail && this.fetchThumbnail
       ? await this.fetchThumbnail(candidate.imageUrl, signal)
-      : await fetch(candidate.imageUrl, {
-      redirect: 'follow',
-      signal,
-      headers: {
-        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-        Referer: candidate.referer,
-        'User-Agent': USER_AGENT
-      }
-    });
+      : await fetchImage();
     if (!response.ok || !response.body) { await response.body?.cancel(); throw new Error(`海报下载失败 (${response.status})`); }
 
     const declaredSize = Number(response.headers.get('content-length')) || 0;

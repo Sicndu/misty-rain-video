@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Film, Search } from '@lucide/vue';
+import { Compass, Film } from '@lucide/vue';
 import type { MediaItem, CategoryType } from '../../types/media';
 import MediaCard from './MediaCard.vue';
 
@@ -17,6 +17,7 @@ const emit = defineEmits<{
   (e: 'edit-category', media: MediaItem): void;
   (e: 'open-actions', media: MediaItem): void;
   (e: 'start-search'): void;
+  (e: 'discover'): void;
 }>();
 </script>
 
@@ -56,17 +57,18 @@ const emit = defineEmits<{
     <div class="empty-content">
       <span class="empty-kicker">{{ currentCategoryName }}片库</span>
       <h3 class="empty-title">从喜欢的第一部开始</h3>
-      <p class="empty-text">搜索片名或粘贴分享链接，系统会自动整理剧集与海报。</p>
-      <button type="button" class="empty-action" @click="emit('start-search')">
-        <Search aria-hidden="true" />
-        添加第一部影片
+      <p class="empty-text">浏览近期热门，或搜索想看的片名。</p>
+      <button type="button" class="empty-action" @click="emit('discover')">
+        <Compass aria-hidden="true" />
+        浏览推荐
       </button>
-      <span class="empty-hint">内容仅保存在你的私人片库</span>
+      <button type="button" class="empty-search" @click="emit('start-search')">搜索片名</button>
     </div>
   </div>
 </template>
 
 <style scoped>
+.empty-search { min-height: 44px; padding: 0 16px; border: 0; color: var(--text-tertiary); background: transparent; font-size: .8rem; }
 .media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 28px 20px; }
 .media-skeleton { display: grid; gap: 10px; min-width: 0; }
 .media-skeleton-poster, .media-skeleton-title, .media-skeleton-subtitle { display: block; background: linear-gradient(100deg, rgb(255 255 255 / .035), rgb(255 255 255 / .085), rgb(255 255 255 / .035)); background-size: 200% 100%; animation: shimmer 1.6s ease-in-out infinite; }

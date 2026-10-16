@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import { build } from 'esbuild';
-import { parse, compileScript } from 'vue/compiler-sfc';
+import { parse, compileScript, compileTemplate } from 'vue/compiler-sfc';
 
 const dom = new JSDOM('<html><body></body></html>', { url: 'http://localhost/', pretendToBeVisual: true });
 for (const key of ['window', 'document', 'Element', 'HTMLElement', 'SVGElement', 'Node', 'CustomEvent', 'HTMLMediaElement', 'HTMLVideoElement']) globalThis[key] = dom.window[key];
@@ -13,6 +13,7 @@ globalThis.localStorage = dom.window.localStorage;
 globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
 window.matchMedia = query => ({ matches: query.includes('max-width'), addEventListener() {}, removeEventListener() {} });
 window.HTMLElement.prototype.scrollIntoView = () => {};
+window.scrollTo = () => {};
 window.HTMLMediaElement.prototype.pause = () => {};
 window.HTMLMediaElement.prototype.load = () => {};
 window.HTMLMediaElement.prototype.play = async () => {};
@@ -38,6 +39,10 @@ async function compile(entry, name) {
       // Canvas rendering has its own browser/UI tests; this suite observes panel state.
       if (args.path.endsWith('/DanmakuControls.vue')) return { contents: 'export default { render() { return null; } };', loader: 'js' };
       const { descriptor } = parse(fs.readFileSync(args.path, 'utf8'));
+      if (!descriptor.script && !descriptor.scriptSetup) {
+        const template = compileTemplate({ id: args.path, filename: args.path, source: descriptor.template?.content || '' });
+        return { contents: template.code.replace('export function render', 'function render') + '\nexport default { render };', loader: 'js' };
+      }
       return { contents: compileScript(descriptor, { id: args.path, inlineTemplate: true }).content, loader: 'ts', resolveDir: path.dirname(args.path) };
     }); } }] });
   return import(pathToFileURL(outfile));
@@ -47,6 +52,9 @@ const TitleEditor = (await compile('src/components/media/MediaTitleEditor.vue', 
 const Sidebar = (await compile('src/components/layout/DesktopSidebar.vue', 'sidebar')).default;
 const Subtitles = (await compile('src/components/player/SubtitleControls.vue', 'subtitles')).default;
 const Player = (await compile('src/components/player/QuarkEmbedPlayerModal.vue', 'player')).default;
+const Discovery = (await compile('src/components/media/DiscoveryPage.vue', 'discovery')).default;
+const ResourceModal = (await compile('src/components/quark/QuarkTransferModal.vue', 'resource-modal')).default;
+const { discoveryMedia, resourcePlaybackMedia } = await compile('src/services/discoveryService.ts', 'discovery-service');
 const { useQuarkTransfer } = await compile('src/composables/useQuarkTransfer.ts', 'transfer');
 const user = role => ({ username: 'private_name', folder: role, role });
 const flush = async () => { for (let i = 0; i < 8; i++) { await new Promise(resolve => setImmediate(resolve)); await nextTick(); } };
@@ -58,6 +66,8 @@ function mount(component, props) {
 const media = { id: 'quark:movie', quarkFid: 'movie', title: '测试影片', category: 'tv', poster: '' };
 const episodes = [1, 2].map(n => ({ fid: 'ep' + n, episodeNumber: n, episodeTitle: '第 ' + n + ' 集', fileName: n + '.mp4', duration: 600 }));
 const preferences = { skipIntroOutro: false, autoNext: true, introSeconds: 30, outroSeconds: 45 };
+const discovered = { id: 'douban-123', provider: 'douban', title: '推荐影片', category: 'movie', year: '2026', rating: 8.1, poster: '/api/discovery/posters/douban-123', subtitle: '', description: '2026 / 剧情', sourceUrl: 'https://movie.douban.com/subject/123/' };
+const discoverySection = (category, items = [discovered]) => ({ id: category, category, title: category === 'movie' ? '热门电影' : '近期热播', source: '豆瓣', sourceUrl: 'https://m.douban.com/subject_collection/movie_hot_gaia', updatedAt: '2026-10-16T01:00:00Z', stale: false, refreshing: false, failed: false, items });
 function mockApi(t) {
   t.mock.method(globalThis, 'fetch', async (input, options = {}) => {
     const url = String(input);
@@ -71,6 +81,63 @@ function mockApi(t) {
     return Response.json({ code: 0, data });
   });
 }
+
+test('发现页切换分类时丢弃晚到的旧响应，点海报传递准确的元数据身份', async t => {
+  const pending = new Map();
+  t.mock.method(globalThis, 'fetch', input => {
+    const category = new URL(String(input), 'http://localhost').searchParams.get('category');
+    if (category === 'all') return Promise.resolve(Response.json({ code: 0, data: { sections: [discoverySection('movie')] } }));
+    return new Promise(resolve => pending.set(category, resolve));
+  });
+  let selected;
+  const app = mount(Discovery, { active: true, libraryCatalogIds: [], onSelect: item => { selected = item; } });
+  try {
+    await flush(); document.querySelector('.discovery-card').click(); assert.equal(selected.id, 'douban-123');
+    [...document.querySelectorAll('.discovery-categories button')].find(x => x.textContent === '电影').click(); await nextTick();
+    [...document.querySelectorAll('.discovery-categories button')].find(x => x.textContent === '电视剧').click(); await nextTick();
+    pending.get('tv')(Response.json({ code: 0, data: { sections: [discoverySection('tv', [{ ...discovered, id: 'douban-456', title: '新的剧集', category: 'tv' }])] } })); await flush();
+    pending.get('movie')(Response.json({ code: 0, data: { sections: [discoverySection('movie')] } })); await flush();
+    assert.match(document.querySelector('.discovery-title').textContent, /新的剧集/);
+    assert.doesNotMatch(document.body.textContent, /推荐影片/);
+  } finally { app.unmount(); }
+});
+
+test('每周放送按所选星期展示，未评分作品没有零分标签', async t => {
+  const entries = [1, 2].map(day => ({ ...discovered, id: 'bangumi-' + day, category: 'anime', weekday: day, rating: null, title: `周${day}新番` }));
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 0, data: { sections: [discoverySection('anime'), { ...discoverySection('anime', entries), id: 'calendar', title: '本周放送', source: 'Bangumi' }] } }));
+  const app = mount(Discovery, { active: true, libraryCatalogIds: [] });
+  try {
+    await flush(); [...document.querySelectorAll('.discovery-categories button')].find(x => x.textContent === '动漫').click(); await flush();
+    [...document.querySelectorAll('.anime-modes button')].find(x => x.textContent === '每周放送').click(); await nextTick();
+    document.querySelector('.weekdays button').click(); await nextTick();
+    assert.equal(document.querySelectorAll('.discovery-card').length, 1); assert.equal(document.querySelector('.discovery-title').textContent, '周1新番');
+    assert.equal(document.querySelector('.discovery-rating'), null);
+  } finally { app.unmount(); }
+});
+
+test('搜源结果的播放操作携带影片、提取码和分类，不触发全部保存', async () => {
+  const resource = { id: 'resource', title: '推荐影片 2026 1080p', url: 'https://pan.quark.cn/s/fixture', password: '1234', quality: '1080P', datetime: '2026-10-16', linkStatus: 'available', type: 'quark' };
+  let playback, saves = 0;
+  const app = mount(ResourceModal, { isOpen: true, isAnalyzing: false, media: discoveryMedia(discovered), currentCategory: 'tv', quarkResources: [resource], searchKeyword: discovered.title,
+    onPlayResource: (...args) => { playback = args; }, onSaveToCards: () => { saves++; } });
+  try {
+    await flush(); assert.equal(document.querySelector('[aria-label="重新输入片名搜索资源"]').value, discovered.title);
+    assert.equal(document.querySelector('[aria-label="保存分类"]').value, 'movie');
+    document.querySelector('.btn-play').click();
+    assert.equal(playback[0].catalogId, discovered.id); assert.equal(playback[1].password, '1234'); assert.equal(playback[2], 'movie');
+    assert.equal(saves, 0);
+  } finally { app.unmount(); }
+});
+
+test('直接播放保留发现元数据和提取码，不把替换片库或任意网址当作播放分享', () => {
+  const media = discoveryMedia(discovered);
+  const resource = { url: 'https://pan.quark.cn/s/valid?pwd=1234', password: '1234', quality: '1080P' };
+  const result = resourcePlaybackMedia(media, resource, 'movie');
+  assert.equal(result.catalogId, discovered.id); assert.equal(result.quarkPasscode, '1234'); assert.equal(result.quarkShareUrl, 'https://pan.quark.cn/s/valid');
+  assert.equal(result.id, 'discovery:douban-123'); assert.equal(result.quarkFid, undefined);
+  assert.throws(() => resourcePlaybackMedia({ ...media, quarkFid: 'saved' }, resource, 'movie'));
+  assert.throws(() => resourcePlaybackMedia(media, { ...resource, url: 'https://example.com' }, 'movie'));
+});
 
 test('观看记录只展示一次，带进度、继续播放与删除；展开不会复制未看完记录', async () => {
   const entries = Array.from({ length: 7 }, (_, index) => ({ id: `history-${index}`, media: { ...media, title: `影片${index}` }, episodeFid: 'ep1', episodeNumber: 1, position: 120, duration: 600, completed: index === 0, updatedAt: '2026-10-14' }));
@@ -211,10 +278,12 @@ test('searching new content updates the save title; replacing an existing source
   document.body.innerHTML = '<div id="mount"></div>';
   const app = createApp({ setup() { transfer = useQuarkTransfer(); return () => h('div'); } }); app.mount('#mount');
   try {
-    await transfer.openTransferModal({ ...media, id: 'new-search', quarkFid: undefined, title: '首次搜索', poster: 'old-poster' });
+    await transfer.openTransferModal({ ...media, id: 'new-search', quarkFid: undefined, title: '首次搜索', poster: 'old-poster', catalogId: 'douban-123', year: '2026' });
     await transfer.refreshResources('新片名');
     assert.equal(transfer.currentMedia.value.title, '新片名');
     assert.equal(transfer.currentMedia.value.poster, '');
+    assert.equal(transfer.currentMedia.value.catalogId, undefined);
+    assert.equal(transfer.currentMedia.value.year, undefined);
     await transfer.openTransferModal(media);
     await transfer.refreshResources('测试影片的别名');
     assert.equal(transfer.currentMedia.value.title, media.title);

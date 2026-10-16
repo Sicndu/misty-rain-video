@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { Clapperboard, Film, Sparkles, Tv, Settings } from '@lucide/vue';
+import { Compass, Clapperboard, Film, Sparkles, Tv, Settings } from '@lucide/vue';
 import BrandMark from '../common/BrandMark.vue';
 import type { AppUser } from '../../services/authService';
 import type { CategoryType } from '../../types/media';
-defineProps<{ activePage: 'library' | 'account'; category: CategoryType; counts: Record<CategoryType, number>; user: AppUser; disabled?: boolean }>();
-const emit = defineEmits<{ (e: 'library', category?: CategoryType): void; (e: 'account'): void }>();
+defineProps<{ activePage: 'discover' | 'library' | 'account'; category: CategoryType; counts: Record<CategoryType, number>; user: AppUser; disabled?: boolean }>();
+const emit = defineEmits<{ (e: 'library', category?: CategoryType): void; (e: 'account'): void; (e: 'discover'): void }>();
 const categories = [
   { value: 'tv' as const, title: '电视剧', icon: Tv },
   { value: 'movie' as const, title: '电影', icon: Film },
@@ -14,8 +14,9 @@ const categories = [
 </script>
 <template>
   <aside class="desktop-sidebar" aria-label="桌面导航">
-    <button class="sidebar-brand" type="button" :disabled="disabled" @click="emit('library')"><BrandMark /><span><strong>烟雨影视</strong><small>MISTY RAIN</small></span></button>
+    <button class="sidebar-brand" type="button" :disabled="disabled" @click="emit('discover')"><BrandMark /><span><strong>烟雨影视</strong><small>MISTY RAIN</small></span></button>
     <nav aria-label="片库分类">
+      <button class="sidebar-discover" type="button" :class="{ active: activePage === 'discover' }" :aria-current="activePage === 'discover' ? 'page' : undefined" :disabled="disabled" @click="emit('discover')"><Compass aria-hidden="true" /><span>发现</span></button>
       <p class="nav-label">我的片库</p>
       <button v-for="item in categories" :key="item.value" type="button" :class="{ active: activePage === 'library' && category === item.value }" :aria-current="activePage === 'library' && category === item.value ? 'page' : undefined" :disabled="disabled" @click="emit('library', item.value)">
         <component :is="item.icon" aria-hidden="true" /><span>{{ item.title }}</span><small>{{ counts[item.value] }}</small>

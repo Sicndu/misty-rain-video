@@ -136,7 +136,7 @@ export function useQuarkTransfer() {
     const normalizedKeyword = keyword.trim();
     if (!currentMedia.value || !normalizedKeyword) return;
     if (!currentMedia.value.quarkFid && currentMedia.value.title !== normalizedKeyword) {
-      currentMedia.value = { ...currentMedia.value, title: normalizedKeyword, poster: '' };
+      currentMedia.value = { ...currentMedia.value, title: normalizedKeyword, poster: '', catalogId: undefined, year: undefined, desc: '' };
     }
     const sequence = ++searchSequence;
     searchKeyword.value = normalizedKeyword;

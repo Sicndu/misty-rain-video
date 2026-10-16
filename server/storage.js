@@ -308,7 +308,8 @@ export class PlaybackHistoryRepository {
 
   save(entry) {
     const entries = this.all();
-    const sourceKey = String(entry?.media?.quarkFid || entry?.media?.id || entry?.media?.title || '').trim();
+    const sourceKey = entry?.media?.catalogId ? `discovery:${entry.media.catalogId}`
+      : String(entry?.media?.quarkFid || entry?.media?.id || entry?.media?.title || '').trim();
     const id = crypto.createHash('sha256').update(sourceKey).digest('hex').slice(0, 24);
     const updated = {
       ...entry,
@@ -349,6 +350,13 @@ export class PlaybackHistoryRepository {
     const id = String(mediaId || '').trim();
     if (!id) return this.all();
     const entries = this.all().filter(entry => String(entry?.media?.id || '') !== id);
+    writeJson(this.filePath, { version: 1, entries }, 0o600);
+    return entries;
+  }
+
+  removeUnlinkedCatalog(catalogId) {
+    const entries = this.all().filter(entry => entry.media?.catalogId !== catalogId || entry.media?.quarkFid
+      || String(entry.media?.id || '').startsWith('quark:'));
     writeJson(this.filePath, { version: 1, entries }, 0o600);
     return entries;
   }

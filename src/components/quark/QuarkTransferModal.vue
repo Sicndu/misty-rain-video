@@ -29,6 +29,7 @@ const emit = defineEmits<{
   (e: 'resource-unavailable', url: string): void;
   (e: 'open-auth-settings'): void;
   (e: 'transfer', res: ResourceItem): void;
+  (e: 'play-resource', media: MediaItem, resource: ResourceItem, category: CategoryType): void;
   (e: 'retry-search'): void;
   (e: 'search', keyword: string): void;
   (e: 'save-to-cards', media: MediaItem, targetCategory: CategoryType, bestRes?: ResourceItem, selectedFids?: string[]): void;
@@ -308,6 +309,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
               </div>
 
               <div class="row-right">
+                <button v-if="!replacingSource" type="button" class="btn-action btn-play" :disabled="isSaving" @click="emit('play-resource', media, res, targetCategory)">播放</button>
                 <button type="button" class="btn-action btn-details" :disabled="isSaving" @click="detailResource = res">查看资源</button>
                 <button
                   class="btn-action btn-transfer"
@@ -340,6 +342,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
 </template>
 
 <style scoped>
+.btn-play { color: var(--accent-ink) !important; background: var(--liquid-accent) !important; border-color: transparent !important; }
 .liquid-dialog-backdrop { position: fixed; inset: 0; z-index: 1400; display: flex; align-items: center; justify-content: center; padding: 24px; opacity: 0; visibility: hidden; }
 .liquid-dialog-backdrop.active { opacity: 1; visibility: visible; }
 .liquid-dialog { display: flex; width: min(820px, 100%); max-height: calc(100dvh - 48px); min-height: 0; flex-direction: column; overflow: hidden; border: var(--glass-border); border-radius: 24px; color: var(--text-primary); background: var(--glass-sheet-material); backdrop-filter: var(--glass-blur-heavy); -webkit-backdrop-filter: var(--glass-blur-heavy); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-lg); }

@@ -12,7 +12,7 @@ export const usePlaybackHistory = (enabled: Ref<boolean>) => {
   const toast = useToast();
   let mounted = false;
   let historyRevision = 0;
-  let removedMedia: Array<Pick<MediaItem, 'id' | 'quarkFid'>> = [];
+  let removedMedia: Array<Pick<MediaItem, 'id' | 'quarkFid' | 'catalogId'>> = [];
 
   const refreshHistory = async (silent = false) => {
     if (!enabled.value) return;
@@ -44,7 +44,7 @@ export const usePlaybackHistory = (enabled: Ref<boolean>) => {
 
   const removeLocalMediaHistory = (media: MediaItem) => {
     historyRevision += 1;
-    removedMedia.push({ id: media.id, quarkFid: media.quarkFid });
+    removedMedia.push({ id: media.id, quarkFid: media.quarkFid, catalogId: media.catalogId });
     history.value = history.value.filter(entry => !sameMediaIdentity(entry.media, media));
     loadingHistory.value = false;
   };

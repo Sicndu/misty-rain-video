@@ -3,6 +3,8 @@ export type CategoryType = 'tv' | 'movie' | 'variety' | 'anime';
 export interface MediaItem {
   id: string;
   title: string;
+  catalogId?: string;          // 发现页元数据身份，用于复用确定的海报
+  year?: string;
   category: CategoryType;      // 所属类型：电视剧、电影、综艺、动漫
   tag: string;                 // 最多单个标签 (例如: 4K 夸克)
   poster: string;              // 封面海报
