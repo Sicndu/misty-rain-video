@@ -295,6 +295,22 @@ test('native fullscreen subtitle choices are respected and retained after exitin
   } finally { app.unmount(); }
 });
 
+test('paused mobile captions reflow above controls without changing the selected track', async () => {
+  const video = document.createElement('video'), changes = [];
+  const cue = { position: 50, align: 'center', size: 90, line: -2, snapToLines: true };
+  let mode = 'showing';
+  video.textTracks.push({ kind: 'subtitles', label: '中文', language: 'zh', activeCues: [cue], get mode() { return mode; }, set mode(value) { changes.push(value); mode = value; } });
+  const props = reactive({ video, username: 'paused-caption-fixture', mobileControlsVisible: false });
+  const app = mount(Subtitles, props);
+  try {
+    await flush(); changes.length = 0;
+    props.mobileControlsVisible = true; await nextTick();
+    assert.equal(cue.line, -5); assert.deepEqual(changes, ['hidden', 'showing']);
+    changes.length = 0; video.dispatchEvent(new window.Event('subtitletracksupdated')); await nextTick();
+    assert.deepEqual(changes, [], 'unchanged layout does not repeatedly toggle track mode');
+  } finally { app.unmount(); }
+});
+
 test('captions arriving during native fullscreen start automatically, while a native off choice stays off', async () => {
   const video = document.createElement('video');
   const props = reactive({ video, username: 'late-native-caption-fixture', nativeFullscreen: true });

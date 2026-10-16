@@ -18,11 +18,15 @@ let lastActive = 'off';
 const positionCues = () => {
   for (const track of Array.from(props.video.textTracks)) {
     if (!['subtitles', 'captions'].includes(track.kind) || track.mode !== 'showing') continue;
+    let changed = false;
     for (const item of Array.from(track.activeCues || [])) {
       if (!('position' in item)) continue;
       const cue = item as VTTCue;
-      centerSubtitleCue(cue, props.mobileControlsVisible && !props.nativeFullscreen ? -5 : -2);
+      changed = centerSubtitleCue(cue, props.mobileControlsVisible && !props.nativeFullscreen ? -5 : -2) || changed;
     }
+    // Chromium can retain the old cue box after pausing. Refresh only changed
+    // inline captions; preserve the selected track and native fullscreen picker.
+    if (changed && props.video.paused && !props.nativeFullscreen) { track.mode = 'hidden'; track.mode = 'showing'; }
   }
 };
 watch([() => props.mobileControlsVisible, () => props.nativeFullscreen], positionCues);
