@@ -30,3 +30,10 @@ export function nextPlayableEpisode(episodes: Array<{ episodeNumber: number; sea
   // Do not jump missing episodes or match the same episode number in another season.
   return episodes.findIndex(item => (item.seasonNumber || 1) === season && item.episodeNumber === current.episodeNumber + 1);
 }
+
+/** A source switch keeps the same season/episode; it must not jump over a missing episode. */
+export function replacementEpisodeIndex(episodes: Array<{episodeNumber: number; seasonNumber?: number; fileName: string}>, current: {episodeNumber: number; seasonNumber?: number; fileName: string}, category: string) {
+  if (category === 'movie') return episodes.length ? 0 : -1;
+  if (current.episodeNumber > 0) return episodes.findIndex(item => item.episodeNumber === current.episodeNumber && (item.seasonNumber || 1) === (current.seasonNumber || 1));
+  return episodes.findIndex(item => item.fileName === current.fileName);
+}

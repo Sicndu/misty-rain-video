@@ -120,8 +120,11 @@ export class SilentSearchEngine {
     return task;
   }
 
-  async validateResources(items: ResourceItem[], force = false): Promise<ShareValidationResult> {
+  async validateResources(items: ResourceItem[], force = false, signal?: AbortSignal): Promise<ShareValidationResult> {
     const controller = new AbortController();
+    const cancel = () => controller.abort();
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) cancel();
     const timer = setTimeout(() => controller.abort(), 8_000);
     try {
       const response = await authFetch(apiUrl('/api/resource-search/validate'), {
@@ -136,7 +139,15 @@ export class SilentSearchEngine {
       if (error && typeof error === 'object' && 'requiresAuth' in error) throw error;
       // A network failure is uncertainty, never evidence that every share was cancelled.
       return { entries: items.map(item => ({ url: item.url, password: item.password || '', status: 'unknown' })), pending: false };
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort',cancel); }
+  }
+
+  async prefetch(keyword: string, signal: AbortSignal): Promise<SearchResult> {
+    const params = new URLSearchParams({ kw: keyword, background: '1' });
+    const response = await authFetch(`${apiUrl('/api/resource-search')}?${params}`, { signal, cache: 'no-store' });
+    const payload = await response.json();
+    if (!response.ok || payload.code !== 0 || !payload.data) throw new Error('备选片源暂不可用');
+    return this.normalizeResponse(payload.data, 'direct', keyword);
   }
 
   private failedSearch(error: unknown): SearchResult {
@@ -144,9 +155,12 @@ export class SilentSearchEngine {
       allowPublicFallback: !(error && typeof error === 'object' && 'requiresAuth' in error && error.requiresAuth) };
   }
 
-  async readCached(keyword: string): Promise<SearchResult | null> {
+  async readCached(keyword: string, signal?: AbortSignal): Promise<SearchResult | null> {
     const params = new URLSearchParams({ kw: keyword, cached: '1' });
     const controller = new AbortController();
+    const cancel = () => controller.abort();
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) cancel();
     const timer = setTimeout(() => controller.abort(), 4_000);
     try {
       const response = await authFetch(`${apiUrl('/api/resource-search')}?${params}`, { cache: 'no-store', signal: controller.signal });
@@ -156,7 +170,7 @@ export class SilentSearchEngine {
       // Do not let an earlier partial client cache hide the completed server result.
       this.cache.delete(keyword.normalize('NFKC').replace(/[《》()（）]/g, ' ').replace(/\s+/g, ' ').trim().toLocaleLowerCase('zh-CN'));
       return result;
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort',cancel); }
   }
 
   private async executeBackendFetch(keyword: string, force: boolean): Promise<SearchResult> {

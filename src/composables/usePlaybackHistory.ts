@@ -12,12 +12,15 @@ export const usePlaybackHistory = (enabled: Ref<boolean>) => {
   const toast = useToast();
   let mounted = false;
   let historyRevision = 0;
+  let refreshTask: Promise<void> | null = null;
   let removedMedia: Array<Pick<MediaItem, 'id' | 'quarkFid' | 'catalogId'>> = [];
 
-  const refreshHistory = async (silent = false) => {
-    if (!enabled.value) return;
+  const refreshHistory = (silent = false): Promise<void> => {
+    if (!enabled.value) return Promise.resolve();
+    if (refreshTask) return refreshTask;
     const revision = ++historyRevision;
     if (!silent) loadingHistory.value = true;
+    const task: Promise<void> = Promise.resolve().then(async () => {
     try {
       const entries = await PlaybackHistoryService.list();
       if (revision !== historyRevision || !enabled.value) return;
@@ -28,8 +31,9 @@ export const usePlaybackHistory = (enabled: Ref<boolean>) => {
       historyError.value = '观看记录加载失败，请检查网络后重试。';
       console.warn('[playback-history] 读取失败:', error);
     } finally {
-      if (revision === historyRevision) loadingHistory.value = false;
+      if (refreshTask === task) { refreshTask = null; loadingHistory.value = false; }
     }
+    }); refreshTask = task; return task;
   };
 
   const continueWatching = computed(() => history.value
@@ -38,6 +42,7 @@ export const usePlaybackHistory = (enabled: Ref<boolean>) => {
 
   const updateLocalHistory = (entry: PlaybackHistoryEntry) => {
     if (!enabled.value || removedMedia.some(media => sameMediaIdentity(entry.media, media))) return;
+    historyRevision++;
     history.value = [entry, ...history.value.filter(item => item.id !== entry.id)]
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   };
@@ -53,7 +58,8 @@ export const usePlaybackHistory = (enabled: Ref<boolean>) => {
     if (deletingHistoryId.value) return;
     deletingHistoryId.value = id;
     try {
-      history.value = await PlaybackHistoryService.remove(id);
+      await PlaybackHistoryService.remove(id);
+      historyRevision++; history.value = history.value.filter(entry => entry.id !== id);
       toast.show('观看记录已删除', '✓');
     } catch {
       toast.show('观看记录删除失败，请稍后重试', '!');
@@ -64,7 +70,7 @@ export const usePlaybackHistory = (enabled: Ref<boolean>) => {
 
   const sync = () => {
     if (!enabled.value) {
-      historyRevision += 1;
+      historyRevision += 1; refreshTask = null;
       removedMedia = [];
       history.value = [];
       historyError.value = '';

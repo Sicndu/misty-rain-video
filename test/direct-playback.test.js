@@ -253,3 +253,14 @@ test('embedded subtitle reads require the session owner and valid time, without 
     assert.doesNotMatch(invalid.body, /private-cookie|private-token|media.example/);
   } finally { clearInterval(gateway.cleanupTimer); }
 });
+
+test('concurrent prepare requests for the same user/session/file share one upstream preparation',async()=>{
+ const gateway=makeGateway();let count=0,release;const gate=new Promise(resolve=>release=resolve);
+ const original=gateway.tvPlaybackClient.getStreaming;
+ gateway.tvPlaybackClient.getStreaming=async(...args)=>{count++;await gate;return original(...args)};
+ try {
+  const first=gateway.prepareEpisode('session','episode'),second=gateway.prepareEpisode('session','episode');
+  await assert.rejects(gateway.prepareEpisode('session','episode',{username:'other',role:'user',folder:'other'}),{statusCode:403});
+  release();const [a,b]=await Promise.all([first,second]);assert.equal(count,1);assert.equal(a,b);assert.equal(gateway.sessions.get('session').pendingPreparations.size,0);
+ }finally{clearInterval(gateway.cleanupTimer)}
+});

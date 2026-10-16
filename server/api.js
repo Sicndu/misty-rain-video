@@ -347,7 +347,7 @@ export const handleApiRequest = async (request, response, context) => {
         return true;
       }
       const force = url.searchParams.get('refresh') === '1';
-      sendSuccess(response, await context.resourceSearch.search(keyword, { force, allowStale: true }));
+      sendSuccess(response, await context.resourceSearch.search(keyword, { force, allowStale: true, priority: url.searchParams.get('background') === '1' ? 'prefetch' : 'interactive' }));
       return true;
     }
 
@@ -618,7 +618,7 @@ export const handleApiRequest = async (request, response, context) => {
     if (historyMatch && request.method === 'DELETE') {
       const id = decodeURIComponent(historyMatch[1]);
       userData.playbackHistory.remove(id);
-      sendSuccess(response, await readHistory(context, user, userData), '播放记录已删除');
+      sendSuccess(response, userData.playbackHistory.all(), '播放记录已删除');
       return true;
     }
 

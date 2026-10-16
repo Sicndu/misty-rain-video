@@ -264,42 +264,87 @@ test('desktop library has one selected category and its library heading is not a
   } finally { app.unmount(); }
 });
 
-test('player tabs are mutually exclusive; captions remain beside video, settings have only playback preferences', async t => {
+test('one player control bar owns captions, episodes and settings without a duplicate page panel', async t => {
   mockApi(t);
   const app = mount(Player, { isOpen: true, media, username: 'fixture' });
   try {
     await flush();
-    assert.ok(document.querySelector('#episode-panel'));
-    assert.ok(document.querySelector('main.player-page'));
-    assert.equal(document.querySelector('[aria-modal="true"]'), null);
-    assert.equal(document.documentElement.style.overflow, '');
-    assert.equal(document.querySelector('#playback-settings').style.display, 'none');
-    assert.equal(document.querySelector('#playback-settings').getAttribute('aria-hidden'), 'true');
-    document.querySelector('#settings-tab').click(); await nextTick();
+    const controls = document.querySelector('.video-column > .player-controls');
+    assert.ok(controls);
+    assert.equal(document.querySelector('.player-panel'), null);
     assert.equal(document.querySelector('#episode-panel'), null);
-    assert.ok(document.querySelector('#playback-settings'));
-    assert.notEqual(document.querySelector('#playback-settings').style.display, 'none');
-    assert.equal(document.querySelector('#playback-settings').getAttribute('aria-hidden'), 'false');
     assert.equal(document.querySelectorAll('select[aria-label="选择影片字幕"]').length, 1);
-    assert.ok(document.querySelector('.playback-tools select'));
-    assert.equal(document.querySelector('.video-stage .mobile-controls'), null, 'controls never cover video captions');
-    assert.ok(document.querySelector('.video-column > .mobile-controls'));
-    assert.equal(document.querySelector('#playback-settings select[aria-label="选择影片字幕"]'), null);
+    assert.ok(controls.querySelector('select[aria-label="选择影片字幕"]'));
+    assert.equal(document.querySelector('.video-stage .mobile-controls'), null, 'inline transport stays below captions');
+    const menu = controls.querySelector('#player-settings-menu');
+    assert.equal(menu.style.display, 'none');
+    const button = controls.querySelector('button[aria-label="播放设置"]');
+    button.click(); await nextTick();
+    assert.equal(button.getAttribute('aria-expanded'), 'true');
+    assert.notEqual(menu.style.display, 'none');
+    assert.ok(menu.querySelector('[aria-label="画质选择"]'));
+    document.querySelector('[aria-label="画面显示方式"] button:last-child').click(); await nextTick();
+    assert.equal(document.querySelector('video').style.objectFit, 'cover');
+    assert.equal(document.querySelectorAll('.duration-input input').length, 0);
+    document.querySelector('[aria-label="跳过片头片尾"]').click(); await flush();
     assert.equal(document.querySelectorAll('.duration-input input').length, 2);
     assert.equal(document.querySelector('[aria-label="片头时长（秒）"]').value, '30');
     assert.equal(document.querySelector('[aria-label="片尾时长（秒）"]').value, '45');
-    document.querySelector('#episodes-tab').click(); await nextTick();
-    assert.ok(document.querySelector('#episode-panel'));
+    menu.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})); await nextTick();
+    assert.equal(menu.style.display, 'none'); assert.equal(document.activeElement,button);
+    assert.equal(document.querySelectorAll('[aria-label="选集与片源"]').length, 1);
     assert.ok(document.querySelector('main.player-page'));
     assert.equal(document.querySelector('[aria-modal="true"]'), null);
-    assert.equal(document.documentElement.style.overflow, '');
-    assert.equal(document.querySelector('#playback-settings').style.display, 'none');
-    assert.equal(document.querySelector('#playback-settings').getAttribute('aria-hidden'), 'true');
-    assert.equal(document.querySelectorAll('[role="option"][aria-selected="true"]').length, 1);
     assert.equal(document.querySelector('.rotated-player'), null);
   } finally { app.unmount(); }
 });
 
+
+test('Android player keeps one caption picker, pauses in background except PiP, and resumes without a blocking prompt', async t => {
+  const previousAgent = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
+  Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Android Chrome' });
+  mockApi(t);
+  const app = mount(Player, { isOpen: true, media, username: 'fixture' });
+  const video = document.querySelector('video');
+  let paused = false;
+  Object.defineProperty(video, 'paused', { configurable: true, get: () => paused });
+  video.pause = () => { paused = true; video.dispatchEvent(new window.Event('pause')); };
+  video.play = async () => { paused = false; video.dispatchEvent(new window.Event('play')); video.dispatchEvent(new window.Event('playing')); };
+  try {
+    await flush(); await video.play(); await flush();
+    assert.equal(document.querySelectorAll('select[aria-label="选择影片字幕"]').length, 1);
+    assert.ok(document.querySelector('.player-controls select[aria-label="选择影片字幕"]'));
+    Object.defineProperty(document, 'pictureInPictureElement', { configurable: true, value: video });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    document.dispatchEvent(new window.Event('visibilitychange')); await flush();
+    assert.equal(paused, false, 'PiP continues while owning page is hidden');
+    Object.defineProperty(document, 'pictureInPictureElement', { configurable: true, value: null });
+    video.dispatchEvent(new window.Event('leavepictureinpicture')); await flush();
+    assert.equal(paused, true, 'leaving PiP in background pauses playback');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    document.dispatchEvent(new window.Event('visibilitychange')); await flush();
+    document.querySelector('.stage-play-button').click(); await flush();
+    assert.equal(paused, false); assert.equal(document.querySelector('.play-prompt'), null);
+  } finally {
+    app.unmount();
+    if (previousAgent) Object.defineProperty(navigator, 'userAgent', previousAgent); else delete navigator.userAgent;
+    delete document.visibilityState; delete document.pictureInPictureElement;
+  }
+});
+
+test('Android settings offer browser installation guidance instead of an iOS profile', async () => {
+  const previousAgent = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
+  Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Android Chrome' });
+  const app = mount(Account, { user: user('user'), history: [] });
+  try {
+    assert.equal(document.querySelector('a[href*="mobileconfig"]'), null);
+    [...document.querySelectorAll('button')].find(button => button.textContent.includes('安装到桌面')).click(); await flush();
+    assert.match(document.querySelector('.install-hint').textContent, /Chrome/);
+  } finally {
+    app.unmount();
+    if (previousAgent) Object.defineProperty(navigator, 'userAgent', previousAgent); else delete navigator.userAgent;
+  }
+});
 
 test('new viewers get Chinese captions automatically; a manual off choice persists when tracks arrive later', async () => {
   const video = document.createElement('video');
@@ -318,7 +363,12 @@ test('new viewers get Chinese captions automatically; a manual off choice persis
 
 test('movies display named files instead of an episode number or unlabeled dots', async t => {
   mockApi(t); const app = mount(Player, { isOpen: true, media: { ...media, category: 'movie' }, username: 'movie-label-fixture' });
-  try { await flush(); assert.match(document.querySelector('#episodes-tab').textContent, /视频/); assert.match(document.querySelector('.episode-heading').textContent, /视频文件/); assert.doesNotMatch(document.querySelector('.title-copy').textContent, /第.*集/); assert.match(document.querySelector('.file-list .episode-copy strong').textContent, /1/); } finally { app.unmount(); }
+  try {
+    await flush(); document.querySelector('[aria-label="选集与片源"]').click(); await nextTick();
+    assert.ok(document.querySelector('[aria-label="视频列表"]'));
+    assert.doesNotMatch(document.querySelector('.title-copy').textContent, /第.*集/);
+    assert.match(document.querySelector('.episodes.files button').textContent, /1.mp4/);
+  } finally { app.unmount(); }
 });
 
 test('native fullscreen subtitle choices are respected and retained after exiting', async () => {
@@ -393,3 +443,49 @@ test('searching new content updates the save title; replacing an existing source
 });
 
 test.after(() => { dom.window.close(); fs.rmSync(folder, { recursive: true, force: true }); });
+
+test('episode panel sorting preserves exact episode selection and separates current/all collection', async t => {
+  mockApi(t); const collected=[];
+  const app=mount(Player,{isOpen:true,media:{...media,quarkFid:undefined,quarkShareUrl:'https://pan.quark.cn/s/fixture'},username:'panel-fixture',collect:async(_media,fids)=>collected.push(fids)});
+  try {
+    await flush();document.querySelector('[aria-label="选集与片源"]').click();await flush();
+    const order=document.querySelector('[aria-label="选集排序"]');order.value='desc';order.dispatchEvent(new window.Event('change'));await nextTick();
+    assert.match(document.querySelector('.episodes button').textContent,/2/);
+    assert.match(document.querySelector('.episodes [aria-selected="true"]').textContent,/1/);
+    const buttons=document.querySelectorAll('.episode-actions button');buttons[0].click();await flush();buttons[1].click();await flush();
+    assert.deepEqual(collected,[['ep1'],undefined]);
+    assert.ok(document.querySelector('.section-heading').closest('.player-controls'));
+    assert.equal(document.querySelector('.header-actions'),null);
+  } finally {app.unmount();localStorage.removeItem('misty_rain_episode_order');}
+});
+
+const { findPlaybackCandidates } = await compile('src/services/playbackCandidates.ts','playback-candidates');
+const { replacementEpisodeIndex } = await compile('src/services/playbackNavigation.ts','playback-switch-navigation');
+test('background source prefetch checks only a bounded batch, excludes cancelled/current shares and never transfers',async t=>{
+ const calls=[];t.mock.method(globalThis,'fetch',async(url,options={})=>{
+  calls.push(String(url));
+  if(String(url).includes('/validate')){const items=JSON.parse(options.body).items;assert.ok(items.length<=12);return Response.json({code:0,data:{pending:false,entries:items.map((item,index)=>({...item,status:index===0?'unavailable':'available'}))}});}
+  assert.match(String(url),/background=1/);
+  return Response.json({code:0,data:{total:20,refreshing:false,merged_by_type:{quark:Array.from({length:20},(_,i)=>({url:`https://pan.quark.cn/s/source${i}`,note:'测试剧 '+i}))}}});
+ });
+ const result=await findPlaybackCandidates('测试剧','https://pan.quark.cn/s/source0',new AbortController().signal,()=>{});
+ assert.equal(result.length,5);assert.ok(!result.some(item=>/source[01]$/.test(item.url)));assert.equal(calls.length,2);assert.ok(calls.every(url=>url.includes('resource-search')));
+});
+test('leaving playback cancels the background HTTP request and prevents later publication',async t=>{
+ let requested, published=0; t.mock.method(globalThis,'fetch',(_url,{signal})=>new Promise((_resolve,reject)=>{requested=signal;signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true});}));
+ const controller=new AbortController();const task=findPlaybackCandidates('测试剧','',controller.signal,()=>published++);controller.abort();await task;
+ assert.equal(requested.aborted,true);assert.equal(published,0);
+});
+test('a source switch matches season and episode, refusing a missing episode instead of jumping',()=>{
+ const list=[{fileName:'s2e2',seasonNumber:2,episodeNumber:2},{fileName:'s1e2',seasonNumber:1,episodeNumber:2}];
+ assert.equal(replacementEpisodeIndex(list,{fileName:'old',seasonNumber:1,episodeNumber:2},'tv'),1);
+ assert.equal(replacementEpisodeIndex(list,{fileName:'old',seasonNumber:1,episodeNumber:3},'tv'),-1);
+ assert.equal(replacementEpisodeIndex(list,{fileName:'s2e2',episodeNumber:0},'tv'),0);
+});
+
+test('background source prefetch aborts a stalled request at its twenty-second deadline',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});let requestSignal;
+ t.mock.method(globalThis,'fetch',(_url,{signal})=>new Promise((_resolve,reject)=>{requestSignal=signal;signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true})}));
+ const task=findPlaybackCandidates('测试剧','',new AbortController().signal,()=>assert.fail('no late publication'));
+ t.mock.timers.tick(20_001);await task;assert.equal(requestSignal.aborted,true);
+});

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { shallowRef, computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Plus, RefreshCw } from '@lucide/vue';
 import LoginScreen from './components/auth/LoginScreen.vue';
 import AccountPage from './components/auth/AccountPage.vue';
+import { QuarkStreamService, type QuarkPlaybackSession, type QuarkEpisode } from './services/quarkStreamService';
+import { replacementEpisodeIndex } from './services/playbackNavigation';
 import HistoryPage from './components/media/HistoryPage.vue';
 import Navbar from './components/layout/Navbar.vue';
 import DesktopSidebar from './components/layout/DesktopSidebar.vue';
@@ -103,6 +105,7 @@ const displayHistory = computed(() => history.value.map(entry => {
 type MobileTab = MobileDockTab | 'search' | 'catalog';
 const catalogQuery = ref('');
 const playbackPageKey = ref('');
+const preparedPageSession = shallowRef<{ key: string; session: QuarkPlaybackSession } | null>(null);
 const mobileTab = ref<MobileTab>('discover');
 const lastContentTab = ref<'discover' | 'library' | 'history' | 'catalog'>('discover');
 const currentPage = computed(() => mobileTab.value === 'search' ? lastContentTab.value : mobileTab.value);
@@ -158,9 +161,10 @@ const restorePage = async (state = window.history.state) => {
   window.scrollTo({ top: state?.scrollY || 0, behavior: 'instant' });
 };
 
-const openPlayerPage = (replace = false) => {
+const openPlayerPage = (replace = false, prepared?: QuarkPlaybackSession) => {
   if (!embedPlayingMedia.value || !user.value) return;
   playbackPageKey.value = savePlaybackPage(user.value.username, embedPlayingMedia.value, selectedHistoryEntry.value);
+  preparedPageSession.value = prepared ? { key: playbackPageKey.value, session: prepared } : null;
   isEmbedPlayerOpen.value = true;
   setAppHistoryLayer('player', replace);
   window.scrollTo({ top: 0, behavior: 'instant' });
@@ -446,6 +450,7 @@ const receivePlaybackHistory = (entry: PlaybackHistoryEntry, username?: string) 
   if (isEmbedPlayerOpen.value && playbackPageKey.value && embedPlayingMedia.value
     && sameMediaIdentity(entry.media, embedPlayingMedia.value)
     && entry.media.quarkShareUrl === embedPlayingMedia.value.quarkShareUrl) {
+    preparedPageSession.value = null;
     if (embedPlayingMedia.value.startEpisodeFid) embedPlayingMedia.value = { ...embedPlayingMedia.value, startEpisodeFid: undefined };
     savePlaybackPage(username!, embedPlayingMedia.value, entry, sessionStorage, playbackPageKey.value);
   }
@@ -542,6 +547,27 @@ const openDiscoveryItem = (item: DiscoveryItem) => {
   if (saved) { handleSelectMedia(saved); return; }
   openTransferModal(discoveryMedia(item));
   setAppHistoryLayer('transfer');
+};
+const playingCollection = computed(() => allMediaList.value.find(item => embedPlayingMedia.value && sameMediaIdentity(item,embedPlayingMedia.value)));
+const collectPlayingMedia = async (media: MediaItem, selectedFids?: string[]) => {
+  const existing = allMediaList.value.find(item => sameMediaIdentity(item,media));
+  if (media.quarkFid || existing && existing.quarkSelectionFids === undefined) return;
+  if (existing?.quarkShareUrl && existing.quarkShareUrl !== media.quarkShareUrl) throw new Error('已收藏其他片源，可在收藏中管理');
+  const selection = selectedFids && existing?.quarkSelectionFids ? [...new Set([...existing.quarkSelectionFids,...selectedFids])] : selectedFids;
+  await saveMedia({ ...media, quarkFid: undefined, startEpisodeFid: undefined, quarkSelectionFids: selection });
+};
+const switchPlayingSource = async (resource: ResourceItem, episode: QuarkEpisode, position: number, signal: AbortSignal) => {
+  const media = embedPlayingMedia.value, key = playbackPageKey.value;
+  if (!media) return;
+  const next = resourcePlaybackMedia({ ...media,quarkFid:undefined,startEpisodeFid:undefined },resource,media.category);
+  const result = await QuarkStreamService.createPlaybackSession({shareUrl:next.quarkShareUrl,passcode:next.quarkPasscode,title:next.title},signal);
+  if (signal.aborted || key !== playbackPageKey.value || !isEmbedPlayerOpen.value) return;
+  const index = replacementEpisodeIndex(result.episodes,episode,media.category);
+  if (index < 0) throw new Error('这个片源没有当前集，请选择其他片源');
+  const target = result.episodes[index]!;
+  embedPlayingMedia.value = next;
+  selectedHistoryEntry.value = { id:'source-switch',media:next,episodeFid:target.fid,episodeNumber:target.episodeNumber,episodeTitle:target.episodeTitle,position,duration:target.duration || 0,completed:false,updatedAt:new Date().toISOString() };
+  openPlayerPage(true,result);
 };
 const playResource = (media: MediaItem, resource: ResourceItem, category: CategoryType, episodeFid?: string) => {
   if (isSavingTransfer.value) return;
@@ -682,6 +708,8 @@ const playResource = (media: MediaItem, resource: ResourceItem, category: Catego
       :media="embedPlayingMedia"
       :username="user.username"
       :history-entry="selectedHistoryEntry"
+      :initial-session="preparedPageSession?.key === playbackPageKey ? preparedPageSession.session : undefined"
+      :collection="playingCollection" :collect="collectPlayingMedia" :switch-source="switchPlayingSource"
       @close="closeEmbedPlayer"
       @re-search="handleReSearch"
       @open-auth-settings="openPlaybackAuth"

@@ -163,6 +163,7 @@ export class ResourceSearchService {
   }
 
   async search(rawKeyword, { force = false, allowStale = !force, priority = 'interactive' } = {}) {
+    this.cleanup();
     const keyword = normalizeKeyword(rawKeyword);
     if (!keyword) throw createSearchError('请输入有效片名', 'RESOURCE_SEARCH_KEYWORD_REQUIRED', 400);
     const key = keyword.toLocaleLowerCase('zh-CN');
@@ -171,7 +172,7 @@ export class ResourceSearchService {
     const stale = allowStale && cached && !cached.isEmpty && this.now() - cached.createdAt <= STALE_CACHE_TTL_MS;
     let job = this.inFlight.get(key);
     if (!job) {
-      const limit = priority === 'background' ? Math.max(1, this.maxConcurrent - 2) : this.maxConcurrent;
+      const limit = priority !== 'interactive' ? Math.max(1, this.maxConcurrent - 2) : this.maxConcurrent;
       if (this.inFlight.size >= limit) {
         if (stale) return this.#publicResult(cached, true);
         throw createSearchError('正在处理其他检索，请稍后重试', 'RESOURCE_SEARCH_BUSY', 503);
@@ -190,7 +191,14 @@ export class ResourceSearchService {
     }
   }
 
+  cleanup() {
+    let changed = false;
+    for (const [key, entry] of this.cache) if (this.now() - entry.createdAt > STALE_CACHE_TTL_MS) { this.cache.delete(key); changed = true; }
+    if (changed) this.#persist();
+  }
+
   peek(rawKeyword) {
+    this.cleanup();
     const key = normalizeKeyword(rawKeyword).toLocaleLowerCase('zh-CN');
     const entry = this.cache.get(key);
     if (!entry || this.now() - entry.createdAt > STALE_CACHE_TTL_MS) return null;
@@ -370,12 +378,18 @@ export class ResourceSearchService {
   }
 
   #remember(keyword, data, partial) {
+    this.cleanup();
     const key = keyword.toLocaleLowerCase('zh-CN');
     const entry = { createdAt: this.now(), data, partial, isEmpty: !data.total, revision: SEARCH_CACHE_REVISION };
     this.cache.delete(key);
     this.cache.set(key, entry);
     while (this.cache.size > MAX_CACHE_ENTRIES) this.cache.delete(this.cache.keys().next().value);
-    if (this.cacheFile && !entry.isEmpty) {
+    if (!entry.isEmpty) this.#persist();
+    return entry;
+  }
+
+  #persist() {
+    if (this.cacheFile) {
       try {
         fs.mkdirSync(path.dirname(this.cacheFile), { recursive: true });
         const temp = `${this.cacheFile}.${process.pid}.tmp`;
@@ -383,6 +397,5 @@ export class ResourceSearchService {
         fs.renameSync(temp, this.cacheFile);
       } catch { /* Search still works when the cache volume is read-only. */ }
     }
-    return entry;
   }
 }

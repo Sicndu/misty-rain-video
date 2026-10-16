@@ -1101,6 +1101,17 @@ export class QuarkGateway {
   }
 
   async prepareEpisode(sessionId, episodeFid, user = SYSTEM_USER, playbackCache = this.playbackCache, capabilities = {}) {
+    const session = this.#getSession(sessionId, normalizeUser(user));
+    const key = `${episodeFid}:${capabilities?.nativeHls === true}`;
+    const pending = session.pendingPreparations ||= new Map();
+    if (pending.has(key)) return pending.get(key);
+    const task = this.#prepareEpisode(sessionId, episodeFid, user, playbackCache, capabilities)
+      .finally(() => { if (pending.get(key) === task) pending.delete(key); });
+    pending.set(key, task);
+    return task;
+  }
+
+  async #prepareEpisode(sessionId, episodeFid, user, playbackCache, capabilities) {
     const principal = normalizeUser(user);
     const session = this.#getSession(sessionId, principal);
     const episode = session.episodes.find(item => item.fid === episodeFid);

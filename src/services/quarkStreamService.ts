@@ -183,9 +183,9 @@ export class QuarkStreamService {
     }
   }
 
-  static createPlaybackSession(input: { quarkFid?: string; shareUrl?: string; title?: string; passcode?: string; episodeFid?: string }): Promise<QuarkPlaybackSession> {
+  static createPlaybackSession(input: { quarkFid?: string; shareUrl?: string; title?: string; passcode?: string; episodeFid?: string }, signal?: AbortSignal): Promise<QuarkPlaybackSession> {
     return request<QuarkPlaybackSession>('/api/player/sessions', {
-      method: 'POST',
+      method: 'POST', signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input)
     });

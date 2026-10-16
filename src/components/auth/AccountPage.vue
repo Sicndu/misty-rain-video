@@ -8,6 +8,7 @@ import { useToast } from '../../composables/useToast';
 import TvPlaybackAuth from './TvPlaybackAuth.vue';
 import ThemeSwitch from '../common/ThemeSwitch.vue';
 import LibraryMaintenanceStatus from './LibraryMaintenanceStatus.vue';
+import { androidInstalled, installAndroidApp } from '../../services/androidInstall';
 
 const props = defineProps<{ user: AppUser }>();
 const emit = defineEmits<{
@@ -18,6 +19,12 @@ const emit = defineEmits<{
 
 const toast = useToast();
 const installUrl = apiUrl('/install/ios.mobileconfig');
+const isAndroid = /Android/i.test(navigator.userAgent);
+const installHint = ref('');
+const installApp = async () => {
+  installHint.value = '';
+  if (await installAndroidApp() === 'unavailable') installHint.value = '在 Chrome 菜单中选择“添加到主屏幕”或“安装应用”。';
+};
 const credential = ref('');
 const loadingStatus = ref(true);
 const statusError = ref('');
@@ -103,7 +110,11 @@ defineExpose({ focusAuth, refreshStatus });
       <section class="settings-section general-settings" aria-label="系统配置">
         <div class="theme-row"><span>主题</span><ThemeSwitch /></div>
         <button v-if="user.role === 'admin'" class="settings-row" type="button" @click="openAdvanced"><Settings2 aria-hidden="true" /><span>高级配置</span><ChevronRight class="chevron" aria-hidden="true" /></button>
-        <a class="settings-row ios-install-link" :href="installUrl"><Download aria-hidden="true" /><span>安装到桌面</span><ChevronRight class="chevron" aria-hidden="true" /></a>
+        <template v-if="isAndroid">
+          <button v-if="!androidInstalled" class="settings-row" type="button" @click="installApp"><Download aria-hidden="true" /><span>安装到桌面</span><ChevronRight class="chevron" aria-hidden="true" /></button>
+          <p v-if="installHint && !androidInstalled" class="install-hint" role="status">{{ installHint }}</p>
+        </template>
+        <a v-else class="settings-row ios-install-link" :href="installUrl"><Download aria-hidden="true" /><span>安装到桌面</span><ChevronRight class="chevron" aria-hidden="true" /></a>
       </section>
       <button type="button" class="logout-button" @click="emit('logout')"><LogOut aria-hidden="true" />退出登录</button>
     </template>
@@ -221,4 +232,8 @@ defineExpose({ focusAuth, refreshStatus });
   .theme-row { gap: 12px; }
   .theme-row .theme-switch { min-width: 0; flex: 1; max-width: 260px; }
 }
+</style>
+
+<style scoped>
+.install-hint { padding: 0 16px 14px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
 </style>

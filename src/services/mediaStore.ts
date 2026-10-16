@@ -70,7 +70,7 @@ export class MediaStore {
   /**
    * 从服务端持久化数据库删除指定卡片
    */
-  static async removeMedia(media: MediaItem): Promise<MediaItem[]> {
+  static async removeMedia(media: MediaItem): Promise<void> {
     const params = new URLSearchParams({ id: media.id });
     if (media.quarkFid) params.set('quarkFid', media.quarkFid);
     const resp = await authFetch(`${API_URL}?${params}`, { method: 'DELETE' });
@@ -78,7 +78,6 @@ export class MediaStore {
     if (!resp.ok || json.code !== 0) {
       throw new Error(json.message || '删除失败，请稍后重试');
     }
-    return this.getAllMedia();
   }
 
   /** 保存用户选择的展示分类；不会移动或删除网盘文件。 */
