@@ -106,24 +106,20 @@ test('empty catalog and provider failure each provide an explicit direct-resourc
   }finally{app.unmount();}
 });
 
-test('发现页切换分类时丢弃晚到的旧响应，点海报传递准确的元数据身份', async t => {
-  const pending = new Map();
-  t.mock.method(globalThis, 'fetch', input => {
-    const category = new URL(String(input), 'http://localhost').searchParams.get('category');
-    if (category === 'all') return Promise.resolve(Response.json({ code: 0, data: { sections: [discoverySection('movie')] } }));
-    return new Promise(resolve => pending.set(category, resolve));
-  });
-  let selected;
-  const app = mount(Discovery, { active: true, libraryCatalogIds: [], onSelect: item => { selected = item; } });
-  try {
-    await flush(); document.querySelector('.discovery-card').click(); assert.equal(selected.id, 'douban-123');
-    [...document.querySelectorAll('.discovery-categories button')].find(x => x.textContent === '电影').click(); await nextTick();
-    [...document.querySelectorAll('.discovery-categories button')].find(x => x.textContent === '电视剧').click(); await nextTick();
-    pending.get('tv')(Response.json({ code: 0, data: { sections: [discoverySection('tv', [{ ...discovered, id: 'douban-456', title: '新的剧集', category: 'tv' }])] } })); await flush();
-    pending.get('movie')(Response.json({ code: 0, data: { sections: [discoverySection('movie')] } })); await flush();
-    assert.match(document.querySelector('.discovery-title').textContent, /新的剧集/);
-    assert.doesNotMatch(document.body.textContent, /推荐影片/);
-  } finally { app.unmount(); }
+test('发现分类直接进入豆瓣片目，切换时丢弃晚到的结果',async t=>{
+ const pending=new Map();t.mock.method(globalThis,'fetch',url=>{
+  const u=new URL(String(url),'http://localhost');if(u.pathname.endsWith('/discovery'))return Promise.resolve(Response.json({code:0,data:{sections:[discoverySection('movie')]}}));
+  return new Promise(resolve=>pending.set(u.searchParams.get('category'),resolve));
+ });
+ let selected;const app=mount(Discovery,{active:true,libraryCatalogIds:[],onSelect:item=>selected=item});
+ try {
+  await flush();[...document.querySelectorAll('.discovery-categories button')].find(x=>x.textContent==='电影').click();await nextTick();await new Promise(r=>setTimeout(r,210));
+  [...document.querySelectorAll('.discovery-categories button')].find(x=>x.textContent==='电视剧').click();await nextTick();await new Promise(r=>setTimeout(r,210));
+  pending.get('tv')(Response.json({code:0,data:{items:[{...discovered,id:'douban-456',title:'新的剧集',category:'tv'}],nextStart:null}}));await flush();
+  pending.get('movie')(Response.json({code:0,data:{items:[{...discovered,title:'过时电影'}],nextStart:null}}));await flush();
+  assert.match(document.querySelector('.discovery-title').textContent,/新的剧集/);assert.doesNotMatch(document.body.textContent,/过时电影/);
+  document.querySelector('.discovery-card').click();assert.equal(selected.id,'douban-456');
+ }finally{app.unmount();}
 });
 
 test('每周放送按所选星期展示，未评分作品没有零分标签', async t => {
@@ -132,7 +128,7 @@ test('每周放送按所选星期展示，未评分作品没有零分标签', as
   const app = mount(Discovery, { active: true, libraryCatalogIds: [] });
   try {
     await flush(); [...document.querySelectorAll('.discovery-categories button')].find(x => x.textContent === '动漫').click(); await flush();
-    [...document.querySelectorAll('.anime-modes button')].find(x => x.textContent === '每周放送').click(); await nextTick();
+    [...document.querySelectorAll('.anime-modes button')].find(x => x.textContent === '每周放送').click(); await flush();
     document.querySelector('.weekdays button').click(); await nextTick();
     assert.equal(document.querySelectorAll('.discovery-card').length, 1); assert.equal(document.querySelector('.discovery-title').textContent, '周1新番');
     assert.equal(document.querySelector('.discovery-rating'), null);
@@ -526,28 +522,13 @@ test('partial catalog displays an honest notice and refreshes when returning; co
 });
 
 const chooseFacet = async (label, value) => {
- const select=document.querySelector(`select[aria-label="${label}"]`);assert.ok(select,label);
- select.value=value;select.dispatchEvent(new window.Event('change',{bubbles:true}));await flush();
+ const group=document.querySelector(`[role="group"][aria-label="${label}"]`);assert.ok(group,label);
+ const button=[...group.querySelectorAll('button')].find(button=>button.getAttribute('aria-label')===value || button.textContent===value);assert.ok(button,value);button.click();await flush();
 };
 const settleBrowse = async () => { await new Promise(resolve=>setTimeout(resolve,210));await flush(); };
-test('search facets combine locally, show unknown metadata, clear on a new keyword and retain card identity',async t=>{
- let calls=0,selected;const list=[
-  {...discovered,id:'douban-1',title:'目标电影',year:'2024',genres:['科幻'],countries:['美国','加拿大']},
-  {...discovered,id:'douban-2',title:'同类旧片',year:'2023',genres:['科幻'],countries:['美国']},
-  {...discovered,id:'douban-3',title:'其他类型',year:'2024',genres:['喜剧'],countries:['日本']},
-  {...discovered,id:'douban-4',title:'缺少资料',year:'2024',description:''}
- ];
- t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({code:0,data:{items:list}})});
- const props=reactive({query:'测试',active:true,libraryCatalogIds:[],onSelect:item=>selected=item});const app=mount(Catalog,props);
- try {
-  await flush();await chooseFacet('类型筛选','科幻');await chooseFacet('国家地区筛选','美国');await chooseFacet('年份筛选','2024');
-  assert.equal(document.querySelectorAll('.catalog-card').length,1);assert.match(document.body.textContent,/1 部影片缺少/);assert.equal(calls,1);
-  document.querySelector('.catalog-card').click();assert.equal(selected.id,'douban-1');
-  await chooseFacet('国家地区筛选','法国');assert.match(document.querySelector('.catalog-empty').textContent,/没有符合筛选/);
-  document.querySelector('.clear-filters').click();await flush();assert.equal(document.querySelectorAll('.catalog-card').length,4);
-  await chooseFacet('类型筛选','科幻');props.query='另一个片名';await flush();
-  assert.equal(document.querySelector('select[aria-label="类型筛选"]').value,'');assert.equal(document.querySelectorAll('.catalog-card').length,4);
- }finally{app.unmount();}
+test('catalog keyword search stays simple with no discovery tag controls',async t=>{
+ t.mock.method(globalThis,'fetch',async()=>Response.json({code:0,data:{items:[discovered]}}));const app=mount(Catalog,{query:'测试',active:true,libraryCatalogIds:[]});
+ try{await flush();assert.equal(document.querySelector('.catalog-filters'),null);assert.ok(document.querySelector('select[aria-label="影片排序"]'));}finally{app.unmount();}
 });
 test('discovery sends combined filters, cancels obsolete queries, appends deduplicated pages, and clears back to charts',async t=>{
  const requests=[];let selected;
@@ -558,7 +539,7 @@ test('discovery sends combined filters, cancels obsolete queries, appends dedupl
  });
  const props=reactive({active:true,libraryCatalogIds:[],onSelect:item=>selected=item});const app=mount(Discovery,props);
  try {
-  await flush();await chooseFacet('类型筛选','科幻');await chooseFacet('国家地区筛选','美国');await chooseFacet('年份筛选','2024');await settleBrowse();
+  await flush();await chooseFacet('类型筛选','科幻');await chooseFacet('地区筛选','美国');await chooseFacet('年份筛选','2024');await settleBrowse();
   assert.equal(requests.length,1);assert.equal(requests[0].address.searchParams.get('genre'),'科幻');assert.equal(requests[0].address.searchParams.get('country'),'美国');
   await chooseFacet('年份筛选','2025');assert.equal(requests[0].options.signal.aborted,true);await settleBrowse();assert.equal(requests.length,2);
   requests[1].resolve(Response.json({code:0,data:{items:[{...discovered,id:'douban-20',title:'新结果'}],partial:false,nextStart:24}}));await flush();
@@ -582,7 +563,7 @@ test('browse empty and failed states provide recovery without discarding a loade
  const app=mount(Discovery,{active:true,libraryCatalogIds:[]});
  try {
   await flush();await chooseFacet('类型筛选','科幻');await settleBrowse();assert.match(document.body.textContent,/没有符合筛选/);
-  mode='loaded';await chooseFacet('国家地区筛选','美国');await settleBrowse();assert.ok(document.querySelector('.browse-more'));
+  mode='loaded';await chooseFacet('地区筛选','美国');await settleBrowse();assert.ok(document.querySelector('.browse-more'));
   mode='error';document.querySelector('.browse-more').click();await flush();assert.ok(document.querySelector('.discovery-card'));assert.match(document.querySelector('[role="alert"]').textContent,/暂时不可用/);
  }finally{app.unmount();}
 });

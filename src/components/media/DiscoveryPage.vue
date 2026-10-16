@@ -6,7 +6,7 @@ import CatalogFilters from './CatalogFilters.vue';
 import { hasCatalogFilters, type CatalogFilters as FilterState } from '../../../server/catalogFacets.js';
 import { browseCatalog, loadDiscovery, type DiscoveryCategory, type DiscoveryItem, type DiscoverySection } from '../../services/discoveryService';
 
-import { catalogSortOptions, catalogSortDescription, sortCatalogItems, type CatalogSort } from '../../services/catalogSort';
+import { sortCatalogItems, type CatalogSort } from '../../services/catalogSort';
 const sort = ref<CatalogSort>('recommended');
 const props = defineProps<{ active: boolean; libraryCatalogIds: string[] }>();
 const emit = defineEmits<{ (event: 'select', item: DiscoveryItem): void; (event: 'search'): void }>();
@@ -15,7 +15,7 @@ const animeMode = ref('anime');
 const weekday = ref(new Date().getDay() || 7);
 const filters = ref<FilterState>({ genre: '', country: '', year: '' });
 const isCalendar = computed(() => category.value === 'anime' && animeMode.value === 'calendar');
-const browsing = computed(() => hasCatalogFilters(filters.value) && !isCalendar.value);
+const browsing = computed(() => (category.value !== 'all' || hasCatalogFilters(filters.value)) && !isCalendar.value);
 const browseItems = ref<DiscoveryItem[]>([]), browseLoading = ref(false), browseFailure = ref(''), browsePartial = ref(false);
 const nextStart = ref<number | null>(null);
 let browseController: AbortController | undefined, browseGeneration = 0, browseTimer: ReturnType<typeof setTimeout> | undefined;
@@ -90,16 +90,16 @@ const visibleItems = (section: DiscoverySection) => {
 
 <template>
   <div class="discovery-page">
-    <header class="discovery-heading"><h1>发现</h1><select v-model="sort" aria-label="发现排序" :title="browsing ? '豆瓣按所选方式检索' : catalogSortDescription[sort]"><option v-for="option in catalogSortOptions" :key="option.value" :value="option.value">{{ browsing && option.value === 'popularity' ? '热度 · 近期' : browsing && option.value === 'time' ? '时间 · 首映' : option.label }}</option></select></header>
+    <header class="discovery-heading"><h1>发现</h1></header>
     <nav class="discovery-categories" aria-label="发现分类">
       <button v-for="item in categories" :key="item.id" type="button" :aria-pressed="category === item.id" @click="changeCategory(item.id)">{{ item.label }}</button>
     </nav>
     <div v-if="category === 'anime'" class="anime-modes" aria-label="动漫榜单">
       <button type="button" :aria-pressed="animeMode === 'anime'" @click="animeMode = 'anime'">热门推荐</button><button type="button" :aria-pressed="animeMode === 'calendar'" @click="animeMode = 'calendar'">每周放送</button>
     </div>
-    <CatalogFilters v-if="!isCalendar" v-model="filters" />
+    <CatalogFilters v-if="!isCalendar" v-model="filters" v-model:sort="sort" />
     <section v-if="browsing" class="discovery-section" aria-label="豆瓣筛选结果">
-      <header class="section-heading"><h2>筛选结果<span v-if="browseItems.length" class="browse-count">{{ browseItems.length }} 部</span></h2></header>
+      <header class="section-heading"><h2>{{ category === 'all' ? '筛选结果' : categories.find(item => item.id === category)?.label }}<span v-if="browseItems.length" class="browse-count">{{ browseItems.length }} 部</span></h2></header>
       <p v-if="browsePartial" class="source-note" role="status">豆瓣暂时返回了部分结果</p>
       <div v-if="browseItems.length" class="discovery-posters">
         <button v-for="item in browseItems" :key="item.id" class="discovery-card" type="button" :aria-label="`${inLibrary.has(item.id) ? '播放' : '查找片源'}：${item.title}（${item.year || '年份未知'}）`" @click="emit('select', item)">
@@ -141,7 +141,6 @@ const visibleItems = (section: DiscoverySection) => {
 .browse-count { margin-left: 10px; color: var(--text-tertiary); font-size: .75rem; font-weight: 400; }
 .browse-more { display: block; min-height: 44px; margin: 24px auto 0; padding: 0 24px; border: 1px solid var(--divider); border-radius: 8px; color: var(--liquid-accent); background: var(--surface-2); }
 .discovery-heading, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.discovery-heading select { min-height: 40px; padding: 0 12px; border: 1px solid var(--divider); border-radius: 8px; color: var(--text-secondary); background: var(--surface-2); font-size: .8rem; }
 .discovery-heading h1 { font-size: 2rem; font-weight: 700; letter-spacing: -.035em; }
 .discovery-categories { display: flex; gap: 24px; overflow-x: auto; margin: 18px 0 28px; border-bottom: 1px solid var(--divider); }
 .discovery-categories button { position: relative; flex: 0 0 auto; min-height: 48px; padding: 0 2px 10px; border: 0; color: var(--text-tertiary); background: transparent; font-size: .86rem; font-weight: 500; }
@@ -179,10 +178,12 @@ const visibleItems = (section: DiscoverySection) => {
 .discovery-feedback button, .discovery-empty button { display: flex; align-items: center; gap: 5px; min-height: 44px; border: 0; color: var(--liquid-accent); background: transparent; white-space: nowrap; }
 .discovery-feedback svg { width: 16px; height: 16px; }
 @media (max-width: 640px) {
+  .discovery-title { font-size: .76rem; }
+  .discovery-meta { font-size: .62rem; gap: 4px; }
   .discovery-heading h1 { font-size: 1.65rem; }
   .discovery-categories { justify-content: space-between; gap: 18px; margin: 10px 0 22px; }
   .discovery-categories button { font-size: .82rem; }
-  .discovery-posters, .discovery-skeleton { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 14px; }
+  .discovery-posters, .discovery-skeleton { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px 10px; }
   .discovery-posters.shelf { grid-template-columns: none; grid-auto-columns: 42%; gap: 14px; }
   .section-heading h2 { font-size: 1.02rem; }
   .discovery-section { margin-bottom: 28px; }

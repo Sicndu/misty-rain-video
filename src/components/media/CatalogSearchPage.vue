@@ -2,26 +2,19 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { ArrowLeft, Search, Star } from '@lucide/vue';
 import MediaPoster from '../common/MediaPoster.vue';
-import CatalogFilters from './CatalogFilters.vue';
-import { hasCatalogFilters, matchesCatalogFilters, missingCatalogFacets, type CatalogFilters as FilterState } from '../../../server/catalogFacets.js';
 import { searchCatalog, type DiscoveryItem } from '../../services/discoveryService';
 import { catalogSortOptions, catalogSortDescription, sortCatalogItems, type CatalogSort } from '../../services/catalogSort';
 const sort = ref<CatalogSort>('recommended');
 const props = defineProps<{ query: string; active: boolean; libraryCatalogIds: string[] }>();
 const emit = defineEmits<{ (e: 'select', item: DiscoveryItem): void; (e: 'search-resources', query: string): void; (e: 'back'): void }>();
 const items = ref<DiscoveryItem[]>([]), loading = ref(false), error = ref(''), partial = ref(false);
-const filters = ref<FilterState>({ genre: '', country: '', year: '' });
-const filtered = computed(() => hasCatalogFilters(filters.value));
-const visibleItems = computed(() => sortCatalogItems(items.value.filter(item => matchesCatalogFilters(item, filters.value)), sort.value));
-const missingCount = computed(() => items.value.filter(item => missingCatalogFacets(item, filters.value)).length);
-const clearFilters = () => { filters.value = { genre: '', country: '', year: '' }; };
-watch(() => props.query, clearFilters);
+const visibleItems = computed(() => sortCatalogItems(items.value, sort.value));
 const categories = { movie: '电影', tv: '电视剧', anime: '动漫', variety: '综艺' };
 let controller: AbortController | undefined, sequence = 0, loadedQuery = '';
 const search = async () => {
   controller?.abort(); const seq = ++sequence;
   if (!props.query) return;
-  loadedQuery = ''; controller = new AbortController(); loading.value = true; error.value = ''; partial.value = false; items.value = [];
+  controller = new AbortController(); loading.value = true; error.value = ''; partial.value = false; items.value = [];
   try {
     const result = await searchCatalog(props.query, controller.signal);
     if (seq !== sequence) return;
@@ -37,19 +30,17 @@ onBeforeUnmount(() => { controller?.abort(); sequence++; });
 </script>
 <template>
   <section class="catalog-search" aria-label="影片搜索结果">
-    <header class="catalog-heading"><button type="button" class="back" @click="emit('back')"><ArrowLeft aria-hidden="true" />返回</button><h1>“{{ query }}”</h1><span v-if="!loading && items.length">{{ visibleItems.length }}{{ filtered ? ` / ${items.length}` : '' }} 部影片</span><label v-if="items.length" class="catalog-sort"><select v-model="sort" aria-label="影片排序" :title="catalogSortDescription[sort]"><option v-for="option in catalogSortOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label></header>
-    <CatalogFilters v-model="filters" />
-    <p v-if="!loading && missingCount" class="catalog-notice" role="status">{{ missingCount }} 部影片缺少所选筛选信息<button type="button" @click="clearFilters">查看全部</button></p>
+    <header class="catalog-heading"><button type="button" class="back" @click="emit('back')"><ArrowLeft aria-hidden="true" />返回</button><h1>“{{ query }}”</h1><span v-if="!loading && items.length">{{ items.length }} 部影片</span><label v-if="items.length" class="catalog-sort"><select v-model="sort" aria-label="影片排序" :title="catalogSortDescription[sort]"><option v-for="option in catalogSortOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label></header>
     <p v-if="!loading && partial" class="catalog-notice" role="status">豆瓣暂时返回了部分结果<button type="button" @click="search">重试</button></p>
     <div v-if="loading" class="catalog-grid" role="status" aria-label="正在搜索影片"><div v-for="n in 6" :key="n" class="skeleton"></div></div>
-    <div v-else-if="visibleItems.length" class="catalog-grid">
+    <div v-else-if="items.length" class="catalog-grid">
       <button v-for="item in visibleItems" :key="item.id" class="catalog-card" type="button" :aria-label="`${libraryCatalogIds.includes(item.id) ? '播放' : '查找片源'}：${item.title}（${item.year || '年份未知'}）`" @click="emit('select', item)">
         <span class="poster"><MediaPoster :src="item.poster" alt="" loading="lazy" /><span v-if="libraryCatalogIds.includes(item.id)" class="saved">已收藏</span></span>
         <strong>{{ item.title }}</strong><span class="meta">{{ item.year }} · {{ categories[item.category] }}<span v-if="item.rating !== null"><Star aria-hidden="true" />{{ item.rating.toFixed(1) }}</span></span>
         <small>{{ item.subtitle || item.description }}</small>
       </button>
     </div>
-    <div v-else-if="!loading" class="catalog-empty" :role="error ? 'alert' : 'status'"><Search aria-hidden="true" /><p>{{ error || (filtered ? '没有符合筛选条件的影片' : '没有找到匹配的影片') }}</p><button v-if="filtered" type="button" @click="clearFilters">清空筛选</button><button v-if="error" type="button" @click="search">重新加载</button></div>
+    <div v-else-if="!loading" class="catalog-empty" :role="error ? 'alert' : 'status'"><Search aria-hidden="true" /><p>{{ error || '没有找到匹配的影片' }}</p><button v-if="error" type="button" @click="search">重新加载</button></div>
     <footer v-if="!loading" class="catalog-fallback"><span>{{ items.length ? '没找到想看的？' : '也可以直接按片名找资源' }}</span><button type="button" @click="emit('search-resources', query)">直接搜索资源</button><small v-if="items.length">影片信息来自豆瓣</small></footer>
   </section>
 </template>

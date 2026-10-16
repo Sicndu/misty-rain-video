@@ -58,13 +58,17 @@ for (const [component, label, selector] of [[Catalog, '影片排序', '.catalog-
     try {
       await flush(); const count = calls;
       const select = document.querySelector(`select[aria-label="${label}"]`);
+      const labels = { rating: "评分", popularity: "热门", time: "最新" };
       for (const [sort, first] of [['rating', '高分新作'], ['popularity', '热门旧作'], ['time', '待播']]) {
-        select.value = sort; select.dispatchEvent(new window.Event('change', { bubbles: true })); await flush();
+        if (select) { select.value = sort; select.dispatchEvent(new window.Event('change', { bubbles: true })); }
+        else [...document.querySelectorAll('[aria-label="发现排序"] button')].find(button => button.textContent === labels[sort]).click();
+        await flush();
         assert.equal(document.querySelector(selector).textContent, first);
       }
-      assert.equal(calls, count); assert.match(select.title, /年份/);
+      assert.equal(calls, count); if (select) assert.match(select.title, /年份/);
       document.querySelector(selector).closest('button').click(); assert.equal(selected.id, 'douban-3');
-      assert.match(select.textContent, /评价人数/);
+      if (select) assert.match(select.textContent, /评价人数/);
+      else assert.equal(document.querySelector('[aria-label="发现排序"] [aria-pressed="true"]').textContent,'最新');
     } finally { app.unmount(); }
   });
 }

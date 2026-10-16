@@ -16,21 +16,3 @@ export function catalogYears(now = new Date().getFullYear()) {
   return [...Array.from({ length: 8 }, (_, index) => String(now - index)), '2020年代','2010年代','2000年代','90年代','80年代','70年代','60年代','更早'];
 }
 export const hasCatalogFilters = filters => Boolean(filters.genre || filters.country || filters.year);
-export function matchesCatalogYear(year, selected) {
-  if (!selected) return true;
-  if (!/^(18|19|20)\d{2}$/.test(String(year))) return false;
-  if (selected === '更早') return Number(year) < 1960;
-  if (/年代$/.test(selected)) {
-    const decade = Number(selected.replace('年代','')); const start = decade < 100 ? 1900 + decade : decade;
-    return Number(year) >= start && Number(year) < start + 10;
-  }
-  return String(year) === selected;
-}
-export function matchesCatalogFilters(item, filters) {
-  const { countries, genres } = catalogFacets(item);
-  return (!filters.genre || genres.includes(filters.genre)) && (!filters.country || countries.includes(filters.country)) && matchesCatalogYear(item.year, filters.year);
-}
-export function missingCatalogFacets(item, filters) {
-  const { countries, genres } = catalogFacets(item);
-  return Boolean(filters.genre && !genres.length || filters.country && !countries.length || filters.year && !/^(18|19|20)\d{2}$/.test(String(item.year)));
-}

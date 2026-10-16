@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { catalogFacets, matchesCatalogFilters, matchesCatalogYear, missingCatalogFacets } from '../server/catalogFacets.js';
+import { catalogFacets } from '../server/catalogFacets.js';
 import { CatalogBrowse, browseOptions } from '../server/catalogBrowse.js';
 import { CatalogSearch, normalizeCatalogSearch } from '../server/catalogSearch.js';
 import { normalizeDoubanFeed } from '../server/discoverySources.js';
@@ -16,16 +16,6 @@ test('facets parse both year-prefixed charts and yearless search snippets; alias
  assert.deepEqual(catalogFacets({countries:['香港','台湾'],genres:['喜剧','喜剧']}),{countries:['中国香港','中国台湾'],genres:['喜剧']});
  assert.deepEqual(catalogFacets({title:'美国爱情故事',description:'American Love Story'}),{countries:[],genres:[]});
  assert.deepEqual(catalogFacets({description:'导演 / 某演员'}),{countries:[],genres:[]});
-});
-test('combined filters intersect, include coproductions, distinguish unknown metadata, and cover decades',()=>{
- const normalized={...catalogFacets(item),year:'2024'};
- assert.equal(matchesCatalogFilters(normalized,filters),true);
- assert.equal(matchesCatalogFilters(normalized,{...filters,country:'加拿大'}),true);
- assert.equal(matchesCatalogFilters(normalized,{...filters,genre:'爱情'}),false);
- assert.equal(matchesCatalogFilters({year:'2024'},filters),false);assert.equal(missingCatalogFacets({year:'2024'},filters),true);
- assert.equal(missingCatalogFacets(normalized,filters),false);
- assert.equal(matchesCatalogFilters({}, {genre:'',country:'',year:''}),true);
- for(const [year,decade,result] of [['1999','90年代',true],['2000','90年代',false],['2024','2020年代',true],['1959','更早',true],['1960','更早',false],['','更早',false]]) assert.equal(matchesCatalogYear(year,decade),result);
 });
 test('search and discovery metadata use the same country/genre fields',()=>{
  const search=normalizeCatalogSearch({smart_box:[{target_type:'movie',target:item}]})[0];
