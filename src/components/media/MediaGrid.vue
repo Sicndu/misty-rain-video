@@ -55,9 +55,9 @@ const emit = defineEmits<{
     </div>
 
     <div class="empty-content">
-      <span class="empty-kicker">{{ currentCategoryName }}片库</span>
-      <h3 class="empty-title">从喜欢的第一部开始</h3>
-      <p class="empty-text">浏览近期热门，或搜索想看的片名。</p>
+      <span class="empty-kicker">{{ currentCategoryName }}收藏</span>
+      <h3 class="empty-title">收藏想保留的影片</h3>
+      <p class="empty-text">保存资源，剧集按收藏范围自动追更。</p>
       <button type="button" class="empty-action" @click="emit('discover')">
         <Compass aria-hidden="true" />
         浏览推荐

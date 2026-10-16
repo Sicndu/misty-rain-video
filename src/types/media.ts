@@ -18,6 +18,7 @@ export interface MediaItem {
   quarkSelectionFids?: string[]; // 选择保存的分享文件/文件夹；不填写表示全部保存
   quarkFid?: string;           // 烟雨影视片库中的夸克目录 ID
   quarkQuality?: string;       // 夸克画质 (如: 4K 臻彩)
+  startEpisodeFid?: string;    // 文件浏览器明确选择的首播文件，首次保存进度后清除
   localEpisodeCount?: number;  // 当前片库中的正片数量
   sourceEpisodeCount?: number; // 原片源中的正片数量
   latestEpisodeNumber?: number;// 原片源最新集数

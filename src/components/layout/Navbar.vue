@@ -187,7 +187,7 @@ defineExpose({ focusSearch, scrollToTop });
             <p v-if="busy" class="share-progress" role="status">正在验证链接并转存，请稍候…</p>
             <div class="dropdown-button-group">
               <button type="submit" class="liquid-btn btn-accent" :disabled="busy">
-                {{ busy ? '正在添加…' : saveError ? '重新验证并添加' : `添加到${currentCategoryName}` }}
+                {{ busy ? '正在添加…' : saveError ? '重新验证并添加' : `收藏到${currentCategoryName}` }}
               </button>
             </div>
           </template>

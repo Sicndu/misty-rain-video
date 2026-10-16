@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, r
 import { Plus, RefreshCw } from '@lucide/vue';
 import LoginScreen from './components/auth/LoginScreen.vue';
 import AccountPage from './components/auth/AccountPage.vue';
+import HistoryPage from './components/media/HistoryPage.vue';
 import Navbar from './components/layout/Navbar.vue';
 import DesktopSidebar from './components/layout/DesktopSidebar.vue';
 import MobileTabBar, { type MobileTab as MobileDockTab } from './components/layout/MobileTabBar.vue';
@@ -103,13 +104,13 @@ type MobileTab = MobileDockTab | 'search' | 'catalog';
 const catalogQuery = ref('');
 const playbackPageKey = ref('');
 const mobileTab = ref<MobileTab>('discover');
-const lastContentTab = ref<'discover' | 'library' | 'catalog'>('discover');
+const lastContentTab = ref<'discover' | 'library' | 'history' | 'catalog'>('discover');
 const currentPage = computed(() => mobileTab.value === 'search' ? lastContentTab.value : mobileTab.value);
 const selectedHistoryEntry = ref<PlaybackHistoryEntry | null>(null);
 const isCheckingUpdates = ref(false);
 const isApplyingUpdates = ref(false);
 let autoCheckedUsername = '';
-type AppHistoryLayer = 'catalog' | 'discover' | 'library' | 'search' | 'account' | 'player' | 'transfer' | 'delete' | 'category' | 'actions' | 'title';
+type AppHistoryLayer = 'catalog' | 'history' | 'discover' | 'library' | 'search' | 'account' | 'player' | 'transfer' | 'delete' | 'category' | 'actions' | 'title';
 let handlingPopState = false;
 
 const historyEnabled = () => typeof window !== 'undefined';
@@ -121,7 +122,7 @@ const setAppHistoryLayer = (layer: AppHistoryLayer, replace = false) => {
     playbackKey: layer === 'player' ? playbackPageKey.value : '', scrollY: 0 };
   const hash = layer === 'player' ? `#/watch/${playbackPageKey.value}`
     : layer === 'catalog' ? `#/search?q=${encodeURIComponent(catalogQuery.value)}`
-    : ['discover', 'library', 'account'].includes(layer) ? `#/${layer}` : window.location.hash;
+    : ['discover', 'library', 'history', 'account'].includes(layer) ? `#/${layer}` : window.location.hash;
   if (replace || (currentHistoryLayer() === layer && layer !== 'player')) window.history.replaceState(state, '', hash);
   else {
     window.history.replaceState({ ...window.history.state, scrollY: window.scrollY }, '');
@@ -146,11 +147,11 @@ const restorePage = async (state = window.history.state) => {
   const layer = state?.mistyRainLayer;
   const search = window.location.hash.match(/^#\/search\?(.*)$/);
   if (search) { catalogQuery.value = (new URLSearchParams(search[1]).get('q') || '').slice(0,100); mobileTab.value = 'catalog'; }
-  else if (['discover','library','account','search','catalog'].includes(layer)) mobileTab.value = layer;
-  else mobileTab.value = window.location.hash === '#/library' ? 'library' : window.location.hash === '#/account' ? 'account' : 'discover';
+  else if (['discover','library','history','account','search','catalog'].includes(layer)) mobileTab.value = layer;
+  else mobileTab.value = window.location.hash === '#/library' ? 'library' : window.location.hash === '#/account' ? 'account' : window.location.hash === '#/history' ? 'history' : 'discover';
   if (state?.query) catalogQuery.value = state.query;
   if (['tv','movie','anime','variety'].includes(state?.category)) currentCategory.value = state.category;
-  if (['discover','library','catalog'].includes(mobileTab.value)) lastContentTab.value = mobileTab.value as 'discover' | 'library' | 'catalog';
+  if (['discover','library','history','catalog'].includes(mobileTab.value)) lastContentTab.value = mobileTab.value as 'discover' | 'library' | 'history' | 'catalog';
   await nextTick();
   if (watchKey) { toast.show('播放页已失效，请重新选择影片', '!'); setAppHistoryLayer('discover', true); }
   else if (!layer) setAppHistoryLayer(mobileTab.value as AppHistoryLayer, true);
@@ -229,7 +230,7 @@ const checkLibraryUpdates = async (force = false, notify = false) => {
         ? `发现 ${count} 部影片有新内容${unavailableCount ? `，另有 ${unavailableCount} 部未能检查更新` : ''}`
         : unavailableCount
           ? `${unavailableCount} 部未能检查更新，可在影片“更多操作”中查看原因`
-          : '片库内容已是最新';
+          : '收藏已是最新';
       toast.show(message, count ? '↻' : unavailableCount ? '!' : '✓', 3200);
     }
   } catch (error) {
@@ -444,8 +445,10 @@ const receivePlaybackHistory = (entry: PlaybackHistoryEntry, username?: string) 
   updateLocalHistory(entry);
   if (isEmbedPlayerOpen.value && playbackPageKey.value && embedPlayingMedia.value
     && sameMediaIdentity(entry.media, embedPlayingMedia.value)
-    && entry.media.quarkShareUrl === embedPlayingMedia.value.quarkShareUrl)
+    && entry.media.quarkShareUrl === embedPlayingMedia.value.quarkShareUrl) {
+    if (embedPlayingMedia.value.startEpisodeFid) embedPlayingMedia.value = { ...embedPlayingMedia.value, startEpisodeFid: undefined };
     savePlaybackPage(username!, embedPlayingMedia.value, entry, sessionStorage, playbackPageKey.value);
+  }
 };
 
 const confirmDeleteMedia = async () => {
@@ -512,7 +515,7 @@ const finishMobileSearch = () => {
   }
 };
 
-const navigateContent = (tab: 'discover' | 'library' | 'catalog') => {
+const navigateContent = (tab: 'discover' | 'library' | 'history' | 'catalog') => {
   if (isSavingTransfer.value) return;
   mobileTab.value = tab;
   lastContentTab.value = tab;
@@ -540,10 +543,11 @@ const openDiscoveryItem = (item: DiscoveryItem) => {
   openTransferModal(discoveryMedia(item));
   setAppHistoryLayer('transfer');
 };
-const playResource = (media: MediaItem, resource: ResourceItem, category: CategoryType) => {
+const playResource = (media: MediaItem, resource: ResourceItem, category: CategoryType, episodeFid?: string) => {
   if (isSavingTransfer.value) return;
   try {
     const playable = resourcePlaybackMedia(media, resource, category);
+    playable.startEpisodeFid = episodeFid;
     closeTransferModal();
     embedPlayingMedia.value = playable;
     selectedHistoryEntry.value = history.value.find(entry => sameMediaIdentity(entry.media, playable)) || null;
@@ -569,7 +573,7 @@ const playResource = (media: MediaItem, resource: ResourceItem, category: Catego
     <div v-show="!isEmbedPlayerOpen && !restoringPlayer" class="content-pages">
     <DesktopSidebar :active-page="currentPage === 'catalog' ? 'discover' : currentPage" :category="currentCategory"
       :counts="categoryCounts" :user="user" :disabled="isSavingTransfer"
-      @library="showDesktopLibrary" @account="showMobileAccount" @discover="showDiscovery" />
+      @library="showDesktopLibrary" @account="showMobileAccount" @discover="showDiscovery" @history="navigateContent('history')" />
     <!-- 片库页面 -->
     <Navbar
       v-if="mobileTab !== 'account'"
@@ -599,7 +603,7 @@ const playResource = (media: MediaItem, resource: ResourceItem, category: Catego
     <main v-if="currentPage === 'library'" class="page-container">
     <header class="library-intro">
       <div class="library-title">
-        <h1>我的片库</h1>
+        <h1>收藏与追更</h1>
         <p>{{ !allMediaList.length && isLoading ? '正在读取…' : !allMediaList.length && loadError ? '等待重新加载' : `${allMediaList.length} 部收藏` }}</p>
       </div>
       <div class="library-actions">
@@ -609,8 +613,8 @@ const playResource = (media: MediaItem, resource: ResourceItem, category: Catego
           class="check-updates-button"
           :class="{ checking: isCheckingUpdates }"
           :disabled="isCheckingUpdates || isApplyingUpdates"
-          aria-label="检查片库更新"
-          title="检查片库更新"
+          aria-label="检查收藏更新"
+          title="检查收藏更新"
           @click="checkLibraryUpdates(true, true)"
         >
           <RefreshCw aria-hidden="true" />
@@ -638,9 +642,9 @@ const playResource = (media: MediaItem, resource: ResourceItem, category: Catego
 
     <!-- 影视卡片网格 -->
     <div v-if="loadError" class="inline-feedback library-load-error" role="alert">
-      <strong>暂时无法读取片库</strong>
+      <strong>暂时无法读取收藏</strong>
       <p>{{ loadError }}{{ allMediaList.length ? ' 当前保留上次加载的内容。' : '' }}</p>
-      <button type="button" :disabled="isLoading" @click="refreshList()">{{ isLoading ? '正在重试…' : '重新加载片库' }}</button>
+      <button type="button" :disabled="isLoading" @click="refreshList()">{{ isLoading ? '正在重试…' : '重新加载收藏' }}</button>
     </div>
     <MediaGrid
       v-if="!loadError || allMediaList.length > 0 || isLoading"
@@ -658,21 +662,8 @@ const playResource = (media: MediaItem, resource: ResourceItem, category: Catego
     />
     </main>
 
-    <AccountPage
-      v-if="currentPage === 'account'"
-      ref="accountPageRef"
-      :user="user"
-      :history="displayHistory"
-      :history-error="historyError"
-      :loading-history="loadingHistory"
-      :deleting-history-id="deletingHistoryId"
-      @retry-history="refreshHistory()"
-      @auth-updated="handlePlaybackAuthUpdated"
-      @play-history="continuePlayback"
-      @delete-history="removeHistory"
-      @back="navigateContent(lastContentTab)"
-      @logout="handleLogout"
-    />
+    <main v-if="currentPage === 'history'" class="page-container"><HistoryPage :history="displayHistory" :history-error="historyError" :loading-history="loadingHistory" :deleting-history-id="deletingHistoryId" @retry="refreshHistory()" @play="continuePlayback" @delete="removeHistory" @discover="showDiscovery" /></main>
+    <AccountPage v-if="currentPage === 'account'" ref="accountPageRef" :user="user" @auth-updated="handlePlaybackAuthUpdated" @back="navigateContent(lastContentTab)" @logout="handleLogout" />
 
     <MobileTabBar
       v-if="!isEmbedPlayerOpen && !isTransferOpen && !deletingMedia && !categoryMedia && !actionMedia && !titleMedia"

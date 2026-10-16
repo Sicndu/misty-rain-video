@@ -36,7 +36,7 @@ useDialog(dialogRef, () => props.open, () => { if (!props.deleting) emit('cancel
           <Trash2 />
         </div>
         <div class="confirm-copy">
-          <h2 id="delete-title">删除《{{ media.title }}》？</h2>
+          <h2 id="delete-title">移除《{{ media.title }}》的收藏？</h2>
           <p>
             影片目录将移入云盘回收站，可在回收站内恢复；对应观看记录会同步删除。
             <template v-if="(media.duplicateCount || 1) > 1">

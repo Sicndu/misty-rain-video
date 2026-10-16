@@ -1,24 +1,19 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue';
-import { ChevronLeft, ChevronRight, Download, LogOut, Settings2, Trash2 } from '@lucide/vue';
-import MediaPoster from '../common/MediaPoster.vue';
+import { nextTick, ref } from 'vue';
+import { ChevronLeft, ChevronRight, Download, LogOut, Settings2 } from '@lucide/vue';
 import type { AppUser } from '../../services/authService';
 import { apiUrl } from '../../services/appUrl';
 import { QuarkStreamService } from '../../services/quarkStreamService';
 import { useToast } from '../../composables/useToast';
-import type { PlaybackHistoryEntry } from '../../types/media';
 import TvPlaybackAuth from './TvPlaybackAuth.vue';
 import ThemeSwitch from '../common/ThemeSwitch.vue';
 import LibraryMaintenanceStatus from './LibraryMaintenanceStatus.vue';
 
-const props = defineProps<{ user: AppUser; history: PlaybackHistoryEntry[]; historyError?: string; loadingHistory?: boolean; deletingHistoryId?: string }>();
+const props = defineProps<{ user: AppUser }>();
 const emit = defineEmits<{
   (e: 'logout'): void;
   (e: 'auth-updated'): void;
   (e: 'back'): void;
-  (e: 'play-history', entry: PlaybackHistoryEntry): void;
-  (e: 'delete-history', id: string): void;
-  (e: 'retry-history'): void;
 }>();
 
 const toast = useToast();
@@ -34,16 +29,7 @@ const tvTokenExchangeOrigin = ref('');
 const isSaving = ref(false);
 const showCredentialForm = ref(false);
 const advancedConfiguration = ref(false);
-const historyExpanded = ref(false);
 const authSection = ref<HTMLElement | null>(null);
-const visibleHistory = computed(() => historyExpanded.value ? props.history : props.history.slice(0, 5));
-const historyProgress = (entry: PlaybackHistoryEntry) => entry.duration > 0 ? Math.max(0, Math.min(100, entry.position / entry.duration * 100)) : 0;
-const formatHistoryMeta = (entry: PlaybackHistoryEntry) => {
-  const episode = entry.media.category === 'movie' ? '电影' : entry.episodeNumber > 0 ? `第 ${entry.episodeNumber} 集` : entry.episodeTitle;
-  const minutes = Math.max(1, Math.floor(entry.position / 60));
-  return `${episode || '影片'} · ${entry.completed ? '已看完' : `看到 ${minutes} 分钟`}`;
-};
-
 const refreshStatus = async () => {
   loadingStatus.value = true;
   statusError.value = '';
@@ -119,52 +105,6 @@ defineExpose({ focusAuth, refreshStatus });
         <button v-if="user.role === 'admin'" class="settings-row" type="button" @click="openAdvanced"><Settings2 aria-hidden="true" /><span>高级配置</span><ChevronRight class="chevron" aria-hidden="true" /></button>
         <a class="settings-row ios-install-link" :href="installUrl"><Download aria-hidden="true" /><span>安装到桌面</span><ChevronRight class="chevron" aria-hidden="true" /></a>
       </section>
-    <section class="settings-section history-section" aria-labelledby="history-title">
-      <div class="section-title-row compact">
-        <div>
-          <h2 id="history-title">观看记录</h2>
-        </div>
-        <small v-if="!historyError && !loadingHistory" class="history-count">{{ history.length }} 条</small>
-      </div>
-
-      <div v-if="historyError" class="inline-feedback" role="alert"><p>{{ historyError }}</p><button type="button" :disabled="loadingHistory" @click="emit('retry-history')">重新加载观看记录</button></div>
-      <p v-else-if="loadingHistory && !history.length" class="history-empty" role="status">正在加载观看记录…</p>
-      <div v-if="history.length" class="history-list">
-        <article v-for="entry in visibleHistory" :key="entry.id" class="history-row">
-          <button type="button" class="history-main" @click="emit('play-history', entry)">
-<MediaPoster :src="entry.media.poster" :alt="`${entry.media.title}封面`" loading="lazy" decoding="async" />
-            <span class="history-copy">
-              <strong>{{ entry.media.title }}</strong>
-              <small>{{ formatHistoryMeta(entry) }}</small>
-              <span v-if="entry.duration > 0" class="history-progress" aria-hidden="true"><i :style="{ width: `${historyProgress(entry)}%` }"></i></span>
-            </span>
-            <span class="history-play">{{ entry.completed ? '再看' : '继续' }}</span>
-          </button>
-          <button
-            type="button"
-            class="history-delete"
-            :disabled="!!deletingHistoryId"
-            :aria-label="`删除${entry.media.title}的播放记录`"
-            @click="emit('delete-history', entry.id)"
-          >
-            <Trash2 aria-hidden="true" />
-          </button>
-        </article>
-
-        <button
-          v-if="history.length > visibleHistory.length || historyExpanded"
-          type="button"
-          class="history-toggle"
-          :aria-expanded="historyExpanded"
-          @click="historyExpanded = !historyExpanded"
-        >
-          {{ historyExpanded ? '收起' : `查看全部 ${history.length} 条记录` }}
-          <ChevronRight aria-hidden="true" />
-        </button>
-      </div>
-      <p v-else-if="!historyError && !loadingHistory" class="history-empty">暂无观看记录</p>
-    </section>
-
       <button type="button" class="logout-button" @click="emit('logout')"><LogOut aria-hidden="true" />退出登录</button>
     </template>
     <section v-else-if="user.role === 'admin'" ref="authSection" class="settings-section auth-section" aria-labelledby="auth-title">
@@ -255,25 +195,7 @@ defineExpose({ focusAuth, refreshStatus });
 .settings-row > span { flex: 1; font-weight: 500; }
 .section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .section-title-row h2 { font-size: .98rem; font-weight: 650; letter-spacing: -.01em; }
-.history-count, .history-empty { color: var(--text-tertiary); font-size: .78rem; }
-.history-progress { display: block; width: min(180px, 100%); height: 3px; margin-top: 4px; overflow: hidden; border-radius: 9999px; background: var(--divider); }
-.history-progress i { display: block; height: 100%; border-radius: 9999px; background: var(--liquid-accent); }
-.history-play { flex-shrink: 0; padding: 4px 10px; border-radius: 9999px; color: var(--liquid-accent); background: var(--liquid-accent-subtle); font-size: .74rem; font-weight: 600; }
-.history-row { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--divider); }
-.history-row:first-child { border: 0; }
-.history-main { display: flex; align-items: center; min-width: 0; flex: 1; gap: 12px; padding: 12px 0; border: 0; color: var(--text-primary); background: transparent; text-align: left; transition: opacity .15s; }
-.history-main:active { opacity: .7; }
-.history-main img { width: 42px; height: 58px; flex-shrink: 0; object-fit: cover; border-radius: 8px; box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, .1); }
-.history-copy { display: grid; min-width: 0; flex: 1; gap: 3px; }
-.history-copy strong { overflow: hidden; font-size: .88rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; line-height: 1.35; }
-.history-copy small { color: var(--text-tertiary); font-size: .73rem; }
 .chevron { width: 17px; height: 17px; flex-shrink: 0; color: var(--text-tertiary); }
-.history-delete { display: grid; width: 44px; height: 44px; flex-shrink: 0; place-items: center; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; transition: color .15s, background .15s; }
-.history-delete:hover, .history-delete:active { color: var(--danger); background: var(--danger-surface); }
-.history-delete svg { width: 18px; height: 18px; }
-.history-toggle { display: flex; width: 100%; align-items: center; justify-content: center; gap: 6px; min-height: 44px; border: 0; border-radius: 12px; color: var(--liquid-accent); background: transparent; font-size: .82rem; font-weight: 550; transition: background .15s; }
-.history-toggle:active { background: var(--glass-bg); }
-.history-toggle svg { width: 16px; height: 16px; }
 .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 9999px; background: var(--glass-bg); color: var(--text-tertiary); font-size: .75rem; font-weight: 600; }
 .status-pill.ready { color: var(--success); background: var(--success-subtle); }
 .status-dot { display: block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }

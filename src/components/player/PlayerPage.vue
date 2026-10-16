@@ -1060,6 +1060,7 @@ const loadSession = async () => {
       quarkFid: media.quarkFid,
       shareUrl,
       title: media.title,
+      episodeFid: media.startEpisodeFid,
       passcode: media.quarkPasscode
     });
     if (sequence !== requestSequence || !props.isOpen) return;
@@ -1069,8 +1070,10 @@ const loadSession = async () => {
     const matchedHistoryIndex = history
       ? result.episodes.findIndex(episode => episode.fid === history.episodeFid)
       : -1;
-    const resumeIndex = matchedHistoryIndex >= 0 ? matchedHistoryIndex : firstPlayableEpisode(result.episodes, media.category);
-    const resumeAt = history && matchedHistoryIndex >= 0 && !history.completed ? history.position : 0;
+    const requestedIndex = media.startEpisodeFid ? result.episodes.findIndex(episode => episode.fid === media.startEpisodeFid) : -1;
+    if (media.startEpisodeFid && requestedIndex < 0) throw new QuarkServiceError('所选视频已不存在，请重新选择资源', 'EPISODE_NOT_FOUND', 404);
+    const resumeIndex = requestedIndex >= 0 ? requestedIndex : matchedHistoryIndex >= 0 ? matchedHistoryIndex : firstPlayableEpisode(result.episodes, media.category);
+    const resumeAt = history && matchedHistoryIndex === resumeIndex && !history.completed ? history.position : 0;
     await prepareEpisode(resumeIndex, resumeAt);
   } catch (error) {
     if (sequence === requestSequence) handleServiceError(error);

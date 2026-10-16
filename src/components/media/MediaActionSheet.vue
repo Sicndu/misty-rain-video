@@ -100,7 +100,7 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
               <Trash2 />
             </span>
             <span class="action-copy">
-              <strong>移出片库</strong>
+              <strong>移除收藏</strong>
               <small>删除前会再次向你确认</small>
             </span>
             <ChevronRight class="chevron" aria-hidden="true" />

@@ -223,3 +223,18 @@ test('movie years in brackets are not mistaken for thousands of episodes', async
   assert.notEqual(details.entries.find(item => item.fid === 'year').episodeNumber, 2026);
   assert.equal(details.entries.find(item => item.fid === 'episode').episodeNumber, 2026);
 });
+
+test('details expose actual thumbnails, aggregate folder sizes and dates; an explicitly clicked file wins over automatic quality deduplication', async t => {
+  const {gateway,tree}=createGateway(t);
+  tree.set('0',[folder('wrap','第一季')]);
+  tree.set('wrap',[
+    {...file('low','S01E01.720p.mp4'),size:1000,video_width:1280,video_height:720,thumbnail:'https://cdn.example.test/low?token=private',updated_at:1760000000000},
+    {...file('high','S01E01.4K.mp4'),size:4000,video_width:3840,video_height:2160}
+  ]);
+  const details=await gateway.getShareDetails(shareInput);
+  assert.equal(details.totalSize,5000);assert.equal(details.entries.find(item=>item.fid==='wrap').size,5000);
+  const low=details.entries.find(item=>item.fid==='low');assert.match(low.thumbnail,/^\/api\/quark\/share-thumbnails\//);assert.ok(low.updatedAt);assert.doesNotMatch(JSON.stringify(details),/cdn.example|token=private/);
+  const selected=await gateway.createPlaybackSession({...shareInput,episodeFid:'low'});
+  assert.ok(selected.episodes.some(e=>e.fid==='low'));assert.ok(!selected.episodes.some(e=>e.fid==='high'));
+  await assert.rejects(gateway.createPlaybackSession({...shareInput,episodeFid:'foreign'}),{code:'EPISODE_NOT_FOUND'});
+});

@@ -4,6 +4,7 @@ import { createOpaqueId } from './http.js';
 import { resolveShareSelection, entriesInSelection } from './shareSelection.js';
 import { includeSubtitleCompanions, isSubtitleFile, isTextSubtitleFile, subtitleMatchesVideo, subtitleLanguage, decodeSubtitle, subtitleToVtt } from './subtitles.js';
 import { EmbeddedSubtitleReader } from './embeddedSubtitles.js';
+import { ShareThumbnails } from './shareThumbnails.js';
 import { episodeKey, isAncillaryVideoPath, libraryVideoName, missingLibraryEpisodes, seasonNumber, validateSourceCandidate } from './libraryPolicy.js';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -496,6 +497,7 @@ export class QuarkGateway {
     this.tvPlaybackClient = tvPlaybackClient;
     this.directPlaybackEnabled = process.env.PLAYER_MEDIA_DELIVERY !== 'proxy';
     this.sessions = new Map();
+    this.shareThumbnails = new ShareThumbnails((url,signal) => this.fetchMedia(url, undefined, 'thumbnail', '', { signal }));
     this.accountCache = null;
     this.libraryRootCache = null;
     this.namedRootCache = new Map();
@@ -922,18 +924,20 @@ export class QuarkGateway {
     }
   }
 
-  async createPlaybackSession({ quarkFid, shareUrl, title, passcode = '' }, user = SYSTEM_USER, playbackCache = this.playbackCache) {
+  async createPlaybackSession({ quarkFid, shareUrl, title, passcode = '', episodeFid = '' }, user = SYSTEM_USER, playbackCache = this.playbackCache) {
     const principal = normalizeUser(user);
+    if (typeof episodeFid !== 'string' || episodeFid.length > 240) throw new QuarkApiError('文件标识无效', { statusCode: 400 });
     if (quarkFid) {
       await this.#assertLibraryAccess(quarkFid, principal);
       return this.#createDrivePlaybackSession({ quarkFid, title }, principal);
     }
-    try { return await this.#createSharePlaybackSession({ shareUrl, title, passcode }, principal); }
+    try { return await this.#createSharePlaybackSession({ shareUrl, title, passcode, episodeFid }, principal); }
     catch (error) {
       if (error?.code !== 'QUARK_SHARE_UNAVAILABLE') throw error;
       const { pwdId } = parseShareUrl(shareUrl);
       const cached = playbackCache?.forShare?.(pwdId) || [];
       if (!cached.length) throw error;
+      if (episodeFid && !cached.some(item => item.episodeFid === episodeFid)) throw error;
       const episodes = cached.map(item => serializeEpisode({ fid: item.episodeFid, file_name: item.fileName, size: item.size, pdir_fid: item.folderFid }));
       const id = createOpaqueId();
       this.sessions.set(id, { id, ownerUsername: principal.username, kind: 'cached-share', pwdId, title: title || '已缓存视频', episodes,
@@ -947,26 +951,38 @@ export class QuarkGateway {
     await this.#resolveShareCredentials({ shareUrl, passcode, cookie: this.#requireCookie(), timeoutMs: 3_000 });
   }
 
-  async getShareDetails({ shareUrl, passcode = '' }) {
+  async getShareDetails({ shareUrl, passcode = '' }, user = SYSTEM_USER) {
+    const principal = normalizeUser(user);
     const cookie = this.#requireCookie();
     const share = await this.#resolveShareCredentials({ shareUrl, passcode, cookie });
     const entries = await this.#readShareTree(share, cookie);
     const videoCounts = new Map();
+    const sizes = new Map();
+    let totalSize = 0;
+    for (const item of entries.filter(item => item.file_type !== 0 && !item.dir)) {
+      const size = Math.max(0, Number(item.size) || 0); totalSize += size;
+      for (const fid of item.ancestorFids) sizes.set(fid, (sizes.get(fid) || 0) + size);
+    }
     for (const item of entries.filter(isVideoFile)) {
       for (const fid of item.ancestorFids) videoCounts.set(fid, (videoCounts.get(fid) || 0) + 1);
     }
     return {
       title: share.title,
+      totalSize, sizeFormatted: formatBytes(totalSize),
       videoCount: entries.filter(isVideoFile).length,
       episodeCount: entries.filter(item => isVideoFile(item) && !ancillaryVideoPattern.test(item.file_name)
         && extractEpisodeNumber(item.file_name) > 0).length,
       entries: entries.map(item => {
         const video = isVideoFile(item);
         const episode = video ? serializeEpisode(item) : null;
+        const directory = item.file_type === 0 || Boolean(item.dir);
+        const size = directory ? sizes.get(item.fid) || 0 : Math.max(0, Number(item.size) || 0);
+        const thumbnail = video ? this.shareThumbnails.register([item.big_thumbnail,item.thumbnail].find(value => typeof value === 'string' && value.startsWith('https://')) || '', principal.username) : '';
         return {
           fid: item.fid, parentFid: item.parentFid, ancestorFids: item.ancestorFids,
           name: item.file_name, isDirectory: item.file_type === 0 || Boolean(item.dir),
-          isVideo: video, isSubtitle: isSubtitleFile(item), size: Number(item.size) || 0, sizeFormatted: formatBytes(item.size),
+          isVideo: video, isSubtitle: isSubtitleFile(item), size, sizeFormatted: formatBytes(size), thumbnail,
+          updatedAt: normalizeFileTimestamp(item.updated_at, item.update_time, item.modified_at, item.created_at),
           episodeNumber: episode?.episodeNumber || 0, episodeTitle: episode?.episodeTitle || '',
           videoCount: videoCounts.get(item.fid) || 0
         };
@@ -1010,10 +1026,10 @@ export class QuarkGateway {
     return category !== 'movie' && numbered.length ? numbered : episodes;
   }
 
-  async #createSharePlaybackSession({ shareUrl, title, passcode = '' }, user) {
+  async #createSharePlaybackSession({ shareUrl, title, passcode = '', episodeFid = '' }, user) {
     const cookie = this.#requireCookie();
     const share = await this.#resolveShareCredentials({ shareUrl, passcode, cookie });
-    const episodes = await this.#walkShareDirectory({ pwdId: share.pwdId, stoken: share.stoken, cookie });
+    const episodes = await this.#walkShareDirectory({ pwdId: share.pwdId, stoken: share.stoken, cookie, requestedEpisodeFid: episodeFid });
     if (!episodes.length) {
       throw new QuarkApiError('这个分享目录中没有找到可播放的视频文件', {
         code: 'QUARK_VIDEO_NOT_FOUND',
@@ -1393,10 +1409,11 @@ export class QuarkGateway {
     for (let redirect = 0; redirect < 4; redirect += 1) {
       const parsed = new URL(currentUrl);
       const headers = {
-        'Accept': '*/*',
-        'User-Agent': requestProfile === 'tv'
+        'Accept': requestProfile === 'thumbnail' ? 'image/*' : '*/*',
+        // Signed thumbnail CDN URLs reject the playback Referer/profile.
+        ...(requestProfile === 'thumbnail' ? {} : { 'User-Agent': requestProfile === 'tv'
           ? 'Mozilla/5.0 (Linux; U; Android 13; zh-cn; M2004J7AC Build/UKQ1.231108.001) AppleWebKit/533.1 (KHTML, like Gecko) Mobile Safari/533.1'
-          : QUARK_DESKTOP_USER_AGENT,
+          : QUARK_DESKTOP_USER_AGENT }),
         ...(requestProfile === 'web' ? { Referer: 'https://pan.quark.cn/' } : {})
       };
       if (rangeHeader) headers.Range = rangeHeader;
@@ -1622,7 +1639,7 @@ export class QuarkGateway {
     return status;
   }
 
-  async #walkShareDirectory({ pwdId, stoken, cookie, title = '', category, rawEpisodes = false }) {
+  async #walkShareDirectory({ pwdId, stoken, cookie, title = '', category, rawEpisodes = false, requestedEpisodeFid = '' }) {
     const queue = [{ fid: '0', path: title }];
     const visited = new Set();
     const files = [];
@@ -1659,6 +1676,15 @@ export class QuarkGateway {
     if (rawEpisodes) return files.filter(item => !ancillaryVideoPattern.test(item.file_name || '')
       && !isAncillaryVideoPath(`${item.source_path}/${item.file_name}`)).map(serializeEpisode);
     const episodes = normalizePlaybackEpisodes(files);
+    if (requestedEpisodeFid) {
+      const selected = files.find(item => item.fid === requestedEpisodeFid);
+      if (!selected) throw new QuarkApiError('所选视频已不存在，请刷新文件列表', { code: 'EPISODE_NOT_FOUND', statusCode: 404 });
+      if (!episodes.some(item => item.fid === requestedEpisodeFid)) {
+        const exact = serializeEpisode(selected);
+        const alternate = exact.episodeNumber > 0 ? episodes.findIndex(item => episodeKey(item) === episodeKey(exact)) : -1;
+        if (alternate >= 0) episodes.splice(alternate,1,exact); else episodes.push(exact);
+      }
+    }
     const numbered = episodes.filter(episode => episode.episodeNumber > 0);
     return category && category !== 'movie' && numbered.length ? numbered : episodes;
   }
@@ -2497,6 +2523,7 @@ export class QuarkGateway {
   }
 
   #cleanupSessions() {
+    this.shareThumbnails.cleanup();
     const threshold = Date.now() - SESSION_TTL_MS;
     for (const [sessionId, session] of this.sessions.entries()) {
       if (session.touchedAt < threshold) this.sessions.delete(sessionId);

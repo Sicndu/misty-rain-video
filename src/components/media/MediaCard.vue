@@ -52,7 +52,7 @@ const categoryLabels: Record<MediaItem['category'], string> = {
           <template v-if="(media.newEpisodeCount || 0) > 0">新增 {{ media.newEpisodeCount }} {{ media.category === 'movie' ? '个视频' : '集' }}</template>
           <template v-else-if="updateFeedback">{{ updateFeedback.label }}</template>
           <template v-else-if="media.category !== 'movie' && media.latestEpisodeNumber">更新至 {{ media.latestEpisodeNumber }} 集</template>
-          <template v-else>{{ media.status || categoryLabels[media.category] }}</template>
+          <template v-else>{{ ['已入库', '已收录'].includes(media.status || '') ? '已收藏' : media.status || categoryLabels[media.category] }}</template>
         </span>
       </span>
     </button>

@@ -31,6 +31,8 @@ export interface QuarkShareEntry {
   episodeTitle: string;
   videoCount: number;
   isSubtitle?: boolean;
+  thumbnail?: string;
+  updatedAt?: string;
 }
 
 export interface QuarkShareDetails {
@@ -38,6 +40,8 @@ export interface QuarkShareDetails {
   videoCount: number;
   episodeCount: number;
   entries: QuarkShareEntry[];
+  totalSize?: number;
+  sizeFormatted?: string;
 }
 
 export interface PlaybackSource {
@@ -144,11 +148,11 @@ const request = async <T>(url: string, init?: RequestInit): Promise<T> => {
 
 export class QuarkStreamService {
   static getShareDetails(shareUrl: string, passcode = ''): Promise<QuarkShareDetails> {
-    return request('/api/quark/share-details', {
+    return request<QuarkShareDetails>('/api/quark/share-details', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ shareUrl, passcode })
-    });
+    }).then(details => ({ ...details, entries: details.entries.map(entry => ({ ...entry, thumbnail: entry.thumbnail ? withAppBase(entry.thumbnail) : '' })) }));
   }
 
   static createTvAuthSession(): Promise<{ sessionId: string; qrCode: string; expiresAt: string }> {
@@ -179,7 +183,7 @@ export class QuarkStreamService {
     }
   }
 
-  static createPlaybackSession(input: { quarkFid?: string; shareUrl?: string; title?: string; passcode?: string }): Promise<QuarkPlaybackSession> {
+  static createPlaybackSession(input: { quarkFid?: string; shareUrl?: string; title?: string; passcode?: string; episodeFid?: string }): Promise<QuarkPlaybackSession> {
     return request<QuarkPlaybackSession>('/api/player/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

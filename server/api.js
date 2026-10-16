@@ -51,7 +51,7 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
     credentialStore,
     posterService: new PosterService(dataDir, {
       resolveThumbnail: (item, user) => quarkGateway.getLibraryThumbnail(item.quarkFid, user),
-      fetchThumbnail: (url, signal) => quarkGateway.fetchMedia(url, undefined, 'web', '', { signal })
+      fetchThumbnail: (url, signal) => quarkGateway.fetchMedia(url, undefined, 'thumbnail', '', { signal })
     }),
     resourceSearch: new ResourceSearchService({ dataDir, exclude: item => shareAvailability.isUnavailable(item.url) }),
     shareAvailability,
@@ -397,11 +397,22 @@ export const handleApiRequest = async (request, response, context) => {
 
     if (pathname === '/api/quark/share-details' && request.method === 'POST') {
       const input = await readRequestBody(request);
-      try { sendSuccess(response, await context.quarkGateway.getShareDetails(input)); }
+      try { sendSuccess(response, await context.quarkGateway.getShareDetails(input, user)); }
       catch (error) {
         if (error?.code === 'QUARK_SHARE_UNAVAILABLE') context.shareAvailability?.markUnavailable(input.shareUrl);
         throw error;
       }
+      return true;
+    }
+
+    const shareThumbnail = pathname.match(/^\/api\/quark\/share-thumbnails\/([a-zA-Z0-9_-]+)$/);
+    if (shareThumbnail && ['GET','HEAD'].includes(request.method)) {
+      const asset = await context.quarkGateway.shareThumbnails.read(shareThumbnail[1], user.username);
+      response.statusCode = 200;
+      response.setHeader('Content-Type',asset.contentType);
+      response.setHeader('Content-Length',asset.bytes.length);
+      response.setHeader('Cache-Control','private, no-store');
+      response.end(request.method === 'HEAD' ? undefined : asset.bytes);
       return true;
     }
 

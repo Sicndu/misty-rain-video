@@ -47,6 +47,8 @@ async function compile(entry, name) {
     }); } }] });
   return import(pathToFileURL(outfile));
 }
+const HistoryPage = (await compile('src/components/media/HistoryPage.vue', 'history-page')).default;
+const Details = (await compile('src/components/quark/QuarkResourceDetails.vue', 'resource-details')).default;
 const Account = (await compile('src/components/auth/AccountPage.vue', 'account')).default;
 const TitleEditor = (await compile('src/components/media/MediaTitleEditor.vue', 'title-editor')).default;
 const Sidebar = (await compile('src/components/layout/DesktopSidebar.vue', 'sidebar')).default;
@@ -137,18 +139,35 @@ test('每周放送按所选星期展示，未评分作品没有零分标签', as
   } finally { app.unmount(); }
 });
 
-test('搜源结果的播放操作携带影片、提取码和分类，不触发全部保存', async () => {
+test('打开资源浏览文件后播放所点文件，保留片名、分类和提取码，不触发收藏', async t => {
+  t.mock.method(globalThis,'fetch',async()=>Response.json({code:0,data:{title:'测试资源',videoCount:1,episodeCount:1,entries:[{fid:'e2',name:'第2集.mp4',parentFid:'0',ancestorFids:[],isVideo:true,isDirectory:false,size:100,sizeFormatted:'100 MB',episodeNumber:2,episodeTitle:'第2集',videoCount:0}]}}));
   const resource = { id: 'resource', title: '推荐影片 2026 1080p', url: 'https://pan.quark.cn/s/fixture', password: '1234', quality: '1080P', datetime: '2026-10-16', linkStatus: 'available', type: 'quark' };
-  let playback, saves = 0;
+  let playback, saves = 0, plays = 0;
   const app = mount(ResourceModal, { isOpen: true, isAnalyzing: false, media: discoveryMedia(discovered), currentCategory: 'tv', quarkResources: [resource], searchKeyword: discovered.title,
-    onPlayResource: (...args) => { playback = args; }, onSaveToCards: () => { saves++; } });
+    onPlayResource: (...args) => { playback = args; plays++; }, onSaveToCards: () => { saves++; } });
   try {
     await flush(); assert.equal(document.querySelector('[aria-label="重新输入片名搜索资源"]').value, discovered.title);
-    assert.equal(document.querySelector('[aria-label="保存分类"]').value, 'movie');
-    document.querySelector('.btn-play').click();
+    assert.equal(document.querySelector('.btn-play'),null);
+    document.querySelector('.resource-item').click(); await flush();
+    assert.equal(document.querySelector('[aria-label="收藏分类"]').value,'movie');
+    document.querySelector('.file-open').click();
+    assert.equal(playback[3],'e2'); assert.equal(plays,1);
     assert.equal(playback[0].catalogId, discovered.id); assert.equal(playback[1].password, '1234'); assert.equal(playback[2], 'movie');
     assert.equal(saves, 0);
   } finally { app.unmount(); }
+});
+
+test('file browser skips wrapper folders, separates checkbox selection from play, preserves folder scope and disables empty saves', async () => {
+ const entries=[{fid:'wrap',parentFid:'0',ancestorFids:[],isDirectory:true,name:'影片目录',videoCount:2,size:200,sizeFormatted:'200 MB'},
+  {fid:'season',parentFid:'wrap',ancestorFids:['wrap'],isDirectory:true,name:'第一季',videoCount:2,size:200,sizeFormatted:'200 MB'},
+  ...[1,2].map(n=>({fid:'ep'+n,parentFid:'season',ancestorFids:['wrap','season'],isVideo:true,isDirectory:false,name:n+'.mp4',size:100,sizeFormatted:'100 MB',thumbnail:'/api/test-thumbnail',updatedAt:'2026-10-16T00:00:00Z'}))];
+ let saved,played=0;const props=reactive({resource:{url:'https://pan.quark.cn/s/fixture'},initialDetails:{title:'目录',entries,videoCount:2,episodeCount:2},onSave:fids=>saved=fids,onPlay:()=>played++});const app=mount(Details,props);
+ try{await flush();assert.equal(document.querySelectorAll('.file-row').length,2);assert.match(document.querySelector('.breadcrumbs').textContent,/第一季/);assert.ok(document.querySelector('.file-row img'));assert.match(document.querySelector('.file-size').textContent,/100 MB/);
+ document.querySelector('.file-row input').click();await nextTick();assert.equal(played,0);document.querySelector('.save-selected').click();assert.deepEqual(saved,['ep1']);
+ [...document.querySelectorAll('.breadcrumbs button')].find(b=>b.textContent==='全部文件').click();await nextTick();document.querySelector('.file-row input').click();await nextTick();document.querySelector('.save-selected').click();assert.deepEqual(saved,['wrap']);
+ }finally{app.unmount()}
+ const empty=mount(Details,{resource:{url:'https://pan.quark.cn/s/empty'},initialDetails:{title:'空',entries:[],videoCount:0,episodeCount:0}});
+ try{await flush();assert.equal(document.querySelector('.save-all').disabled,true);assert.equal(document.querySelector('.save-selected').disabled,true);}finally{empty.unmount()}
 });
 
 test('直接播放保留发现元数据和提取码，不把替换片库或任意网址当作播放分享', () => {
@@ -162,17 +181,17 @@ test('直接播放保留发现元数据和提取码，不把替换片库或任�
 });
 
 test('观看记录只展示一次，带进度、继续播放与删除；展开不会复制未看完记录', async () => {
-  const entries = Array.from({ length: 7 }, (_, index) => ({ id: `history-${index}`, media: { ...media, title: `影片${index}` }, episodeFid: 'ep1', episodeNumber: 1, position: 120, duration: 600, completed: index === 0, updatedAt: '2026-10-14' }));
+  const entries = Array.from({ length: 22 }, (_, index) => ({ id: `history-${index}`, media: { ...media, title: `影片${index}` }, episodeFid: 'ep1', episodeNumber: 1, position: 120, duration: 600, completed: index === 0, updatedAt: '2026-10-14' }));
   let played, deleted;
-  const app = mount(Account, { user: user('admin'), history: entries, onPlayHistory: entry => { played = entry; }, onDeleteHistory: id => { deleted = id; } });
+  const app = mount(HistoryPage, { history: entries, onPlay: entry => { played = entry; }, onDelete: id => { deleted = id; } });
   try {
     assert.equal(document.querySelector('.continue-history-section'), null);
-    assert.equal(document.querySelectorAll('.history-row').length, 5);
+    assert.equal(document.querySelectorAll('.history-row').length, 20);
     assert.equal(document.querySelector('.history-play').textContent, '再看');
     assert.equal(document.querySelector('.history-progress i').style.width, '20%');
-    document.querySelector('.history-toggle').click(); await nextTick();
-    assert.equal(document.querySelectorAll('.history-row').length, 7);
-    assert.equal(new Set([...document.querySelectorAll('.history-copy strong')].map(item => item.textContent)).size, 7);
+    document.querySelector('.load-more').click(); await nextTick();
+    assert.equal(document.querySelectorAll('.history-row').length, 22);
+    assert.equal(new Set([...document.querySelectorAll('.history-copy strong')].map(item => item.textContent)).size, 22);
     document.querySelectorAll('.history-main')[1].click(); assert.equal(played.id, 'history-1');
     document.querySelectorAll('.history-delete')[1].click(); assert.equal(deleted, 'history-1');
   } finally { app.unmount(); }
@@ -203,10 +222,11 @@ test('名称编辑保留原值，空名称不能提交，失败可重试，提�
 test('settings show no read-only identity; advanced configuration is an admin-only inner page', async t => {
   mockApi(t);
   for (const role of ['admin', 'user']) {
-    const app = mount(Account, { user: user(role), history: [] });
+    const app = mount(Account, { user: user(role) });
     try {
       assert.doesNotMatch(document.body.textContent, /private_name|管理员账户|片库账户/);
       assert.equal(document.querySelectorAll('.theme-switch').length, 1);
+      assert.equal(document.querySelector('.history-list'),null);
       assert.equal(document.querySelector('.auth-section'), null);
       const advanced = [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '高级配置');
       assert.equal(Boolean(advanced), role === 'admin');
@@ -239,7 +259,7 @@ test('desktop library has one selected category and its library heading is not a
     assert.equal(document.querySelectorAll('.desktop-sidebar .active').length, 1);
     assert.equal(document.querySelectorAll('[aria-current="page"]').length, 1);
     assert.match(document.querySelector('[aria-current="page"]').textContent, /电影/);
-    assert.equal(document.querySelector('.nav-label').textContent, '我的片库');
+    assert.equal(document.querySelector('.nav-label').textContent, '收藏 / 追更');
     assert.ok(![...document.querySelectorAll('nav button')].some(button => button.textContent.trim() === '我的片库'));
   } finally { app.unmount(); }
 });

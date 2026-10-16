@@ -72,7 +72,7 @@ const visibleItems = (section: DiscoverySection) => section.id === 'calendar' ? 
       <nav v-if="section.id === 'calendar'" class="weekdays" aria-label="放送日期"><button v-for="(day, index) in ['一', '二', '三', '四', '五', '六', '日']" :key="day" type="button" :aria-pressed="weekday === index + 1" @click="weekday = index + 1">周{{ day }}</button></nav>
       <div v-if="visibleItems(section).length" class="discovery-posters" :class="{ shelf: category === 'all' }">
         <button v-for="item in visibleItems(section)" :key="item.id" class="discovery-card" type="button" :aria-label="`${inLibrary.has(item.id) ? '播放' : '查找片源'}：${item.title}${item.year ? `（${item.year}）` : ''}`" @click="emit('select', item)">
-          <span class="discovery-cover"><MediaPoster :src="item.poster" alt="" loading="lazy" decoding="async" /><span v-if="inLibrary.has(item.id)" class="library-badge">片库已有</span><span class="poster-action" aria-hidden="true">{{ inLibrary.has(item.id) ? '播放' : '找片源' }}<ChevronRight /></span></span>
+          <span class="discovery-cover"><MediaPoster :src="item.poster" alt="" loading="lazy" decoding="async" /><span v-if="inLibrary.has(item.id)" class="library-badge">已收藏</span><span class="poster-action" aria-hidden="true">{{ inLibrary.has(item.id) ? '播放' : '找片源' }}<ChevronRight /></span></span>
           <strong class="discovery-title">{{ item.title }}</strong>
           <span class="discovery-meta"><span>{{ item.subtitle || item.year }}</span><span v-if="item.rating !== null" class="discovery-rating"><Star aria-hidden="true" />{{ item.rating.toFixed(1) }}</span></span>
         </button>

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { Check, RefreshCw, Search, SlidersHorizontal, X } from '@lucide/vue';
+import { ArrowLeft, ChevronRight, RefreshCw, Search, X } from '@lucide/vue';
+import ResourceThumbnail from './ResourceThumbnail.vue';
+import type { QuarkShareDetails } from '../../services/quarkStreamService';
 import QuarkResourceDetails from './QuarkResourceDetails.vue';
 import type { MediaItem, CategoryType } from '../../types/media';
 import type { ResourceItem } from '../../types/search';
-import SkeletonCard from '../common/SkeletonCard.vue';
 import type { LibrarySaveFeedback } from '../../services/libraryFeedback';
 import { useDialog } from '../../composables/useDialog';
 
@@ -29,7 +30,7 @@ const emit = defineEmits<{
   (e: 'resource-unavailable', url: string): void;
   (e: 'open-auth-settings'): void;
   (e: 'transfer', res: ResourceItem): void;
-  (e: 'play-resource', media: MediaItem, resource: ResourceItem, category: CategoryType): void;
+  (e: 'play-resource', media: MediaItem, resource: ResourceItem, category: CategoryType, episodeFid?: string): void;
   (e: 'retry-search'): void;
   (e: 'search', keyword: string): void;
   (e: 'save-to-cards', media: MediaItem, targetCategory: CategoryType, bestRes?: ResourceItem, selectedFids?: string[]): void;
@@ -145,7 +146,19 @@ const filteredResources = computed(() => {
 });
 const visibleResources = computed(() => filteredResources.value.slice(0, visibleCount.value));
 const hasMoreResources = computed(() => visibleResources.value.length < filteredResources.value.length);
-const bestQuarkResource = computed(() => rankedQuarkResources.value[0]);
+const previews = ref(new Map<string, QuarkShareDetails>());
+const resourceKey = (resource: ResourceItem) => `${resource.url}\0${resource.password || ''}`;
+const preview = (resource: ResourceItem) => previews.value.get(resourceKey(resource));
+const previewImage = (resource: ResourceItem) => preview(resource)?.entries.find(item => item.isVideo && item.thumbnail)?.thumbnail;
+const dateText = (value: string) => Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleDateString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit'}) : '';
+const resourceMeta = (resource: ResourceItem) => {
+  const data = preview(resource);
+  const quality = /^(?:4K|8K|1080P|720P|HDR|杜比)/i.test(resource.quality || '') ? resource.quality : '';
+  return [data ? data.videoCount ? `${data.videoCount} 个视频` : '无可播放视频' : quality,
+    data?.sizeFormatted || resource.size, dateText(resource.datetime)].filter(Boolean).join(' · ');
+};
+const cacheDetails = (data: QuarkShareDetails) => { if (detailResource.value) previews.value.set(resourceKey(detailResource.value),data); };
+const playFile = (fid: string) => { if (props.media && detailResource.value && !replacingSource.value) emit('play-resource',props.media,detailResource.value,targetCategory.value,fid); };
 
 watch([() => props.media?.id, () => props.currentCategory], () => {
   targetCategory.value = props.media?.category || props.currentCategory;
@@ -188,226 +201,59 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
 </script>
 
 <template>
-  <div
-    class="liquid-dialog-backdrop"
-    ref="dialogRef"
-    :class="{ active: isOpen }"
-    role="dialog"
-    aria-modal="true"
-    aria-label="选择网盘资源"
-    @keydown.esc.stop="requestClose"
-    @click.self="requestClose"
-  >
-    <div class="liquid-dialog glass-rim" v-if="media" :aria-busy="isSaving || isAnalyzing">
-      <div class="dialog-header">
-        <select v-model="targetCategory" class="category-picker" aria-label="保存分类" :disabled="isSaving">
-          <option v-for="category in categories" :key="category.value" :value="category.value">{{ category.label }}</option>
-        </select>
-        <button class="btn-close-dialog" type="button" aria-label="关闭资源选择" :disabled="isSaving" @click="requestClose"><X aria-hidden="true" /></button>
-      </div>
-
-      <form v-if="!detailResource" class="result-search" role="search" @submit.prevent="submitSearch">
-        <Search class="result-search-icon" aria-hidden="true" />
-        <input
-          v-model="searchQuery"
-          type="search"
-          inputmode="search"
-          enterkeyhint="search"
-          autocomplete="off"
-          aria-label="重新输入片名搜索资源"
-          placeholder="搜索片名"
-          :disabled="isAnalyzing || isSaving"
-        />
-        <button
-          v-if="searchQuery"
-          type="button"
-          class="clear-search-button"
-          aria-label="清空搜索内容"
-          :disabled="isAnalyzing || isSaving"
-          @click="searchQuery = ''"
-        >
-          <X aria-hidden="true" />
-        </button>
-        <button
-          type="submit"
-          class="submit-search-button"
-          :disabled="isAnalyzing || isSaving || !searchQuery.trim()"
-        >
-          {{ isAnalyzing ? '检索中' : '搜索' }}
-        </button>
-      </form>
-
-      <div v-if="!detailResource && !isAnalyzing && !searchError" class="result-summary" aria-live="polite">
-        <span>找到</span>
-        <strong>{{ rankedQuarkResources.length }}</strong>
-        <span>条资源</span>
-      </div>
-      <p v-if="!detailResource && !isAnalyzing && searchNotice" class="result-summary" role="status">{{ searchNotice }}</p>
-
-      <div v-if="!detailResource && !isAnalyzing" class="result-filters" role="radiogroup" aria-label="资源筛选">
-        <SlidersHorizontal aria-hidden="true" />
-        <button
-          v-for="option in filterOptions"
-          :key="option.value"
-          type="button"
-          class="filter-chip"
-          :class="{ active: resultFilter === option.value }"
-          role="radio"
-          :aria-checked="resultFilter === option.value"
-          :disabled="isSaving"
-          @click="resultFilter = option.value"
-        >
-          {{ option.label }}
-        </button>
-      </div>
-
-      <!-- 列表内容 -->
+  <div ref="dialogRef" class="resource-backdrop" :class="{ active: isOpen }" role="dialog" aria-modal="true" aria-label="选择网盘资源" @click.self="requestClose">
+    <section v-if="media" class="resource-dialog" :aria-busy="isSaving">
+      <header class="resource-header">
+        <template v-if="detailResource"><button type="button" class="icon-button" aria-label="返回资源列表" :disabled="isSaving" @click="detailResource = null"><ArrowLeft /></button><h2 :title="cleanTitle(detailResource.title)">{{ cleanTitle(detailResource.title) }}</h2><select v-model="targetCategory" class="category-picker" aria-label="收藏分类" :disabled="isSaving"><option v-for="category in categories" :key="category.value" :value="category.value">{{ category.label }}</option></select></template>
+        <form v-else class="result-search" role="search" @submit.prevent="submitSearch"><Search aria-hidden="true" /><input v-model="searchQuery" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" aria-label="重新输入片名搜索资源" placeholder="搜索资源" :disabled="isAnalyzing || isSaving" /><button v-if="searchQuery" type="button" class="icon-button clear-search" aria-label="清空搜索内容" :disabled="isAnalyzing || isSaving" @click="searchQuery = ''"><X /></button><button type="submit" class="search-submit" :disabled="isAnalyzing || isSaving || !searchQuery.trim()">搜索</button></form>
+        <button type="button" class="icon-button close-dialog" aria-label="关闭资源选择" :disabled="isSaving" @click="requestClose"><X /></button>
+      </header>
+      <div v-if="!detailResource" class="resource-toolbar"><span>{{ rankedQuarkResources.length }} 个资源</span><span v-if="searchPending || isAnalyzing" class="search-status" role="status"><i></i>搜索中</span><select v-model="resultFilter" aria-label="资源筛选" :disabled="isSaving"><option v-for="option in filterOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></div>
       <div class="dialog-body" :class="{ 'showing-details': detailResource }" @scroll.passive="handleBodyScroll">
-        <QuarkResourceDetails v-if="detailResource"
-          :resource="detailResource" :is-saving="isSaving" :replacing-source="replacingSource"
-          :save-error="failedResourceId === detailResource.id ? saveError : null"
-          @back="detailResource = null" @unavailable="emit('resource-unavailable', $event.url); detailResource = null" @open-auth-settings="emit('open-auth-settings')"
-          @save="saveDetails"
-        />
-        <template v-else-if="isAnalyzing">
-          <div class="loading-bar">
-            <div class="mini-spinner"></div>
-            <span>正在检索《{{ searchKeyword || media.title }}》网盘资源...</span>
-          </div>
-          <SkeletonCard v-for="i in 3" :key="i" />
-        </template>
-
+        <QuarkResourceDetails v-if="detailResource" :resource="detailResource" :initial-details="preview(detailResource)" :is-saving="isSaving" :replacing-source="replacingSource" :save-error="failedResourceId === detailResource.id ? saveError : null" @loaded="cacheDetails" @back="detailResource = null" @unavailable="emit('resource-unavailable',$event.url); detailResource = null" @open-auth-settings="emit('open-auth-settings')" @save="saveDetails" @play="playFile" />
+        <div v-else-if="isAnalyzing && !visibleResources.length" role="status" aria-label="正在搜索资源"><div v-for="i in 5" :key="i" class="resource-skeleton"></div></div>
         <template v-else>
-          <div v-if="visibleResources.length > 0" class="resource-rows">
-            <div
-              v-for="res in visibleResources"
-              :key="res.id"
-              class="liquid-resource-row"
-            >
-              <div class="row-left">
-                <div class="row-info">
-                  <div class="row-title" :title="cleanTitle(res.title)">
-                    <span v-if="res.id === bestQuarkResource?.id" class="recommended-badge">
-                      <Check aria-hidden="true" />推荐
-                    </span>
-                    {{ cleanTitle(res.title) }}
-                  </div>
-                  <div v-if="saveError && failedResourceId === res.id" class="inline-feedback resource-save-error" role="alert">
-                    <strong>{{ saveError.title }}</strong>
-                    <p>{{ saveError.message }}</p>
-                    <button v-if="saveError.needsAuth" type="button" @click="emit('open-auth-settings')">前往认证设置</button>
-                  </div>
-                  <div class="row-tags">
-                    <span class="tag-badge">{{ res.quality }}</span>
-                    <span v-if="res.linkStatus === 'unknown'" class="tag-meta">链接待确认</span>
-                    <span v-else-if="res.linkStatus === 'restricted'" class="tag-meta">需要提取码</span>
-                    <span v-if="res.size" class="tag-meta">{{ res.size }}</span>
-                    <span v-if="res.password" class="tag-meta">提取码已自动识别</span>
-                    <span class="tag-meta">{{ res.datetime }}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="row-right">
-                <button v-if="!replacingSource" type="button" class="btn-action btn-play" :disabled="isSaving" @click="emit('play-resource', media, res, targetCategory)">播放</button>
-                <button type="button" class="btn-action btn-details" :disabled="isSaving" @click="detailResource = res">查看资源</button>
-                <button
-                  class="btn-action btn-transfer"
-                  :class="{ 'is-saving': isSaving && savingResourceId === res.id }"
-                  :disabled="isSaving"
-                  @click="emit('save-to-cards', media, targetCategory, res)"
-                >
-                  {{ isSaving && savingResourceId === res.id ? (replacingSource ? '正在替换…' : '正在添加…') : failedResourceId === res.id && saveError ? '重试' : replacingSource ? '全部替换' : '全部保存' }}
-                </button>
-              </div>
-            </div>
-
-            <button v-if="hasMoreResources" type="button" class="load-more-button" :disabled="isSaving" @click="loadMore">
-              加载更多 · 还有 {{ filteredResources.length - visibleResources.length }} 条
-            </button>
-          </div>
-
-          <div v-else class="empty-notice" role="status">
-            <span>{{ searchError || (searchPending ? '仍在搜索其他来源，找到结果后会自动显示。' : resultFilter === 'recommended' ? '暂时没有可用资源，可以修改上方片名重新搜索。' : '当前筛选下没有结果，试试“推荐”。') }}</span>
-            <button v-if="searchError" type="button" class="retry-search-button" :disabled="isSaving" @click="emit('retry-search')">
-              <RefreshCw aria-hidden="true" />
-              重新检索
-            </button>
-            <button v-else-if="resultFilter !== 'recommended'" type="button" class="retry-search-button" @click="resultFilter = 'recommended'">查看全部候选资源</button>
-          </div>
+          <ul v-if="visibleResources.length" class="resource-list" aria-label="网盘资源列表"><li v-for="res in visibleResources" :key="res.id"><button type="button" class="resource-item" :disabled="isSaving" :aria-label="`打开资源 ${cleanTitle(res.title)}`" @click="detailResource = res"><ResourceThumbnail :src="previewImage(res)" directory /><span class="source-copy"><strong>{{ cleanTitle(res.title) }}</strong><small v-if="resourceMeta(res)">{{ resourceMeta(res) }}</small><small v-if="res.linkStatus === 'restricted'">需要提取码</small></span><ChevronRight class="source-arrow" aria-hidden="true" /></button></li></ul>
+          <div v-else class="empty-notice" :role="searchError ? 'alert' : 'status'"><p>{{ searchError || (searchPending ? '正在查找可用资源…' : resultFilter === 'recommended' ? '暂无可用资源' : '没有符合筛选条件的资源') }}</p><button v-if="searchError" type="button" :disabled="isSaving" @click="emit('retry-search')"><RefreshCw />重试</button><button v-else-if="resultFilter !== 'recommended'" type="button" @click="resultFilter = 'recommended'">显示全部</button></div>
+          <button v-if="hasMoreResources" type="button" class="load-more" :disabled="isSaving" @click="loadMore">加载更多</button>
         </template>
       </div>
-    </div>
+    </section>
   </div>
 </template>
-
 <style scoped>
-.btn-play { color: var(--accent-ink) !important; background: var(--liquid-accent) !important; border-color: transparent !important; }
-.liquid-dialog-backdrop { position: fixed; inset: 0; z-index: 1400; display: flex; align-items: center; justify-content: center; padding: 24px; opacity: 0; visibility: hidden; }
-.liquid-dialog-backdrop.active { opacity: 1; visibility: visible; }
-.liquid-dialog { display: flex; width: min(820px, 100%); max-height: calc(100dvh - 48px); min-height: 0; flex-direction: column; overflow: hidden; border: var(--glass-border); border-radius: 24px; color: var(--text-primary); background: var(--glass-sheet-material); backdrop-filter: var(--glass-blur-heavy); -webkit-backdrop-filter: var(--glass-blur-heavy); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-lg); }
-.dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; flex-shrink: 0; }
-.category-picker { min-height: 44px; max-width: 160px; padding: 0 12px; border: 0; border-radius: 12px; color: var(--text-secondary); background: var(--surface-2); font-size: .88rem; }
-.btn-close-dialog { display: grid; width: 44px; height: 44px; place-items: center; border: var(--glass-border); border-radius: 50%; color: var(--text-secondary); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
-.btn-close-dialog svg { width: 20px; height: 20px; }
-.result-search { display: flex; align-items: center; gap: 6px; margin: 0 24px; min-height: 48px; padding: 3px 4px 3px 15px; border: 1px solid var(--divider); border-radius: 14px; background: var(--glass-bg); flex-shrink: 0; }
-.result-search-icon { width: 19px; height: 19px; color: var(--text-tertiary); flex-shrink: 0; }
-.result-search input { width: 100%; min-width: 0; flex: 1; min-height: 44px; padding: 6px; border: 0; color: var(--text-primary); background: transparent; font-size: 16px; outline: none; }
-.result-search:focus-within { box-shadow: 0 0 0 3px var(--liquid-accent-subtle); }
+.resource-backdrop { position: fixed; inset: 0; z-index: 1400; display: none; align-items: center; justify-content: center; padding: 24px; background: rgb(0 0 0 / .45); }
+.resource-backdrop.active { display: flex; }
+.resource-dialog { display: flex; width: min(1040px,100%); height: min(760px,calc(100dvh - 48px)); min-height: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--divider); border-radius: 20px; color: var(--text-primary); background: var(--liquid-canvas); }
+.resource-header { display: flex; align-items: center; gap: 10px; padding: 16px 20px; flex-shrink: 0; }
+.resource-header h2 { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .95rem; font-weight: 600; }
+.icon-button { display: grid; width: 40px; height: 40px; flex: 0 0 40px; place-items: center; padding: 0; border: 0; border-radius: 8px; color: var(--text-secondary); background: transparent; }
+.icon-button svg { width: 20px; height: 20px; }
+.close-dialog:hover { background: var(--surface-2); }
+.result-search { display: flex; min-width: 0; flex: 1; align-items: center; gap: 5px; padding: 2px 4px 2px 12px; min-height: 46px; border: 1px solid var(--divider); border-radius: 10px; background: var(--surface-1); }
+.result-search > svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--text-tertiary); }
+.result-search input { width: 100%; flex: 1; min-width: 0; height: 40px; padding: 0 4px; border: 0; color: var(--text-primary); background: transparent; font-size: 16px; outline: none; }
 .result-search input::-webkit-search-cancel-button { -webkit-appearance: none; }
-.clear-search-button { display: grid; width: 44px; height: 44px; place-items: center; flex-shrink: 0; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; }
-.clear-search-button svg { width: 17px; height: 17px; }
-.submit-search-button { min-height: 40px; padding: 0 18px; border: 0; border-radius: 12px; flex-shrink: 0; color: var(--accent-ink); background: var(--liquid-accent); font-size: .84rem; font-weight: 650; }
-.result-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; flex-shrink: 0; padding: 16px 26px 3px; color: var(--text-tertiary); font-size: .75rem; }
-.result-summary strong { color: var(--text-primary); font-size: .92rem; }
-.result-filters { display: flex; align-items: center; gap: 6px; padding: 6px 24px 12px; overflow-x: auto; flex-shrink: 0; }
-.result-filters > svg { width: 18px; height: 18px; margin-right: 4px; color: var(--text-tertiary); flex-shrink: 0; }
-.filter-chip { min-height: 40px; padding: 0 16px; border: 1px solid transparent; border-radius: 9999px; color: var(--text-secondary); background: transparent; font-size: .8rem; flex-shrink: 0; }
-.filter-chip.active { color: var(--liquid-accent); border-color: rgb(255 255 255 / .14); background: var(--surface-elevated); box-shadow: var(--glass-shadow-sm); font-weight: 650; }
-.dialog-body { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 0 24px 24px; }
+.result-search:focus-within { border-color: var(--liquid-accent); }
+.search-submit { min-height: 40px; padding: 0 12px; border: 0; border-radius: 7px; color: var(--liquid-accent); background: transparent; font-size: .84rem; font-weight: 600; }
+.resource-toolbar { display: flex; align-items: center; gap: 12px; padding: 0 24px 8px; color: var(--text-tertiary); font-size: .76rem; }
+.resource-toolbar select { margin-left: auto; }
+.resource-toolbar select,.category-picker { min-height: 40px; max-width: 110px; padding: 0 4px; border: 0; color: var(--text-secondary); background: transparent; font-size: .82rem; }
+.search-status { display: flex; align-items: center; gap: 6px; font-size: .72rem; }
+.search-status i { width: 5px; height: 5px; border-radius: 50%; background: var(--liquid-accent); }
+.dialog-body { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 20px 20px; }
 .dialog-body.showing-details { display: flex; overflow: hidden; }
-.resource-rows { display: grid; gap: 0; }
-.liquid-resource-row { display: flex; align-items: center; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--divider); background: transparent; }
-.row-left { min-width: 0; flex: 1; }
-.row-info { min-width: 0; }
-.row-title { overflow-wrap: anywhere; color: var(--text-primary); font-size: .94rem; font-weight: 650; line-height: 1.5; }
-.recommended-badge { display: inline-flex; align-items: center; gap: 3px; margin-right: 6px; padding: 2px 6px; border-radius: 6px; color: var(--liquid-accent); background: var(--liquid-accent-subtle); font-size: .66rem; vertical-align: 1px; }
-.recommended-badge svg { width: 12px; height: 12px; }
-.row-tags { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 8px; color: var(--text-tertiary); font-size: .73rem; overflow-wrap: anywhere; }
-.tag-badge { padding: 1px 6px; border: 1px solid rgb(85 113 158 / .14); border-radius: 6px; color: var(--text-secondary); font-size: .67rem; }
-.row-right { display: flex; gap: 8px; flex-shrink: 0; }
-.btn-action { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 18px; border: 0; border-radius: 12px; color: var(--text-primary); background: var(--glass-bg-active); font-size: .82rem; font-weight: 600; transition: transform .15s, background .15s; }
-.btn-action:active { transform: scale(.98); }
-.btn-details { color: var(--liquid-accent); background: transparent; border: 1px solid var(--liquid-accent-subtle); }
-.btn-action:hover:not(:disabled) { background: var(--glass-bg-hover); }
-.resource-save-error { margin-top: 12px; }
-.empty-notice { padding: 40px 16px; color: var(--text-secondary); text-align: center; font-size: .9rem; }
-.empty-notice > span { display: block; }
-.retry-search-button, .load-more-button { display: inline-flex; min-height: 46px; align-items: center; justify-content: center; gap: 7px; margin-top: 16px; padding: 0 18px; border: var(--glass-border); border-radius: 9999px; color: var(--liquid-accent); background: var(--surface-elevated); font-size: .84rem; font-weight: 600; }
-.retry-search-button svg { width: 17px; height: 17px; }
-.load-more-button { width: 100%; margin-top: 0; }
-.loading-bar { display: flex; align-items: center; gap: 10px; padding: 24px 0; color: var(--text-secondary); font-size: .88rem; }
-.mini-spinner { width: 18px; height: 18px; flex-shrink: 0; border: 2px solid var(--surface-3); border-top-color: var(--liquid-accent); border-radius: 50%; animation: spin .8s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 640px) {
-  .liquid-dialog-backdrop { align-items: flex-end; padding: calc(var(--safe-area-top) + 10px) 0 0; }
-  .liquid-dialog { width: 100%; height: calc(100dvh - var(--safe-area-top) - 10px); max-height: 100%; border-radius: 28px 28px 0 0; }
-  .dialog-header { padding: 8px 16px; }
-  .category-picker { font-size: 16px; }
-  .result-search { margin: 0 16px; }
-  .result-summary { padding: 14px 20px 2px; }
-  .result-filters { padding: 4px 16px 10px; gap: 4px; }
-  .filter-chip { padding: 0 15px; }
-  .dialog-body { padding: 0 16px calc(24px + var(--safe-area-bottom)); }
-  .liquid-resource-row { align-items: stretch; flex-direction: column; gap: 14px; padding: 18px 4px; border-radius: 0; background: transparent; }
-  .row-right { width: 100%; }
-  .row-right .btn-action { flex: 1; padding: 0 10px; }
-  .row-title { font-size: .91rem; }
-}
-@media (max-height: 500px) and (orientation: landscape) {
-  .liquid-dialog { max-height: calc(100dvh - 20px); }
-  .dialog-header { padding-top: 10px; padding-bottom: 5px; }
-  .result-summary { padding-top: 4px; }
-  .result-filters { padding-bottom: 4px; }
-}
+.resource-list { list-style: none; padding: 0; margin: 0; }
+.resource-item { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 88px; padding: 12px 8px; border: 0; border-bottom: 1px solid var(--divider); color: var(--text-primary); background: transparent; text-align: left; }
+.resource-item:hover { background: var(--glass-bg-hover); }
+.source-copy { display: grid; min-width: 0; flex: 1; gap: 5px; }
+.source-copy strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: .88rem; line-height: 1.5; font-weight: 550; }
+.source-copy small { color: var(--text-tertiary); font-size: .72rem; }
+.source-arrow { width: 17px; height: 17px; color: var(--text-tertiary); flex-shrink: 0; }
+.resource-skeleton { height: 72px; margin: 12px 0; border-radius: 8px; background: var(--surface-2); }
+.empty-notice { display: grid; justify-items: center; gap: 14px; padding: 48px 12px; color: var(--text-tertiary); font-size: .85rem; }
+.empty-notice button,.load-more { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 14px; border: 0; color: var(--liquid-accent); background: transparent; }
+.empty-notice svg { width: 16px; height: 16px; }
+.load-more { width: 100%; margin-top: 12px; }
+@media(max-width:640px) { .resource-backdrop { align-items: flex-end; padding: calc(var(--safe-area-top) + 8px) 0 0; } .resource-dialog { width: 100%; height: calc(100dvh - var(--safe-area-top) - 8px); max-height: 100%; border-radius: 20px 20px 0 0; } .resource-header { padding: 10px 12px; gap: 4px; } .dialog-body { padding: 0 12px calc(16px + var(--safe-area-bottom)); } .resource-toolbar { padding: 0 20px 6px; } .resource-toolbar select,.category-picker { font-size: 16px; } .resource-item { gap: 12px; min-height: 84px; } }
 </style>
