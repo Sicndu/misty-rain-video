@@ -16,7 +16,9 @@ test('标准文件名保留季、上下集和扩展名，旧嵌套目录与新�
     video('S01E01.mkv'), video('S02E01.MP4'), video('E02上.mkv', { source_path: '测试剧/第二季' }),
     video('E03.mkv', { source_path: '测试剧/花絮' }), video('广告.mp4'), video('说明.txt')
   ]);
-  assert.equal(episodes.length, 3);
+  assert.equal(episodes.length, 5);
+  assert.ok(episodes.some(item => item.fileName === 'E03.mkv'));
+  assert.ok(episodes.some(item => item.fileName === '广告.mp4'));
   assert.equal(libraryVideoName(episodes[0]), '第02季 第02集（上）.mkv');
   assert.equal(libraryVideoName(episodes[1]), '第02季 第01集.MP4');
   const renamed = normalizePlaybackEpisodes(episodes.map(item => video(libraryVideoName(item))));

@@ -457,14 +457,32 @@ const preferEpisode = (left, right) => {
   return collator.compare(right.fileName, left.fileName) > 0 ? right : left;
 };
 
+const compareEpisodes = (left, right) => {
+  if ((left.seasonNumber || 1) !== (right.seasonNumber || 1)) return (right.seasonNumber || 1) - (left.seasonNumber || 1);
+  if (left.episodeNumber !== right.episodeNumber) return right.episodeNumber - left.episodeNumber;
+  return collator.compare(right.fileName, left.fileName);
+};
+
+// A playback directory is a file browser: numbering, names, size and duration
+// are presentation metadata, not reasons to hide a different video file.
 export const normalizePlaybackEpisodes = items => {
+  const unique = new Map();
+  for (const item of items.filter(isVideoFile)) {
+    if (!unique.has(item.fid)) unique.set(item.fid, serializeEpisode(item));
+  }
+  return [...unique.values()].sort(compareEpisodes);
+};
+
+// Cloud transfers/auto-follow retain their existing main-episode policy.
+// Keep that write-side decision out of resource previews and playback lists.
+const selectLibraryEpisodes = (items, category) => {
   const playable = items
     .filter(isVideoFile)
     .filter(item => !ancillaryVideoPattern.test(String(item.file_name || ''))
       && !isAncillaryVideoPath(`${item.source_path || ''}/${item.file_name || ''}`))
     .map(serializeEpisode);
   const numbered = playable.filter(episode => episode.episodeNumber > 0);
-  const candidates = numbered.length >= 2 ? numbered : playable;
+  const candidates = (numbered.length >= 2 || category && category !== 'movie') && numbered.length ? numbered : playable;
   const unique = new Map();
   for (const episode of candidates) {
     const key = episode.episodeNumber > 0
@@ -472,11 +490,7 @@ export const normalizePlaybackEpisodes = items => {
       : `file:${String(episode.fileName).normalize('NFKC').toLowerCase()}`;
     unique.set(key, unique.has(key) ? preferEpisode(unique.get(key), episode) : episode);
   }
-  return [...unique.values()].sort((left, right) => {
-    if ((left.seasonNumber || 1) !== (right.seasonNumber || 1)) return (right.seasonNumber || 1) - (left.seasonNumber || 1);
-    if (left.episodeNumber !== right.episodeNumber) return right.episodeNumber - left.episodeNumber;
-    return collator.compare(right.fileName, left.fileName);
-  });
+  return [...unique.values()].sort(compareEpisodes);
 };
 
 const publicUpdateStatus = status => ({
@@ -973,8 +987,7 @@ export class QuarkGateway {
       title: share.title,
       totalSize, sizeFormatted: formatBytes(totalSize),
       videoCount: entries.filter(isVideoFile).length,
-      episodeCount: entries.filter(item => isVideoFile(item) && !ancillaryVideoPattern.test(item.file_name)
-        && extractEpisodeNumber(item.file_name) > 0).length,
+      episodeCount: entries.filter(item => isVideoFile(item) && extractEpisodeNumber(item.file_name) > 0).length,
       entries: entries.map(item => {
         const video = isVideoFile(item);
         const episode = video ? serializeEpisode(item) : null;
@@ -1024,9 +1037,7 @@ export class QuarkGateway {
   }
 
   #selectedLibraryEpisodes(tree, selected, category) {
-    const episodes = normalizePlaybackEpisodes(entriesInSelection(tree, selected).map(item => ({ ...item, pdir_fid: item.parentFid })));
-    const numbered = episodes.filter(episode => episode.episodeNumber > 0);
-    return category !== 'movie' && numbered.length ? numbered : episodes;
+    return selectLibraryEpisodes(entriesInSelection(tree, selected).map(item => ({ ...item, pdir_fid: item.parentFid })), category);
   }
 
   async #createSharePlaybackSession({ shareUrl, title, passcode = '', episodeFid = '' }, user) {
@@ -1528,14 +1539,15 @@ export class QuarkGateway {
   }
 
   async #listShareFolder({ pwdId, stoken, parentFid, cookie }) {
-    const all = [];
+    const all = [], seen = new Set();
     for (let page = 1; page <= 100; page += 1) {
       const url = new URL(`${SHARE_HOST}/share/sharepage/detail`);
       url.searchParams.set('pwd_id', pwdId);
       url.searchParams.set('stoken', stoken);
       url.searchParams.set('pdir_fid', parentFid);
-      url.searchParams.set('page', String(page));
-      url.searchParams.set('size', '100');
+      url.searchParams.set('_page', String(page));
+      url.searchParams.set('_size', '100');
+      url.searchParams.set('_fetch_total', '1');
       const result = await this.#requestJson(url, { cookie, userAgent: QUARK_DESKTOP_USER_AGENT });
       if (result?.code !== 0) {
         const message = result?.message || result?.message_desc || '';
@@ -1544,11 +1556,19 @@ export class QuarkGateway {
           statusCode: 502
         });
       }
-      const list = arrayFrom(result?.data?.list);
-      all.push(...list);
-      if (list.length < 100) break;
+      if (!Array.isArray(result?.data?.list)) break;
+      const list = result.data.list, metadata = result?.metadata || {};
+      const total = Number.isSafeInteger(metadata._total) && metadata._total >= 0 ? metadata._total : null;
+      const pageSize = Number.isSafeInteger(metadata._size) && metadata._size > 0 ? metadata._size : 100;
+      const before = all.length;
+      for (const item of list) if (!seen.has(item.fid)) { seen.add(item.fid); all.push(item); }
+      // Providers may cap page size. Completion follows their declared total,
+      // never the assumption that fewer than 100 means the last page.
+      if (metadata._page !== undefined && Number(metadata._page) !== page) break;
+      if (total !== null ? all.length >= total : list.length < pageSize) return all;
+      if (all.length === before) break;
     }
-    return all;
+    throw new QuarkApiError('资源文件列表未读取完整，请刷新重试', { code: 'QUARK_SHARE_LIST_INCOMPLETE', statusCode: 502 });
   }
 
   async #walkDriveDirectory(rootFid, cookie) {
@@ -1656,44 +1676,20 @@ export class QuarkGateway {
       if (visited.has(parentFid)) continue;
       visited.add(parentFid);
 
-      for (let page = 1; page <= 100; page += 1) {
-        const url = new URL(`${SHARE_HOST}/share/sharepage/detail`);
-        url.searchParams.set('pwd_id', pwdId);
-        url.searchParams.set('stoken', stoken);
-        url.searchParams.set('pdir_fid', parentFid);
-        url.searchParams.set('page', String(page));
-        url.searchParams.set('size', '100');
-        const result = await this.#requestJson(url, { cookie, userAgent: QUARK_DESKTOP_USER_AGENT });
-        if (result?.code !== 0) {
-          const message = result?.message || result?.message_desc || '';
-          throw new QuarkApiError(message || '读取网盘分享目录失败', {
-            code: isShareUnavailableMessage(message) ? 'QUARK_SHARE_UNAVAILABLE' : 'QUARK_SHARE_LIST_FAILED',
-            statusCode: 502
-          });
-        }
-        const list = arrayFrom(result?.data?.list);
-        for (const item of list) {
-          if (item.file_type === 0 || item.dir) queue.push({ fid: item.fid, path: [sourcePath, item.file_name].filter(Boolean).join('/') });
-          else if (isVideoFile(item)) files.push({ ...item, source_path: sourcePath, pdir_fid: parentFid });
-        }
-        if (list.length < 100) break;
+      const list = await this.#listShareFolder({ pwdId, stoken, parentFid, cookie });
+      for (const item of list) {
+        if (item.file_type === 0 || item.dir) queue.push({ fid: item.fid, path: [sourcePath, item.file_name].filter(Boolean).join('/') });
+        else if (isVideoFile(item)) files.push({ ...item, source_path: sourcePath, pdir_fid: parentFid });
       }
     }
     if (queue.length || files.length >= 5000) throw new QuarkApiError('分享目录过大，请选择单部影片的分享', { code: 'LIBRARY_SCAN_LIMIT', statusCode: 422 });
     if (rawEpisodes) return files.filter(item => !ancillaryVideoPattern.test(item.file_name || '')
       && !isAncillaryVideoPath(`${item.source_path}/${item.file_name}`)).map(serializeEpisode);
-    const episodes = normalizePlaybackEpisodes(files);
-    if (requestedEpisodeFid) {
-      const selected = files.find(item => item.fid === requestedEpisodeFid);
-      if (!selected) throw new QuarkApiError('所选视频已不存在，请刷新文件列表', { code: 'EPISODE_NOT_FOUND', statusCode: 404 });
-      if (!episodes.some(item => item.fid === requestedEpisodeFid)) {
-        const exact = serializeEpisode(selected);
-        const alternate = exact.episodeNumber > 0 ? episodes.findIndex(item => episodeKey(item) === episodeKey(exact)) : -1;
-        if (alternate >= 0) episodes.splice(alternate,1,exact); else episodes.push(exact);
-      }
+    const episodes = category ? selectLibraryEpisodes(files, category) : normalizePlaybackEpisodes(files);
+    if (requestedEpisodeFid && !episodes.some(item => item.fid === requestedEpisodeFid)) {
+      throw new QuarkApiError('所选视频已不存在，请刷新文件列表', { code: 'EPISODE_NOT_FOUND', statusCode: 404 });
     }
-    const numbered = episodes.filter(episode => episode.episodeNumber > 0);
-    return category && category !== 'movie' && numbered.length ? numbered : episodes;
+    return episodes;
   }
 
   async #ensurePlaybackFolder(cookie, user) {

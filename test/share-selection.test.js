@@ -45,7 +45,9 @@ const createGateway = t => {
     if (url.pathname.endsWith('/share/sharepage/detail')) {
       const parent = url.searchParams.get('pdir_fid');
       listReads.push(parent);
-      return reply({ list: tree.get(parent) || [] });
+      const items=tree.get(parent)||[];
+      const page=Number(url.searchParams.get('_page'))||1, size=Number(url.searchParams.get('_size'))||10;
+      return Response.json({code:0,metadata:{_page:page,_size:size,_total:items.length},data:{list:items.slice((page-1)*size,page*size)}});
     }
     if (url.pathname.endsWith('/file/sort')) return reply({ list: drive.get(url.searchParams.get('pdir_fid')) || [] });
     if (url.pathname.endsWith('/file') && init.method === 'POST') {
@@ -224,7 +226,7 @@ test('movie years in brackets are not mistaken for thousands of episodes', async
   assert.equal(details.entries.find(item => item.fid === 'episode').episodeNumber, 2026);
 });
 
-test('details expose actual thumbnails, aggregate folder sizes and dates; an explicitly clicked file wins over automatic quality deduplication', async t => {
+test('details expose actual thumbnails, aggregate folder sizes and dates; playback retains every version so the clicked file stays selectable', async t => {
   const {gateway,tree}=createGateway(t);
   tree.set('0',[folder('wrap','第一季')]);
   tree.set('wrap',[
@@ -235,7 +237,7 @@ test('details expose actual thumbnails, aggregate folder sizes and dates; an exp
   assert.equal(details.totalSize,5000);assert.equal(details.entries.find(item=>item.fid==='wrap').size,5000);
   const low=details.entries.find(item=>item.fid==='low');assert.match(low.thumbnail,/^\/api\/quark\/share-thumbnails\//);assert.ok(low.updatedAt);assert.doesNotMatch(JSON.stringify(details),/cdn.example|token=private/);
   const selected=await gateway.createPlaybackSession({...shareInput,episodeFid:'low'});
-  assert.ok(selected.episodes.some(e=>e.fid==='low'));assert.ok(!selected.episodes.some(e=>e.fid==='high'));
+  assert.ok(selected.episodes.some(e=>e.fid==='low'));assert.ok(selected.episodes.some(e=>e.fid==='high'));assert.equal(selected.episodes.length,2);
   await assert.rejects(gateway.createPlaybackSession({...shareInput,episodeFid:'foreign'}),{code:'EPISODE_NOT_FOUND'});
 });
 
