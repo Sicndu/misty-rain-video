@@ -31,8 +31,8 @@ export function useQuarkTransfer() {
   const showProgress = (progress: SearchProgress) => {
     searchPending.value = progress.server || progress.public || validationRunning;
     searchError.value = !quarkResources.value.length && !searchPending.value ? progress.error : '';
-    searchNotice.value = validationRunning ? '正在检查分享链接…'
-      : invalidCount ? `已排除 ${invalidCount} 条失效资源`
+    searchNotice.value = validationRunning ? '正在检查资源内容…'
+      : invalidCount ? `已排除 ${invalidCount} 条不可用资源`
         : searchPending.value ? quarkResources.value.length ? '已显示当前候选，正在补充其他来源…' : '正在继续搜索，找到结果后会自动显示…'
           : progress.supplemented ? '已通过备用来源补充候选' : progress.notice;
   };
@@ -40,8 +40,9 @@ export function useQuarkTransfer() {
     if (validationRunning || !isCurrent(sequence)) return;
     validationRunning = true;
     if (activeProgress) showProgress(activeProgress);
+    const deadline = Date.now() + 30_000;
     try {
-      while (isCurrent(sequence)) {
+      while (isCurrent(sequence) && Date.now() < deadline) {
         const batch = [...candidates.values()];
         const revision = candidateRevision;
         const force = forceValidation; forceValidation = false;
@@ -52,7 +53,7 @@ export function useQuarkTransfer() {
         for (const item of candidates.values()) {
           const entry = statuses.get(item.url);
           if (!entry || entry.password !== (item.password || '')) continue;
-          if (entry.status === 'unavailable') { rejected.add(item.url); candidates.delete(item.url); continue; }
+          if (entry.status === 'unavailable' || entry.status === 'deferred') { rejected.add(item.url); candidates.delete(item.url); continue; }
           if (entry.status !== 'pending') visible.push({ ...item, linkStatus: entry.status });
         }
         invalidCount = rejected.size;
@@ -85,7 +86,7 @@ export function useQuarkTransfer() {
     quarkResources.value = quarkResources.value.filter(item => item.url !== url);
     invalidCount = rejected.size;
     if (activeProgress) showProgress(activeProgress);
-    toast.show('分享已失效，已移除', '!', 2800);
+    toast.show('已移除不可用片源', '!', 2800);
   };
   const supplementSearch = async (keyword: string, sequence: number, progress: SearchProgress, force: boolean) => {
     try {

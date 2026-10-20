@@ -872,11 +872,17 @@ const collectedAll = computed(() => Boolean(props.media?.quarkFid || props.colle
 let candidateController: AbortController | undefined, switchController: AbortController | undefined;
 let candidateTimer: ReturnType<typeof setTimeout> | undefined;
 let searchedMedia = '';
+const rejectedCandidates = new Set<string>();
+const candidateKey = (item: ResourceItem) => `${item.url.split(/[?#]/)[0]}:${item.password || ''}`;
+watch([() => props.media?.id, () => props.isOpen], ([id, open], [previousId]) => {
+  if (!open || id !== previousId) { candidateController?.abort(); switchController?.abort(); clearTimeout(candidateTimer); searchingSources.value = false; searchedMedia = ''; }
+  if (id !== previousId) { rejectedCandidates.clear(); candidateSources.value = []; }
+});
 const searchCandidates = async () => {
-  if (!props.media || searchingSources.value) return;
+  if (!props.isOpen || !props.media || searchingSources.value) return;
   candidateController?.abort(); const controller = candidateController = new AbortController();
   searchingSources.value = true; sourceError.value = '';
-  try { await findPlaybackCandidates(props.media.title, props.media.quarkShareUrl || '', controller.signal, items => { if (!controller.signal.aborted) candidateSources.value = items; }); }
+  try { await findPlaybackCandidates(props.media.title, props.media.quarkShareUrl || '', controller.signal, items => { if (!controller.signal.aborted) candidateSources.value = items.filter(item => !rejectedCandidates.has(candidateKey(item))); }); }
   catch (error) { if (!controller.signal.aborted) sourceError.value = error instanceof Error ? error.message : '备选片源暂不可用'; }
   finally { if (candidateController === controller) searchingSources.value = false; }
 };
@@ -885,12 +891,21 @@ watch([phase, () => props.media?.id, () => props.media?.quarkShareUrl], () => {
   if (phase.value === 'ready' && searchedMedia !== key) { searchedMedia = key; clearTimeout(candidateTimer); candidateTimer = setTimeout(() => { if (document.visibilityState !== 'hidden') void searchCandidates(); }, 2000); }
 });
 const switchCandidate = async (resource: ResourceItem) => {
-  if (switchingSource.value || !currentEpisode.value || !props.switchSource) return;
+  if (switchingSource.value || !currentEpisode.value || !props.switchSource || rejectedCandidates.has(candidateKey(resource))) return;
+  const mediaId = props.media?.id;
   switchingSource.value = true; sourceError.value = '';
   const controller = switchController = new AbortController(); const timer = setTimeout(() => controller.abort(), 15_000);
   try { await persistProgress(true); await props.switchSource(resource,currentEpisode.value,videoRef.value?.currentTime || 0,controller.signal); }
-  catch (error) { if (!controller.signal.aborted) sourceError.value = error instanceof Error ? error.message : '换源失败'; else sourceError.value = '换源超时，请重试'; }
-  finally { clearTimeout(timer); switchingSource.value = false; }
+  catch (error) {
+    if (props.isOpen && props.media?.id === mediaId && switchController === controller) {
+      rejectedCandidates.add(candidateKey(resource));
+      candidateSources.value = candidateSources.value.filter(item => candidateKey(item) !== candidateKey(resource));
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : '';
+      sourceError.value = code === 'QUARK_AUTH_REQUIRED' ? '播放认证暂不可用，请稍后重试'
+        : code === 'SOURCE_EPISODE_MISSING' ? '该片源没有当前集，已移除' : '该片源暂不可用，已移除';
+    }
+  }
+  finally { clearTimeout(timer); if (switchController === controller) switchingSource.value = false; }
 };
 const collectSeries = async () => {
   if (collecting.value || !props.media || !currentEpisode.value || !props.collect) return;

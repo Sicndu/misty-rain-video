@@ -19,14 +19,14 @@ export async function findPlaybackCandidates(keyword: string, currentUrl: string
   try {
     let result = await engine.prefetch(keyword, controller.signal);
     for (let attempt = 0; attempt < 12 && !controller.signal.aborted; attempt++) {
-      const candidates = result?.quarkItems.filter(item => item.url.split('?')[0] !== currentUrl.split('?')[0]).slice(0, 12) || [];
+      const candidates = result?.quarkItems.filter(item => item.url.split(/[?#]/)[0] !== currentUrl.split(/[?#]/)[0]).slice(0, 12) || [];
       if (candidates.length) {
         const checked = await engine.validateResources(candidates, false, controller.signal);
         if (controller.signal.aborted) break;
         for (const item of candidates) {
           const status = checked.entries.find(entry => entry.url === item.url)?.status;
           if (status === 'available') valid.set(item.url, { ...item, linkStatus: status });
-          if (status === 'unavailable') valid.delete(item.url);
+          if (status !== 'available') valid.delete(item.url);
         }
         publish([...valid.values()].slice(0,5));
         if (valid.size >= 3 || !checked.pending && !result?.refreshing) break;

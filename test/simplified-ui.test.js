@@ -153,7 +153,7 @@ test('打开资源浏览文件后播放所点文件，保留片名、分类和�
   } finally { app.unmount(); }
 });
 
-test('file browser skips wrapper folders, separates checkbox selection from play, preserves folder scope and disables empty saves', async () => {
+test('file browser skips wrapper folders, separates checkbox selection from play, preserves folder scope and removes confirmed empty sources', async () => {
  const entries=[{fid:'wrap',parentFid:'0',ancestorFids:[],isDirectory:true,name:'影片目录',videoCount:2,size:200,sizeFormatted:'200 MB'},
   {fid:'season',parentFid:'wrap',ancestorFids:['wrap'],isDirectory:true,name:'第一季',videoCount:2,size:200,sizeFormatted:'200 MB'},
   ...[1,2].map(n=>({fid:'ep'+n,parentFid:'season',ancestorFids:['wrap','season'],isVideo:true,isDirectory:false,name:n+'.mp4',size:100,sizeFormatted:'100 MB',thumbnail:'/api/test-thumbnail',updatedAt:'2026-10-16T00:00:00Z'}))];
@@ -162,8 +162,8 @@ test('file browser skips wrapper folders, separates checkbox selection from play
  document.querySelector('.file-row input').click();await nextTick();assert.equal(played,0);document.querySelector('.save-selected').click();assert.deepEqual(saved,['ep1']);
  [...document.querySelectorAll('.breadcrumbs button')].find(b=>b.textContent==='全部文件').click();await nextTick();document.querySelector('.file-row input').click();await nextTick();document.querySelector('.save-selected').click();assert.deepEqual(saved,['wrap']);
  }finally{app.unmount()}
- const empty=mount(Details,{resource:{url:'https://pan.quark.cn/s/empty'},initialDetails:{title:'空',entries:[],videoCount:0,episodeCount:0}});
- try{await flush();assert.equal(document.querySelector('.save-all').disabled,true);assert.equal(document.querySelector('.save-selected').disabled,true);}finally{empty.unmount()}
+ let unavailable;const empty=mount(Details,{resource:{url:'https://pan.quark.cn/s/empty'},initialDetails:{title:'空',entries:[],videoCount:0,episodeCount:0},onUnavailable:resource=>unavailable=resource});
+ try{await flush();assert.equal(unavailable.url,'https://pan.quark.cn/s/empty');assert.equal(document.querySelector('.save-all'),null);}finally{empty.unmount()}
 });
 
 test('直接播放保留发现元数据和提取码，不把替换片库或任意网址当作播放分享', () => {
@@ -566,4 +566,35 @@ test('browse empty and failed states provide recovery without discarding a loade
   mode='loaded';await chooseFacet('地区筛选','美国');await settleBrowse();assert.ok(document.querySelector('.browse-more'));
   mode='error';document.querySelector('.browse-more').click();await flush();assert.ok(document.querySelector('.discovery-card'));assert.match(document.querySelector('[role="alert"]').textContent,/暂时不可用/);
  }finally{app.unmount();}
+});
+
+test('failed backup source is removed immediately and cannot return on refresh; current video and episode stay unchanged',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});mockApi(t);const baseFetch=globalThis.fetch;
+ const item={...media,quarkShareUrl:'https://pan.quark.cn/s/current'};let switches=0;
+ t.mock.method(globalThis,'fetch',async(url,options={})=>{
+  if(String(url).includes('/resource-search/validate'))return Response.json({code:0,data:{pending:false,entries:JSON.parse(options.body).items.map(item=>({...item,status:'available'}))}});
+  if(String(url).includes('/resource-search'))return Response.json({code:0,data:{total:3,refreshing:false,merged_by_type:{quark:['bad','good1','good2'].map(id=>({url:'https://pan.quark.cn/s/'+id,note:media.title+' '+id}))}}});
+  if(String(url).includes('/playback-history'))return Response.json({code:0,data:{media:item}});
+  return baseFetch(url,options);
+ });
+ const app=mount(Player,{isOpen:true,media:item,username:'candidate-rejection',switchSource:async()=>{switches++;throw Object.assign(new Error('资源文件列表未读取完整，请刷新重试'),{code:'QUARK_SHARE_LIST_INCOMPLETE'});}});
+ try {
+  await flush();t.mock.timers.tick(2000);await flush();
+  const video=document.querySelector('video');video.currentTime=42;const source=video.getAttribute('src');
+  const active=document.querySelector('.episode-row[aria-selected="true"]').getAttribute('aria-label');
+  const bad=document.querySelector('[aria-label="切换片源：'+media.title+' bad"]');assert.ok(bad);bad.click();await flush();
+  assert.equal(switches,1);assert.equal(document.querySelector('[aria-label="切换片源：'+media.title+' bad"]'),null);
+  assert.match(document.querySelector('.source-status').textContent,/已移除/);assert.equal(video.currentTime,42);assert.equal(video.getAttribute('src'),source);
+  assert.equal(document.querySelector('.episode-row[aria-selected="true"]').getAttribute('aria-label'),active);
+  document.querySelector('[aria-label="刷新备选片源"]').click();await flush();
+  assert.equal(document.querySelector('[aria-label="切换片源：'+media.title+' bad"]'),null);assert.equal(document.querySelectorAll('.source-chip').length,3);
+ }finally{app.unmount();}
+});
+test('an unreadable detail source is removed but authentication errors stay recoverable',async t=>{
+ let code='QUARK_SHARE_LIST_INCOMPLETE',removed=0;
+ t.mock.method(globalThis,'fetch',async()=>Response.json({code,message:'无法读取'},{status:502}));
+ let app=mount(Details,{resource:{url:'https://pan.quark.cn/s/bad'},onUnavailable:()=>removed++});
+ await flush();assert.equal(removed,1);app.unmount();
+ code='QUARK_AUTH_REQUIRED';app=mount(Details,{resource:{url:'https://pan.quark.cn/s/retry'},onUnavailable:()=>removed++});
+ try{await flush();assert.equal(removed,1);assert.match(document.querySelector('[role="alert"]').textContent,/无法读取/);}finally{app.unmount();}
 });

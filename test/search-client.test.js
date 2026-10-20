@@ -249,7 +249,7 @@ test('服务器及浏览器补充都先校验，失效候选被移除且晚到�
     await view.openTransferModal({ title: '校验测试', category: 'anime' });
     await flush(); t.mock.timers.tick(1_000); await flush();
     assert.deepEqual(view.quarkResources.value.map(item => item.url).sort(), ['https://pan.quark.cn/s/publicvalid', 'https://pan.quark.cn/s/servervalid']);
-    assert.match(view.searchNotice.value, /排除 1 条失效/);
+    assert.match(view.searchNotice.value, /排除 1 条不可用/);
     view.rejectResource('https://pan.quark.cn/s/servervalid');
     t.mock.timers.tick(1_000); await flush();
     assert.deepEqual(view.quarkResources.value.map(item => item.url), ['https://pan.quark.cn/s/publicvalid']);
@@ -278,4 +278,12 @@ test('新检索忽略前一次晚到的链接校验，网络不确定性保留�
     assert.equal(view.quarkResources.value[0].url, 'https://pan.quark.cn/s/new');
     assert.equal(view.quarkResources.value[0].linkStatus, 'unknown');
   } finally { view.closeTransferModal(); }
+});
+
+test('content-invalid and temporarily unreadable sources are removed from current search without discarding valid candidates',async t=>{
+ t.mock.method(globalThis,'fetch',async(url,init)=>{
+  if(String(url).includes('/validate'))return Response.json({code:0,data:{pending:false,entries:JSON.parse(init.body).items.map(item=>({...item,status:item.url.endsWith('good')?'available':item.url.endsWith('empty')?'unavailable':'deferred'}))}});
+  return Response.json({code:0,data:{total:3,refreshing:false,allowPublicFallback:false,merged_by_type:{quark:['empty','unreadable','good'].map(id=>({url:'https://pan.quark.cn/s/'+id,note:'内容测试 '+id}))}}});
+ });
+ const view=useQuarkTransfer();try{await view.openTransferModal({title:'内容测试',category:'tv'});await flush();assert.deepEqual(view.quarkResources.value.map(item=>item.url),['https://pan.quark.cn/s/good']);assert.match(view.searchNotice.value,/排除 2 条不可用/);}finally{view.closeTransferModal();}
 });

@@ -966,7 +966,19 @@ export class QuarkGateway {
   }
 
   async probeShare({ shareUrl, passcode = '' }) {
-    await this.#resolveShareCredentials({ shareUrl, passcode, cookie: this.#requireCookie(), timeoutMs: 3_000 });
+    const signal = AbortSignal.timeout(6_000), cookie = this.#requireCookie();
+    const share = await this.#resolveShareCredentials({ shareUrl, passcode, cookie, timeoutMs: 3_000, signal });
+    const queue = ['0'], visited = new Set();
+    while (queue.length && visited.size < 8) {
+      signal.throwIfAborted();
+      const parentFid = queue.shift(); if (visited.has(parentFid)) continue;
+      visited.add(parentFid);
+      const files = await this.#listShareFolder({ ...share, parentFid, cookie, signal, timeoutMs: 3_000, maxPages: 4, probeOnly: true });
+      if (files.some(isVideoFile)) return { videoCount: 1 };
+      for (const file of files) if ((file.file_type === 0 || file.dir) && !visited.has(file.fid)) queue.push(file.fid);
+    }
+    if (queue.length) throw new QuarkApiError('资源目录尚未验证完整', { code: 'QUARK_SHARE_PROBE_INCOMPLETE', statusCode: 502 });
+    throw new QuarkApiError('资源中没有可播放的视频', { code: 'QUARK_VIDEO_NOT_FOUND', statusCode: 404 });
   }
 
   async getShareDetails({ shareUrl, passcode = '' }, user = SYSTEM_USER) {
@@ -1514,14 +1526,14 @@ export class QuarkGateway {
     return cookie;
   }
 
-  async #resolveShareCredentials({ shareUrl, passcode = '', cookie, timeoutMs = API_REQUEST_TIMEOUT_MS }) {
+  async #resolveShareCredentials({ shareUrl, passcode = '', cookie, timeoutMs = API_REQUEST_TIMEOUT_MS, signal }) {
     const { pwdId } = parseShareUrl(shareUrl);
     const tokenData = await this.#requestJson(`${SHARE_HOST}/share/sharepage/token?pr=ucpro&fr=pc`, {
       method: 'POST',
       cookie,
       userAgent: QUARK_DESKTOP_USER_AGENT,
       body: { pwd_id: pwdId, passcode: String(passcode || '') },
-      timeoutMs
+      timeoutMs, signal
     });
     if (tokenData?.code !== 0 || !tokenData?.data?.stoken) {
       const message = tokenData?.message || tokenData?.message_desc || '';
@@ -1539,9 +1551,9 @@ export class QuarkGateway {
     };
   }
 
-  async #listShareFolder({ pwdId, stoken, parentFid, cookie }) {
+  async #listShareFolder({ pwdId, stoken, parentFid, cookie, signal, timeoutMs, maxPages = 100, probeOnly = false }) {
     const all = [], seen = new Set();
-    for (let page = 1; page <= 100; page += 1) {
+    for (let page = 1; page <= maxPages; page += 1) {
       const url = new URL(`${SHARE_HOST}/share/sharepage/detail`);
       url.searchParams.set('pwd_id', pwdId);
       url.searchParams.set('stoken', stoken);
@@ -1549,7 +1561,7 @@ export class QuarkGateway {
       url.searchParams.set('_page', String(page));
       url.searchParams.set('_size', '100');
       url.searchParams.set('_fetch_total', '1');
-      const result = await this.#requestJson(url, { cookie, userAgent: QUARK_DESKTOP_USER_AGENT });
+      const result = await this.#requestJson(url, { cookie, userAgent: QUARK_DESKTOP_USER_AGENT, signal, timeoutMs });
       if (result?.code !== 0) {
         const message = result?.message || result?.message_desc || '';
         throw new QuarkApiError(message || '读取网盘分享目录失败', {
@@ -1566,6 +1578,9 @@ export class QuarkGateway {
       // Providers may cap page size. Completion follows their declared total,
       // never the assumption that fewer than 100 means the last page.
       if (metadata._page !== undefined && Number(metadata._page) !== page) break;
+      // A positive probe establishes that content exists; full directory reads
+      // still continue to completion before publishing an episode list.
+      if (probeOnly && list.some(isVideoFile)) return all;
       if (total !== null ? all.length >= total : list.length < pageSize) return all;
       if (all.length === before) break;
     }
@@ -2358,7 +2373,8 @@ export class QuarkGateway {
           'Cookie': cookie
         },
         ...(options.body ? { body: JSON.stringify(options.body) } : {}),
-        signal: AbortSignal.timeout(options.timeoutMs || API_REQUEST_TIMEOUT_MS)
+        signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(options.timeoutMs || API_REQUEST_TIMEOUT_MS)])
+          : AbortSignal.timeout(options.timeoutMs || API_REQUEST_TIMEOUT_MS)
       });
     } catch (error) {
       throw new QuarkApiError(`连接播放服务失败：${error.message}`, {

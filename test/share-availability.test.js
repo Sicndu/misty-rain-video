@@ -22,7 +22,7 @@ test('有效、明确失效、提取码、网络与账号故障分别标记，�
   const items = ['valid', ...Object.keys(codes)].map(item);
   await service.inspect(items, { waitMs: 0 }); await flush();
   const result = await service.inspect(items, { waitMs: 0 });
-  assert.deepEqual(result.entries.map(entry => entry.status), ['available', 'unavailable', 'restricted', 'unknown', 'unknown']);
+  assert.deepEqual(result.entries.map(entry => entry.status), ['available', 'unavailable', 'restricted', 'deferred', 'unknown']);
   assert.equal(service.isUnavailable(item('cancelled').url), true);
   for (const id of ['protected', 'timeout', 'auth']) assert.equal(service.isUnavailable(item(id).url), false);
 });
@@ -93,18 +93,66 @@ test('校验拒绝非夸克网址、额外路径与超量输入，不能充当�
   assert.equal(calls, 0);
 });
 
-test('轻量探测只申请分享令牌，不遍历文件夹或转存；保留明确失败代码', async t => {
+test('内容探测读取目录，保留明确失败代码且从不转存', async t => {
   const calls = [];
   let message = '';
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     calls.push({ url: String(url), init });
-    return Response.json(message ? { code: 41012, message } : { code: 0, data: { stoken: 'private-token' } }, { status: message ? 404 : 200 });
+    return Response.json(message ? { code: 41012, message } : String(url).includes('/token') ? { code: 0, data: { stoken: 'private-token' } } : { code:0,metadata:{_total:1,_page:1,_size:100},data:{list:[{fid:'video',file_name:'01.mp4',file_type:1}]} }, { status: message ? 404 : 200 });
   });
   const gateway = new QuarkGateway({ credentialStore: { getCookie: () => 'private-cookie' } });
   await gateway.probeShare({ shareUrl: item('test').url, passcode: '1234' });
-  assert.equal(calls.length, 1); assert.match(calls[0].url, /sharepage\/token/);
+  assert.equal(calls.length, 2); assert.match(calls[1].url,/sharepage\/detail/); assert.match(calls[0].url, /sharepage\/token/);
   assert.deepEqual(JSON.parse(calls[0].init.body), { pwd_id: 'test', passcode: '1234' });
   assert.equal(calls[0].init.signal.aborted, false);
   message = '好友已取消了分享'; await assert.rejects(gateway.probeShare({ shareUrl: item('test').url }), { code: 'QUARK_SHARE_UNAVAILABLE' });
   message = '提取码错误'; await assert.rejects(gateway.probeShare({ shareUrl: item('test').url }), { code: 'QUARK_SHARE_PASSCODE_REQUIRED' });
+});
+
+test('empty sources are excluded for five minutes; incomplete reads are deferred only briefly and recover',async t=>{
+ const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'content-health-'));t.after(()=>fs.rmSync(dataDir,{recursive:true,force:true}));
+ let now=100000,calls=0;
+ const service=new ShareAvailability({dataDir,now:()=>now,probe:async()=>{calls++;}});
+ service.recordFailure(item('empty'),error('QUARK_VIDEO_NOT_FOUND'));
+ service.recordFailure(item('incomplete'),error('QUARK_SHARE_LIST_INCOMPLETE'));
+ const first=await service.inspect([item('empty'),item('incomplete')],{waitMs:0});assert.deepEqual(first.entries.map(e=>e.status),['unavailable','deferred']);assert.equal(calls,0);
+ assert.equal(service.isUnavailable(item('incomplete').url),false);
+ const restarted=new ShareAvailability({dataDir,now:()=>now,probe:async()=>{calls++;}});
+ assert.deepEqual((await restarted.inspect([item('empty'),item('incomplete')],{waitMs:0})).entries.map(e=>e.status),['unavailable','deferred']);
+ now+=30001;await restarted.inspect([item('incomplete')],{waitMs:0});await flush();assert.equal((await restarted.inspect([item('incomplete')],{waitMs:0})).entries[0].status,'available');
+ assert.equal(restarted.isUnavailable(item('empty').url),true);now+=5*60000;assert.equal(restarted.isUnavailable(item('empty').url),false);
+});
+test('an actual failed directory read wins over an older successful probe; a later complete read recovers the source',async()=>{
+ let resolve;const service=new ShareAvailability({probe:()=>new Promise(done=>{resolve=done})});
+ await service.inspect([item('race')],{waitMs:0});service.recordFailure(item('race'),error('QUARK_SHARE_LIST_INCOMPLETE'));resolve();await flush();
+ assert.equal((await service.inspect([item('race')],{waitMs:0})).entries[0].status,'deferred');
+ service.recordContents(item('race'),24);assert.equal((await service.inspect([item('race')],{waitMs:0})).entries[0].status,'available');
+ service.recordContents(item('race'),0);assert.equal(service.isUnavailable(item('race').url),true);
+ service.recordContents(item('race'),24);assert.equal(service.isUnavailable(item('race').url),false);
+});
+test('old token-only positive cache is rechecked for video content after upgrade',async t=>{
+ const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'content-version-'));t.after(()=>fs.rmSync(dataDir,{recursive:true,force:true}));
+ const first=new ShareAvailability({dataDir,probe:async()=>{}});await first.inspect([item('old')],{waitMs:0});await flush();
+ const file=path.join(dataDir,'share_availability.json'),data=JSON.parse(fs.readFileSync(file));delete data.version;fs.writeFileSync(file,JSON.stringify(data));
+ let calls=0;const restarted=new ShareAvailability({dataDir,probe:async()=>{calls++;throw error('QUARK_VIDEO_NOT_FOUND')}});
+ await restarted.inspect([item('old')],{waitMs:0});await flush();assert.equal(calls,1);assert.equal(restarted.isUnavailable(item('old').url),true);
+});
+
+test('actual empty details and failed session reads feed the shared validation cache',async()=>{
+ const {handleApiRequest}=await import('../server/api.js');const {Readable}=await import('node:stream');
+ const availability=new ShareAvailability({probe:async()=>{}});
+ const context={authService:{authenticate:()=>({username:'user',folder:'user',role:'user'}),assertSameOrigin(){}},userContext:()=>({}),shareAvailability:availability,
+  quarkGateway:{getShareDetails:async()=>({videoCount:0,entries:[]}),createPlaybackSession:async()=>{throw error('QUARK_SHARE_LIST_INCOMPLETE')}}};
+ const response=()=>({statusCode:0,headersSent:false,setHeader(){},end(){this.headersSent=true;}});
+ for(const [route,id] of [['/api/quark/share-details','empty'],['/api/player/sessions','incomplete']]){
+  const request=Object.assign(Readable.from([Buffer.from(JSON.stringify({shareUrl:item(id).url}))]),{method:'POST',url:route,headers:{host:'localhost'}});
+  await handleApiRequest(request,response(),context);
+ }
+ const results=await availability.inspect([item('empty'),item('incomplete')],{waitMs:0});assert.deepEqual(results.entries.map(entry=>entry.status),['unavailable','deferred']);
+});
+
+test('a fresh inconclusive authentication failure also retires an older positive result without globally invalidating the link',async()=>{
+ const service=new ShareAvailability({probe:async()=>{}});service.recordContents(item('auth'),24);
+ service.recordFailure(item('auth'),error('QUARK_AUTH_REQUIRED'));
+ assert.equal((await service.inspect([item('auth')],{waitMs:0})).entries[0].status,'unknown');assert.equal(service.isUnavailable(item('auth').url),false);
 });

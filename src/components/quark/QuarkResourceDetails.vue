@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { ChevronRight, FolderOpen, Play, RefreshCw } from '@lucide/vue';
 import ResourceThumbnail from './ResourceThumbnail.vue';
+import { discardFailedSource } from '../../../server/shareFailurePolicy.js';
 import type { ResourceItem } from '../../types/search';
 import type { LibrarySaveFeedback } from '../../services/libraryFeedback';
 import { QuarkStreamService, type QuarkShareDetails, type QuarkShareEntry } from '../../services/quarkStreamService';
@@ -30,6 +31,7 @@ const toggleAll = () => {
 const enter = (entry: QuarkShareEntry) => { if (props.isSaving) return; if (entry.isDirectory) currentFolder.value = entry.fid; else if (entry.isVideo && !props.replacingSource) emit('play',entry.fid); };
 const dateText = (value?: string, time = false) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',...(time ? { hour: '2-digit', minute: '2-digit', hour12: false } as const : {})}) : '—';
 const install = (result: QuarkShareDetails) => {
+  if (!result.videoCount) { emit('unavailable', props.resource); return; }
   details.value = result;
   // Skip a chain of packaging folders, while keeping its breadcrumb available.
   const visited = new Set<string>();
@@ -44,7 +46,7 @@ const install = (result: QuarkShareDetails) => {
 const load = async (force = false) => {
   const request = ++sequence; isLoading.value = true; loadError.value = ''; details.value = null; currentFolder.value = '0'; selected.value = new Set();
   try { const result = !force && props.initialDetails || await QuarkStreamService.getShareDetails(props.resource.url,props.resource.password); if (request === sequence) install(result); }
-  catch (error) { if (request === sequence) { loadError.value = error instanceof Error ? error.message : '文件读取失败'; if (error && typeof error === 'object' && 'code' in error && error.code === 'QUARK_SHARE_UNAVAILABLE') emit('unavailable',props.resource); } }
+  catch (error) { if (request === sequence) { loadError.value = error instanceof Error ? error.message : '文件读取失败'; if (discardFailedSource(error)) emit('unavailable',props.resource); } }
   finally { if (request === sequence) isLoading.value = false; }
 };
 watch(() => props.resource, () => load(), { immediate: true });

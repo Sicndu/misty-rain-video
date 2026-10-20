@@ -1,3 +1,4 @@
+import { shareFailureDisposition } from './shareFailurePolicy.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -5,6 +6,7 @@ import path from 'node:path';
 const AVAILABLE_TTL_MS = 60_000;
 const UNAVAILABLE_TTL_MS = 30 * 60_000;
 const UNCERTAIN_TTL_MS = 30_000;
+const EMPTY_TTL_MS = 5 * 60_000;
 const MAX_ENTRIES = 2_000;
 
 export const shareFailureCode = message => {
@@ -27,9 +29,9 @@ const normalize = item => {
   return { url, password, key };
 };
 
-/** Lightweight token checks, shared across search channels and users. Never transfer files. */
+/** Bounded content checks shared across search channels and users. Never transfer files. */
 export class ShareAvailability {
-  constructor({ probe, dataDir, now = Date.now, concurrency = 4, maxPending = 200 } = {}) {
+  constructor({ probe, dataDir, now = Date.now, concurrency = 4, maxPending = 32 } = {}) {
     this.probe = probe;
     this.now = now;
     this.concurrency = concurrency;
@@ -44,7 +46,7 @@ export class ShareAvailability {
       try {
         const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
         for (const [key, entry] of (saved.entries || []).slice(-MAX_ENTRIES)) {
-          if (entry.expiresAt > now() && ['available', 'restricted'].includes(entry.status)) this.cache.set(key, entry);
+          if (saved.version === 2 && entry.expiresAt > now() && ['available', 'restricted', 'deferred'].includes(entry.status)) this.cache.set(key, entry);
         }
         for (const [url, expiresAt] of (saved.unavailable || []).slice(-MAX_ENTRIES)) {
           if (expiresAt > now()) this.unavailable.set(normalize({ url }).url, expiresAt);
@@ -57,9 +59,26 @@ export class ShareAvailability {
     return (this.unavailable.get(String(url)) || 0) > this.now();
   }
 
-  markUnavailable(url) {
-    this.unavailable.set(normalize({ url }).url, this.now() + UNAVAILABLE_TTL_MS);
+  markUnavailable(url, ttlMs = UNAVAILABLE_TTL_MS) {
+    this.unavailable.set(normalize({ url }).url, this.now() + ttlMs);
     this.#persist();
+  }
+
+  recordFailure(input, error) {
+    let item; try { item = normalize(input); } catch { return; }
+    const status = shareFailureDisposition(error);
+    if (status === 'unavailable') {
+      this.markUnavailable(item.url, error?.code === 'QUARK_SHARE_UNAVAILABLE' ? UNAVAILABLE_TTL_MS : EMPTY_TTL_MS);
+    } else {
+      this.cache.set(item.key, { status, expiresAt: this.now() + UNCERTAIN_TTL_MS }); this.#persist();
+    }
+  }
+
+  recordContents(input, videoCount) {
+    if (!(videoCount > 0)) { this.recordFailure(input, { code: 'QUARK_VIDEO_NOT_FOUND' }); return; }
+    let item; try { item = normalize(input); } catch { return; }
+    this.unavailable.delete(item.url);
+    this.cache.set(item.key, { status: 'available', expiresAt: this.now() + AVAILABLE_TTL_MS }); this.#persist();
   }
 
   async inspect(items, { force = false, waitMs = 350 } = {}) {
@@ -84,7 +103,7 @@ export class ShareAvailability {
     }
     const entries = resources.map(item => ({ url: item.url, password: item.password,
       status: this.isUnavailable(item.url) ? 'unavailable' : this.jobs.has(item.key) ? 'pending'
-        : this.cache.get(item.key)?.expiresAt > this.now() ? this.cache.get(item.key).status : 'unknown' }));
+        : this.cache.get(item.key)?.expiresAt > this.now() ? this.cache.get(item.key).status : 'pending' }));
     return { entries, pending: entries.some(entry => entry.status === 'pending') };
   }
 
@@ -97,14 +116,16 @@ export class ShareAvailability {
   }
 
   async #check(item) {
-    let status = 'available';
+    const previous = this.cache.get(item.key);
+    let status = 'available', failure;
     try { await this.probe({ shareUrl: item.url, passcode: item.password }); }
-    catch (error) {
-      status = error?.code === 'QUARK_SHARE_UNAVAILABLE' ? 'unavailable'
-        : error?.code === 'QUARK_SHARE_PASSCODE_REQUIRED' ? 'restricted' : 'unknown';
-    }
-    if (status === 'unavailable') this.markUnavailable(item.url);
-    else if (!this.isUnavailable(item.url)) {
+    catch (error) { failure = error; status = shareFailureDisposition(error); }
+    // A later actual directory read/switch failure is stronger evidence than
+    // this older in-flight probe, even when it eventually reports success.
+    const current = this.cache.get(item.key);
+    if (current && current !== previous || this.isUnavailable(item.url)) return;
+    if (status === 'unavailable') this.recordFailure(item, failure);
+    else {
       this.cache.delete(item.key);
       this.cache.set(item.key, { status, expiresAt: this.now() + (status === 'available' ? AVAILABLE_TTL_MS : UNCERTAIN_TTL_MS) });
       this.#persist();
@@ -119,7 +140,7 @@ export class ShareAvailability {
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
       const temp = `${this.file}.${process.pid}.tmp`;
-      fs.writeFileSync(temp, JSON.stringify({ entries: [...this.cache].filter(([, entry]) => entry.status !== 'unknown'),
+      fs.writeFileSync(temp, JSON.stringify({ version: 2, entries: [...this.cache].filter(([, entry]) => entry.status !== 'unknown'),
         unavailable: [...this.unavailable] }), { mode: 0o600 });
       fs.renameSync(temp, this.file);
     } catch { /* Checks remain usable when the cache volume is read-only. */ }

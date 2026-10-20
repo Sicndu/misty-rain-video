@@ -562,7 +562,7 @@ const switchPlayingSource = async (resource: ResourceItem, episode: QuarkEpisode
   const result = await QuarkStreamService.createPlaybackSession({shareUrl:next.quarkShareUrl,passcode:next.quarkPasscode,title:next.title},signal);
   if (signal.aborted || key !== playbackPageKey.value || !isEmbedPlayerOpen.value) return;
   const index = replacementEpisodeIndex(result.episodes,episode,media.category);
-  if (index < 0) throw new Error('这个片源没有当前集，请选择其他片源');
+  if (index < 0) throw Object.assign(new Error('这个片源没有当前集，请选择其他片源'), { code: 'SOURCE_EPISODE_MISSING' });
   const target = result.episodes[index]!;
   embedPlayingMedia.value = next;
   selectedHistoryEntry.value = { id:'source-switch',media:next,episodeFid:target.fid,episodeNumber:target.episodeNumber,episodeTitle:target.episodeTitle,position,duration:target.duration || 0,completed:false,updatedAt:new Date().toISOString() };

@@ -143,6 +143,7 @@ const importLibraryShare = async (context, card, user) => {
   try { return await context.quarkGateway.importShare(card, user); }
   catch (error) {
     if (error?.code === 'QUARK_SHARE_UNAVAILABLE' && card.quarkShareUrl) context.shareAvailability?.markUnavailable(card.quarkShareUrl);
+    else if (card.quarkShareUrl) context.shareAvailability?.recordFailure?.({ shareUrl: card.quarkShareUrl, passcode: card.quarkPasscode }, error);
     throw error;
   }
 };
@@ -327,9 +328,14 @@ export const handleApiRequest = async (request, response, context) => {
 
     if (pathname === '/api/quark/share-details' && request.method === 'POST') {
       const input = await readRequestBody(request);
-      try { sendSuccess(response, await context.quarkGateway.getShareDetails(input, user)); }
+      try {
+        const result = await context.quarkGateway.getShareDetails(input, user);
+        context.shareAvailability?.recordContents?.(input, result.videoCount);
+        sendSuccess(response, result);
+      }
       catch (error) {
         if (error?.code === 'QUARK_SHARE_UNAVAILABLE') context.shareAvailability?.markUnavailable(input.shareUrl);
+        else context.shareAvailability?.recordFailure?.(input, error);
         throw error;
       }
       return true;
@@ -633,10 +639,12 @@ export const handleApiRequest = async (request, response, context) => {
       try {
         const session = await context.quarkGateway.createPlaybackSession(body, user, userData.playbackCache);
         if (session.cachedOnly && body.shareUrl) context.shareAvailability?.markUnavailable(body.shareUrl);
+        else if (body.shareUrl && !body.quarkFid) context.shareAvailability?.recordContents?.(body, session.episodes.length);
         sendSuccess(response, session);
       }
       catch (error) {
         if (error?.code === 'QUARK_SHARE_UNAVAILABLE' && body.shareUrl) context.shareAvailability?.markUnavailable(body.shareUrl);
+        else if (body.shareUrl) context.shareAvailability?.recordFailure?.(body, error);
         throw error;
       }
       return true;

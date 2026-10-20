@@ -48,6 +48,6 @@ export interface DriveCountMap {
 }
 
 export interface ShareValidationResult {
-  entries: Array<{ url: string; password: string; status: 'available' | 'unavailable' | 'restricted' | 'unknown' | 'pending' }>;
+  entries: Array<{ url: string; password: string; status: 'available' | 'unavailable' | 'deferred' | 'restricted' | 'unknown' | 'pending' }>;
   pending: boolean;
 }
