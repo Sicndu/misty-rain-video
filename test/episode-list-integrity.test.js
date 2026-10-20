@@ -41,7 +41,7 @@ test('playback retains short, unnumbered, ancillary and alternate files; only du
  const items=[video('low','S01E01.720p.mp4',{duration:60}),video('high','S01E01.4K.mp4',{duration:3600}),video('second','02.mp4'),
   video('named','大结局.mp4'),video('extra','花絮.mp4'),video('nested','01.mp4',{source_path:'花絮'}),
   video('s2','S02E01.mp4'),video('sub','02.srt'),{fid:'folder',file_name:'03.mp4',file_type:0},video('low','S01E01.720p.mp4')];
- const result=normalizePlaybackEpisodes(items);assert.equal(result.length,7);assert.equal(result.filter(item=>item.episodeNumber===1).length,4);
+ const result=normalizePlaybackEpisodes(items);assert.equal(result.length,7);assert.equal(result.find(item=>item.fid==='extra').ancillary,true);assert.equal(result.find(item=>item.fid==='low').ancillary,false);assert.equal(result.filter(item=>item.episodeNumber===1).length,4);
  const {gateway}=fixture(t,{items:items.slice(0,-1).filter(item=>item.file_type!==0)});const detail=await gateway.getShareDetails(input),session=await gateway.createPlaybackSession({...input,episodeFid:'low'});
  assert.equal(session.episodes.length,detail.videoCount);assert.ok(session.episodes.some(item=>item.fid==='low'));assert.ok(session.episodes.some(item=>item.fid==='high'));
 });

@@ -6,6 +6,7 @@ export interface QuarkEpisode {
   fileName: string;
   episodeNumber: number;
   seasonNumber?: number;
+  ancillary?: boolean;
   episodeTitle: string;
   updatedAt: string;
   size: number;

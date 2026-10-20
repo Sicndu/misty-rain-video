@@ -14,3 +14,10 @@ test('new series start at the first available episode; auto-next never skips a g
  const episodes=[{seasonNumber:2,episodeNumber:1},{seasonNumber:1,episodeNumber:3},{seasonNumber:1,episodeNumber:2},{seasonNumber:1,episodeNumber:1}];
  assert.equal(firstPlayableEpisode(episodes,'tv'),3);assert.equal(firstPlayableEpisode(episodes,'movie'),0);assert.equal(nextPlayableEpisode(episodes,3,'tv'),2);assert.equal(nextPlayableEpisode(episodes,1,'tv'),-1);assert.equal(nextPlayableEpisode(episodes,3,'movie'),-1);assert.equal(nextPlayableEpisode(episodes,3,'tv',true),-1);assert.equal(nextPlayableEpisode([{episodeNumber:1},{episodeNumber:3}],0,'tv'),-1);
 });
+
+test('visible extras remain selectable without taking over default playback or automatic next episode',()=>{
+ const episodes=[{episodeNumber:1,ancillary:true},{episodeNumber:2,ancillary:true},{episodeNumber:2},{episodeNumber:1}];
+ assert.equal(firstPlayableEpisode(episodes,'tv'),3);assert.equal(firstPlayableEpisode(episodes,'movie'),2);
+ assert.equal(nextPlayableEpisode(episodes,3,'tv'),2);assert.equal(nextPlayableEpisode(episodes,0,'tv'),-1);
+ assert.equal(firstPlayableEpisode([{episodeNumber:0,ancillary:true}],'movie'),0);
+});

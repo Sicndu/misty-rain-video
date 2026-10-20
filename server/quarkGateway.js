@@ -422,6 +422,7 @@ const serializeEpisode = item => {
     parentFid: item.pdir_fid || '0',
     fileName: item.file_name || (episodeNumber ? `第 ${episodeNumber} 集` : '正片'),
     episodeNumber,
+    ancillary: ancillaryVideoPattern.test(String(item.file_name || '')) || isAncillaryVideoPath(`${item.source_path || ''}/${item.file_name || ''}`),
     seasonNumber: season,
     sourcePath: item.source_path || '',
     episodeTitle: episodeNumber ? `${season ? `第 ${season} 季 · ` : ''}第 ${episodeNumber} 集${part ? `（${part}）` : ''}` : '正片',
