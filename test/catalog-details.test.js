@@ -9,9 +9,10 @@ const core = (id = '123') => ({ id, type: 'tv', title: '测试剧集', original_
   genres: ['剧情'], countries: ['中国大陆'], languages: ['汉语普通话'], pubdate: ['2026-01-01'], durations: ['45分钟'], aka: ['测试别名'],
   pic: { large: 'https://img2.doubanio.com/poster.jpg' }, rating: { value: 8.1, count: 240 }, episodes_count: 24,
   directors: [{ name: '导演甲' }], actors: [{ name: '演员甲' }, { name: '演员乙' }], comment_count: 11 });
-const modules = { credits: { total: 20, items: [{ id: '321', name: '导演甲', category: '导演', avatar: { large: 'https://img2.doubanio.com/a.jpg' } }, { id: '321', name: '导演甲', category: '编剧' }] },
+const modules = { info: {}, credits: { total: 20, items: [{ id: '321', name: '导演甲', category: '导演', avatar: { large: 'https://img2.doubanio.com/a.jpg' } }, { id: '321', name: '导演甲', category: '编剧' }] },
   photos: { total: 50, photos: [{ id: '456', image: { large: { url: 'https://img2.doubanio.com/photo.jpg' } } }, { image: { large: { url: 'http://127.0.0.1/private' } } }] },
   comments: { interests: [{ comment: '测试短评', user: { name: '观众', id: 'secret', location: 'private' }, ip_location: 'private', rating: { value: 5 }, create_time: '2026-01-01 10:00:00' }] } };
+const fixtureResponse = url => url.endsWith('/desc') ? new Response('<table><tr><td>类型</td><td>剧情</td></tr></table>') : Response.json(responder(url));
 const temp = t => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'catalog-details-')); t.after(() => fs.rmSync(dir, { force: true, recursive: true })); return dir; };
 function responder(url) {
   if (url.includes('/credits')) return modules.credits;
@@ -36,26 +37,26 @@ test('Bangumi subjects stay in their own namespace, with no invented Douban fiel
 });
 test('parallel readers share one metadata request; persistent cache survives restart and never leaks upstream image URLs', async t => {
   const dir = temp(t); let calls = 0; const registered = [];
-  const fetcher = async url => { calls++; return Response.json(responder(url)); };
+  const fetcher = async url => { calls++; return fixtureResponse(url); };
   const options = { dataDir: dir, fetcher, discovery: { registerCatalogItems: items => registered.push(...items) } };
   const service = new CatalogDetails(options);
   const results = await Promise.all(Array.from({ length: 12 }, () => service.get('douban-123')));
-  assert.equal(calls, 4); assert.ok(results.every(d => d.title === '测试剧集')); assert.match(results[0].poster, /^\/api\/catalog\/detail-images\//);
+  assert.equal(calls, 5); assert.ok(results.every(d => d.title === '测试剧集')); assert.match(results[0].poster, /^\/api\/catalog\/detail-images\//);
   assert.doesNotMatch(JSON.stringify(results), /doubanio\.com|imageUrl/);
-  const restarted = new CatalogDetails(options); await restarted.get('douban-123'); assert.equal(calls, 4); assert.ok(registered.length); assert.equal('credits' in registered[0], false); assert.ok(registered[0].description.length <= 180);
-  await assert.rejects(service.get('douban-../123'), { statusCode: 404 }); assert.equal(calls, 4);
+  const restarted = new CatalogDetails(options); await restarted.get('douban-123'); assert.equal(calls, 5); assert.ok(registered.length); assert.equal('credits' in registered[0], false); assert.ok(registered[0].description.length <= 180);
+  await assert.rejects(service.get('douban-../123'), { statusCode: 404 }); assert.equal(calls, 5);
 });
 test('optional module failure preserves core metadata and retries soon; expired upstream failure serves bounded stale cache', async t => {
   let clock = 1000, failed = 'credits', calls = 0;
   const service = new CatalogDetails({ dataDir: temp(t), now: () => clock, ttlMs: 100, fetcher: async url => {
-    calls++; if (failed === 'all' || url.endsWith('/' + failed)) return new Response('', { status: 503 }); return Response.json(responder(url));
+    calls++; if (failed === 'all' || url.endsWith('/' + failed)) return new Response('', { status: 503 }); return fixtureResponse(url);
   } });
   const first = await service.get('douban-123'); assert.equal(first.partial, true); assert.equal(first.episodeCount, 24);
-  await service.get('douban-123'); assert.equal(calls, 4);
-  clock += 60_001; failed = ''; assert.equal((await service.get('douban-123')).partial, false); assert.equal(calls, 8);
-  clock += 101; failed = 'all'; assert.equal((await service.get('douban-123')).stale, true); assert.equal(calls, 9);
-  await service.get('douban-123'); assert.equal(calls, 9);
-  clock += 8 * 86400_000; await assert.rejects(service.get('douban-123')); assert.equal(calls, 10);
+  await service.get('douban-123'); assert.equal(calls, 5);
+  clock += 60_001; failed = ''; assert.equal((await service.get('douban-123')).partial, false); assert.equal(calls, 10);
+  clock += 101; failed = 'all'; assert.equal((await service.get('douban-123')).stale, true); assert.equal(calls, 11);
+  await service.get('douban-123'); assert.equal(calls, 11);
+  clock += 8 * 86400_000; await assert.rejects(service.get('douban-123')); assert.equal(calls, 12);
 });
 test('new subjects are concurrency bounded and mismatched provider identities cannot poison cache', async t => {
   let release; const gate = new Promise(resolve => { release = resolve; });
@@ -78,7 +79,7 @@ test('subject metadata and images require authentication before any provider req
   let calls = 0;
   const context = { authService: { authenticate() { throw Object.assign(new Error('login'), { statusCode: 401 }); } }, userContext: () => ({}),
     catalogDetails: { get() { calls++; }, assets: { read() { calls++; } } } };
-  for (const url of ['/api/catalog/subjects/douban-123', '/api/catalog/detail-images/abc']) {
+  for (const url of ['/api/catalog/subjects/douban-123', '/api/catalog/detail-images/abc', '/api/catalog/subjects/douban-123/photos?start=0', '/api/catalog/subjects/douban-123/comments?start=0']) {
     const response = { statusCode: 0, setHeader() {}, end() {} };
     await handleApiRequest({ method: 'GET', url, headers: { host: 'localhost' } }, response, context); assert.equal(response.statusCode, 401);
   }
@@ -90,9 +91,9 @@ test('Douban movie-to-TV canonical redirects retain the subject ID and share the
   const service = new CatalogDetails({ dataDir: temp(t), fetcher: async (url, options) => {
     calls.push({ url, signal: options.signal });
     if (url.endsWith('/movie/123')) return new Response(null, { status: 301, headers: { Location: 'https://m.douban.com/rexxar/api/v2/tv/123' } });
-    return Response.json(responder(url));
+    return fixtureResponse(url);
   } });
-  const result = await service.get('douban-123'); assert.equal(result.episodeCount, 24); assert.equal(calls.length, 5);
+  const result = await service.get('douban-123'); assert.equal(result.episodeCount, 24); assert.equal(calls.length, 6);
   assert.equal(calls[1].url, 'https://m.douban.com/rexxar/api/v2/tv/123'); assert.equal(calls[0].signal, calls[1].signal);
 });
 test('security pages, different IDs and redirects from other modules are never followed', async t => {

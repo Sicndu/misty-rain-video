@@ -70,3 +70,44 @@ test('metadata failure retains matching seed and manual search, with a retry; no
     app.unmount();
   }
 });
+
+const photo = n => ({ id: String(n), image: `/thumb/${n}`, fullImage: `/full/${n}`, description: '' });
+const comment = n => ({ id: String(n), author: `观众${n}`, text: `短评${n}`, rating: 4, date: '2026-10-21', votes: 10 });
+const clickText = text => [...document.querySelectorAll('button')].find(button => button.textContent === text)?.click();
+test('details have one quiet attribution link; photos and comments expand locally and pages deduplicate stable IDs', async t => {
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    calls.push(url);
+    if (url.includes('/photos?')) return Response.json({ code: 0, data: { items: Array.from({ length: 24 }, (_, i) => photo(i + 1)), total: 40, nextStart: 24, stale: false } });
+    if (url.includes('/comments?')) return Response.json({ code: 0, data: { items: Array.from({ length: 20 }, (_, i) => comment(i + 1)), total: 50, nextStart: 20, stale: false } });
+    return Response.json({ code: 0, data: { ...details(), photos: [photo(1), photo(2)], photoCount: 40, comments: [comment(1), comment(2)], commentCount: 50,
+      writers: ['编剧甲'], imdb: 'tt1234567', credits: [{ name: '演员甲', role: '演员', image: '/actor', url: 'https://movie.douban.com/celebrity/1/' }] } });
+  });
+  document.body.innerHTML = '<div id="mount"></div>';
+  const app = createApp({ render: () => h(Detail, { id: 'douban-123' }) }); app.mount('#mount'); t.after(() => app.unmount()); await flush();
+  assert.equal(document.querySelectorAll('a[href^="https://"]').length, 1); assert.match(document.body.textContent, /编剧甲/); assert.match(document.body.textContent, /tt1234567/); assert.equal(calls.length, 1);
+  document.querySelector('.photo-row').closest('section').querySelector('.section-heading button').click(); await flush();
+  assert.equal(document.querySelectorAll('.photo-row button').length, 24); assert.equal(calls.length, 2);
+  clickText('更多短评'); await flush(); assert.equal(document.querySelectorAll('.short-comment').length, 20); assert.equal(calls.length, 3);
+  assert.equal(document.querySelectorAll('a[href^="https://"]').length, 1); assert.ok(calls.every(url => url.startsWith('/api/catalog/subjects/')));
+});
+test('closing the photo viewer while its next page loads never reopens it; switching subjects cancels pending content', async t => {
+  const { ref } = await import('vue'); const id = ref('douban-123'); const pending = [];
+  t.mock.method(globalThis, 'fetch', (url, options) => {
+    if (url.includes('/photos?')) return new Promise(resolve => pending.push({ resolve, signal: options.signal }));
+    return Promise.resolve(Response.json({ code: 0, data: { ...details(id.value), photos: [photo(1)], photoCount: 2 } }));
+  });
+  document.body.innerHTML = '<div id="mount"></div>';
+  const app = createApp({ render: () => h(Detail, { id: id.value }) }); app.mount('#mount'); t.after(() => app.unmount()); await flush();
+  document.querySelector('.photo-row button').click(); await flush(); assert.ok(document.querySelector('[aria-label="剧照大图"]'));
+  document.querySelector('.photo-stage img').dispatchEvent(new window.Event('error')); await flush();
+  assert.equal(document.querySelector('.photo-stage img').getAttribute('src'), '/thumb/1');
+  document.querySelector('[aria-label="下一张"]').click(); await flush();
+  window.dispatchEvent(new window.PopStateEvent('popstate', { state: {} })); await flush(); assert.equal(document.querySelector('[aria-label="剧照大图"]'), null);
+  pending[0].resolve(Response.json({ code: 0, data: { items: [photo(1), photo(2)], total: 2, nextStart: null } })); await flush(); assert.equal(document.querySelector('[aria-label="剧照大图"]'), null);
+  id.value = 'douban-456'; await flush();
+  document.querySelector('.photo-row').closest('section').querySelector('.section-heading button').click(); await flush();
+  id.value = 'douban-789'; await flush(); assert.equal(pending[1].signal.aborted, true);
+  pending[1].resolve(Response.json({ code: 0, data: { items: [photo(99)], total: 1, nextStart: null } })); await flush();
+  assert.equal(document.querySelector('.photo-row img').getAttribute('src'), '/thumb/1');
+});

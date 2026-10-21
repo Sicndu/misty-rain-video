@@ -286,6 +286,12 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
+    const subjectContentMatch = pathname.match(/^\/api\/catalog\/subjects\/([^/]+)\/(photos|comments)$/);
+    if (subjectContentMatch && request.method === 'GET') {
+      response.setHeader('Cache-Control', 'private, no-store');
+      sendSuccess(response, await context.catalogDetails.content.get(subjectContentMatch[1], subjectContentMatch[2], url.searchParams.get('start') || '0'));
+      return true;
+    }
     const subjectMatch = pathname.match(/^\/api\/catalog\/subjects\/([^/]+)$/);
     if (subjectMatch && request.method === 'GET') {
       response.setHeader('Cache-Control', 'private, no-store');

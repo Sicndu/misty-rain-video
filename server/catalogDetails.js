@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isDiscoveryImageUrl } from './discoverySources.js';
 import { ShareThumbnails } from './shareThumbnails.js';
+import { CatalogDetailContent, normalizePhotos, normalizeComments, parseSubjectInfo } from './catalogDetailContent.js';
 
 const validId = /^(douban|bangumi)-[1-9]\d{0,12}$/;
 const text = (value, length = 300) => typeof value === 'string' ? value.trim().slice(0, length) : '';
@@ -14,7 +15,9 @@ const TTL = 6 * 3600_000, MAX_AGE = 7 * 86400_000;
 
 export function normalizeDoubanDetails(core, modules = {}) {
   if (!/^[1-9]\d{0,12}$/.test(String(core?.id)) || !text(core.title) || !['movie', 'tv'].includes(core.type)) throw error('影片详情暂时不可用');
-  const genres = list(core.genres), id = `douban-${core.id}`, sourceUrl = `https://movie.douban.com/subject/${core.id}/`;
+  const info = modules.info || {};
+  const merge = (a, b) => list([...(a || []), ...(b || [])]);
+  const genres = merge(core.genres, info.genres), id = `douban-${core.id}`, sourceUrl = `https://movie.douban.com/subject/${core.id}/`;
   const credits = new Map();
   const addCredit = (person, role) => {
     const name = text(person?.name, 100); if (!name) return;
@@ -27,24 +30,21 @@ export function normalizeDoubanDetails(core, modules = {}) {
   for (const person of (modules.credits?.items || []).slice(0, 100)) addCredit(person, person.simple_character || person.category);
   for (const person of (core.directors || []).slice(0, 30)) if (!credits.has(person.name)) addCredit(person, '导演');
   for (const person of (core.actors || []).slice(0, 100)) if (!credits.has(person.name)) addCredit(person, '演员');
-  const photos = (modules.photos?.photos || []).slice(0, 12).map(photo => ({
-    imageUrl: imageUrl(photo.image?.large?.url || photo.image?.normal?.url), description: text(photo.description, 180),
-    url: /^[1-9]\d{0,12}$/.test(String(photo.id)) ? `https://movie.douban.com/photos/photo/${photo.id}/` : ''
-  })).filter(photo => photo.imageUrl);
-  return { id, provider: 'douban', title: text(core.title, 120), originalTitle: text(core.original_title, 200),
+  for (const name of info.actors || []) if (!credits.has(name)) addCredit({ name }, '演员');
+  for (const name of info.writers || []) if (!credits.get(name)?.role.includes('编剧')) addCredit({ name }, '编剧');
+  const photos = normalizePhotos(modules.photos).slice(0, 6);
+  return { id, provider: 'douban', subjectType: core.type, title: text(core.title, 120), originalTitle: text(core.original_title, 200),
     category: genres.includes('动画') ? 'anime' : genres.includes('真人秀') || genres.includes('脱口秀') ? 'variety' : core.type === 'tv' ? 'tv' : 'movie',
     year: text(String(core.year || ''), 4), rating: score(core.rating?.value), ratingCount: count(core.rating?.count),
     description: text(core.intro, 10000), subtitle: text(core.episodes_info, 100), imageUrl: imageUrl(core.pic?.large || core.pic?.normal || core.cover_url),
-    sourceUrl, genres, countries: list(core.countries), languages: list(core.languages), premieres: list(core.pubdate),
-    durations: list(core.durations), aliases: list(core.aka), episodeCount: count(core.episodes_count),
+    sourceUrl, genres, countries: merge(core.countries, info.countries), languages: merge(core.languages, info.languages), premieres: merge(core.pubdate, info.premieres),
+    durations: merge(core.durations, info.durations), aliases: merge(core.aka, info.aliases), writers: info.writers || [], imdb: info.imdb || '', episodeCount: count(core.episodes_count),
     directors: list((core.directors || []).map(person => person.name)), credits: [...credits.values()].slice(0, 120),
     creditCount: count(modules.credits?.total), photos, photoCount: count(modules.photos?.total),
     commentCount: count(core.comment_count), reviewCount: count(core.review_count),
-    comments: (modules.comments?.interests || []).slice(0, 3).map(item => ({ author: text(item.user?.name, 80),
-      text: text(item.comment, 600), rating: count(item.rating?.value) <= 5 ? count(item.rating?.value) : 0,
-      date: text(item.create_time, 10), votes: count(item.vote_count) })).filter(item => item.text),
+    comments: normalizeComments(modules.comments).slice(0, 3),
     honors: list((core.honor_infos || []).map(item => `${text(item.title, 80)}${text(item.title).includes('榜') && count(item.rank) ? ` 第 ${item.rank} 名` : ''}`)),
-    partial: ['credits', 'photos', 'comments'].some(key => !modules[key]) };
+    partial: ['credits', 'photos', 'comments', 'info'].some(key => !modules[key]) };
 }
 
 export function normalizeBangumiDetails(core) {
@@ -52,7 +52,7 @@ export function normalizeBangumiDetails(core) {
   const info = key => (core.infobox || []).find(item => item.key === key)?.value;
   const names = value => list(typeof value === 'string' ? value.split('、') : (value || []).map(item => typeof item === 'string' ? item : item.v));
   return { id: `bangumi-${core.id}`, provider: 'bangumi', title: text(core.name_cn || core.name, 120), originalTitle: text(core.name, 200),
-    category: 'anime', year: text(core.date, 4), rating: score(core.rating?.score), ratingCount: count(core.rating?.total),
+    category: 'anime', writers: [], imdb: '', year: text(core.date, 4), rating: score(core.rating?.score), ratingCount: count(core.rating?.total),
     description: text(core.summary, 10000), subtitle: '', imageUrl: imageUrl(core.images?.large || core.images?.common, 'bangumi'),
     sourceUrl: `https://bgm.tv/subject/${core.id}`, genres: [], countries: [], languages: [], premieres: list([core.date]), durations: names(info('单集片长')),
     aliases: names(info('别名')), episodeCount: count(core.eps), directors: names(info('导演')),
@@ -63,6 +63,7 @@ export function normalizeBangumiDetails(core) {
 export class CatalogDetails {
   constructor({ dataDir, discovery, fetcher = fetch, now = Date.now, ttlMs = TTL }) {
     this.file = path.resolve(dataDir, 'catalog-details.json'); this.discovery = discovery; this.fetcher = fetcher; this.now = now; this.ttlMs = ttlMs;
+    this.content = new CatalogDetailContent(this, { dataDir, now });
     this.cache = new Map(); this.pending = new Map(); this.failures = new Map(); this.images = new Map();
     this.assets = new ShareThumbnails((url, signal) => {
       const provider = isDiscoveryImageUrl(url, 'douban') ? 'douban' : isDiscoveryImageUrl(url, 'bangumi') ? 'bangumi' : '';
@@ -71,7 +72,7 @@ export class CatalogDetails {
     }, now);
     try {
       const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      if (saved.version === 2) for (const entry of (saved.entries || []).slice(-100)) {
+      if (saved.version === 3) for (const entry of (saved.entries || []).slice(-100)) {
         if (validId.test(entry?.detail?.id) && entry.at > now() - MAX_AGE && Array.isArray(entry.detail.credits) && Array.isArray(entry.detail.photos)) this.cache.set(entry.detail.id, entry);
       }
     } catch { /* Cache is optional and rebuilt from public metadata. */ }
@@ -94,6 +95,17 @@ export class CatalogDetails {
     for await (const chunk of response.body) { size += chunk.length; if (size > 2 * 1024 * 1024) throw error('影片详情响应过大'); chunks.push(chunk); }
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   }
+  async subjectInfo(id, signal) {
+    const response = await this.fetcher(`https://www.douban.com/doubanapp//h5/movie/${id}/desc`, {
+      signal, redirect: 'error', headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    if (!response.ok || !response.body) { await response.body?.cancel(); throw error('影片资料暂时不可用'); }
+    const chunks = []; let size = 0;
+    for await (const chunk of response.body) { size += chunk.length; if (size > 512 * 1024) throw error('影片资料响应过大'); chunks.push(chunk); }
+    const info = parseSubjectInfo(Buffer.concat(chunks).toString('utf8'));
+    if (!Object.values(info).some(value => value.length)) throw error('影片资料暂时不可用');
+    return info;
+  }
   async fetchDetails(id) {
     const signal = AbortSignal.timeout(10_000), number = id.split('-')[1];
     if (id.startsWith('bangumi-')) return normalizeBangumiDetails(await this.json(`https://api.bgm.tv/v0/subjects/${number}`, signal));
@@ -101,9 +113,9 @@ export class CatalogDetails {
     const core = await this.json(`https://m.douban.com/rexxar/api/v2/movie/${number}`, AbortSignal.any([signal, AbortSignal.timeout(6000)]));
     if (String(core.id) !== number || !['movie', 'tv'].includes(core.type)) throw error('影片详情暂时不可用');
     const base = `https://m.douban.com/rexxar/api/v2/${core.type}/${number}`;
-    const endpoints = { credits: '/credits', photos: '/photos?type=S&start=0&count=6', comments: '/interests?count=3&order_by=hot&start=0' };
+    const endpoints = { credits: '/credits', photos: '/photos?type=S&start=0&count=6', comments: '/interests?count=3&order_by=hot&start=0', info: '' };
     const modules = Object.fromEntries(await Promise.all(Object.entries(endpoints).map(async ([key, suffix]) => {
-      try { return [key, await this.json(base + suffix, AbortSignal.any([signal, AbortSignal.timeout(5000)]))]; } catch { return [key, null]; }
+      try { const moduleSignal = AbortSignal.any([signal, AbortSignal.timeout(5000)]); return [key, key === 'info' ? await this.subjectInfo(number, moduleSignal) : await this.json(base + suffix, moduleSignal)]; } catch { return [key, null]; }
     })));
     return normalizeDoubanDetails(core, modules);
   }
@@ -112,7 +124,7 @@ export class CatalogDetails {
     while (this.cache.size > 100) this.cache.delete(this.cache.keys().next().value);
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      fs.writeFileSync(this.file + '.tmp', JSON.stringify({ version: 2, entries: [...this.cache.values()] }), { mode: 0o600 });
+      fs.writeFileSync(this.file + '.tmp', JSON.stringify({ version: 3, entries: [...this.cache.values()] }), { mode: 0o600 });
       fs.renameSync(this.file + '.tmp', this.file);
     } catch { /* Read-only/full data volume must not make live details fail. */ }
   }
@@ -160,6 +172,6 @@ export class CatalogDetails {
     const { imageUrl: posterUrl, credits, photos, ...rest } = detail;
     return { ...rest, stale, poster: this.image(posterUrl, detail.provider),
       credits: credits.map(({ imageUrl: url, ...person }) => ({ ...person, image: this.image(url, detail.provider) })),
-      photos: photos.map(({ imageUrl: url, ...photo }) => ({ ...photo, image: this.image(url, detail.provider) })) };
+      photos: photos.map(({ imageUrl: url, fullImageUrl, ...photo }) => ({ ...photo, image: this.image(url, detail.provider), fullImage: this.image(fullImageUrl, detail.provider) })) };
   }
 }
