@@ -30,7 +30,7 @@ test('details retain real episode counts, merge credit roles, keep unnamed portr
   assert.throws(() => normalizeDoubanDetails({ ...core(), type: 'celebrity' }));
 });
 test('Bangumi subjects stay in their own namespace, with no invented Douban fields', () => {
-  const d = normalizeBangumiDetails({ id: 10, type: 2, name: 'Original', name_cn: '动画', date: '2026-02-01', summary: '简介', total_episodes: 12,
+  const d = normalizeBangumiDetails({ id: 10, type: 2, name: 'Original', name_cn: '动画', date: '2026-02-01', summary: '简介', eps: 12, total_episodes: 16,
     infobox: [{ key: '导演', value: '导演甲' }, { key: '别名', value: [{ v: '别名' }] }], images: { large: 'https://lain.bgm.tv/cover.jpg' } });
   assert.equal(d.id, 'bangumi-10'); assert.equal(d.episodeCount, 12); assert.deepEqual(d.aliases, ['别名']); assert.equal(d.credits.length, 0);
 });
@@ -83,4 +83,22 @@ test('subject metadata and images require authentication before any provider req
     await handleApiRequest({ method: 'GET', url, headers: { host: 'localhost' } }, response, context); assert.equal(response.statusCode, 401);
   }
   assert.equal(calls, 0);
+});
+
+test('Douban movie-to-TV canonical redirects retain the subject ID and share the request deadline', async t => {
+  const calls = [];
+  const service = new CatalogDetails({ dataDir: temp(t), fetcher: async (url, options) => {
+    calls.push({ url, signal: options.signal });
+    if (url.endsWith('/movie/123')) return new Response(null, { status: 301, headers: { Location: 'https://m.douban.com/rexxar/api/v2/tv/123' } });
+    return Response.json(responder(url));
+  } });
+  const result = await service.get('douban-123'); assert.equal(result.episodeCount, 24); assert.equal(calls.length, 5);
+  assert.equal(calls[1].url, 'https://m.douban.com/rexxar/api/v2/tv/123'); assert.equal(calls[0].signal, calls[1].signal);
+});
+test('security pages, different IDs and redirects from other modules are never followed', async t => {
+  for (const location of ['https://sec.douban.com/check', 'https://m.douban.com/rexxar/api/v2/tv/456', 'https://example.com/tv/123']) {
+    let calls = 0;
+    const service = new CatalogDetails({ dataDir: temp(t), fetcher: async () => { calls++; return new Response(null, { status: 302, headers: { Location: location } }); } });
+    await assert.rejects(service.get('douban-123')); assert.equal(calls, 1);
+  }
 });

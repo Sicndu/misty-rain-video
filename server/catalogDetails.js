@@ -55,7 +55,7 @@ export function normalizeBangumiDetails(core) {
     category: 'anime', year: text(core.date, 4), rating: score(core.rating?.score), ratingCount: count(core.rating?.total),
     description: text(core.summary, 10000), subtitle: '', imageUrl: imageUrl(core.images?.large || core.images?.common, 'bangumi'),
     sourceUrl: `https://bgm.tv/subject/${core.id}`, genres: [], countries: [], languages: [], premieres: list([core.date]), durations: names(info('单集片长')),
-    aliases: names(info('别名')), episodeCount: count(core.total_episodes || core.eps), directors: names(info('导演')),
+    aliases: names(info('别名')), episodeCount: count(core.eps), directors: names(info('导演')),
     credits: [], creditCount: 0, photos: [], photoCount: 0, comments: [], commentCount: 0, reviewCount: 0, honors: [], partial: false };
 }
 
@@ -71,15 +71,24 @@ export class CatalogDetails {
     }, now);
     try {
       const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      if (saved.version === 1) for (const entry of (saved.entries || []).slice(-100)) {
+      if (saved.version === 2) for (const entry of (saved.entries || []).slice(-100)) {
         if (validId.test(entry?.detail?.id) && entry.at > now() - MAX_AGE && Array.isArray(entry.detail.credits) && Array.isArray(entry.detail.photos)) this.cache.set(entry.detail.id, entry);
       }
     } catch { /* Cache is optional and rebuilt from public metadata. */ }
   }
-  async json(url, signal) {
+  async json(url, signal, allowSubjectRedirect = true) {
     const bangumi = url.startsWith('https://api.bgm.tv/');
-    const response = await this.fetcher(url, { signal, redirect: 'error', headers: { Accept: 'application/json',
+    const response = await this.fetcher(url, { signal, redirect: 'manual', headers: { Accept: 'application/json',
       'User-Agent': bangumi ? 'MistyRainVideo/1.0 (https://github.com/Sicndu/misty-rain-video)' : 'Mozilla/5.0', Referer: bangumi ? 'https://bgm.tv/' : 'https://m.douban.com/' } });
+    // Douban canonicalizes a television ID from /movie/:id to /tv/:id. Follow only that
+    // exact same-subject API transition, never arbitrary redirects or security/login pages.
+    const movieId = url.match(/^https:\/\/m\.douban\.com\/rexxar\/api\/v2\/movie\/([1-9]\d{0,12})$/)?.[1];
+    const canonicalTv = movieId ? `https://m.douban.com/rexxar/api/v2/tv/${movieId}` : '';
+    if (allowSubjectRedirect && canonicalTv && [301, 302, 303, 307, 308].includes(response.status)
+      && new URL(response.headers.get('location') || '', url).href === canonicalTv) {
+      await response.body?.cancel();
+      return this.json(canonicalTv, signal, false);
+    }
     if (!response.ok || !response.body) { await response.body?.cancel(); throw error('影片详情暂时不可用', response.status === 404 ? 404 : 503); }
     const chunks = []; let size = 0;
     for await (const chunk of response.body) { size += chunk.length; if (size > 2 * 1024 * 1024) throw error('影片详情响应过大'); chunks.push(chunk); }
@@ -103,7 +112,7 @@ export class CatalogDetails {
     while (this.cache.size > 100) this.cache.delete(this.cache.keys().next().value);
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      fs.writeFileSync(this.file + '.tmp', JSON.stringify({ version: 1, entries: [...this.cache.values()] }), { mode: 0o600 });
+      fs.writeFileSync(this.file + '.tmp', JSON.stringify({ version: 2, entries: [...this.cache.values()] }), { mode: 0o600 });
       fs.renameSync(this.file + '.tmp', this.file);
     } catch { /* Read-only/full data volume must not make live details fail. */ }
   }
