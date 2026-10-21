@@ -24,7 +24,6 @@ async function bundle(file) {
   await build({ entryPoints: [file], outfile, bundle: true, format: 'esm', external: ['vue'], plugins: [vuePlugin], logLevel: 'silent' });
   return import(pathToFileURL(outfile));
 }
-const { default: Controls } = await bundle('src/components/player/PlaybackControls.vue');
 const { default: Captions } = await bundle('src/components/player/PlayerCaptions.vue');
 const { captionLayout } = await bundle('src/services/captionLayout.ts');
 const { useVideoFullscreen } = await bundle('src/composables/useVideoFullscreen.ts');
@@ -95,44 +94,6 @@ test('Android captions mirror active text without changing modes, ignore metadat
   } finally { view.app.unmount(); set(document, 'pictureInPictureElement', null); }
 });
 
-function touch(target, type, x, y = 40, extras = {}) {
-  const pointer = new dom.window.MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 });
-  Object.assign(pointer, { isPrimary: true, pointerId: 1, ...extras }); target.dispatchEvent(pointer);
-}
-test('Android gestures seek by double tap, ignore swipes/multitouch, retain scrubbing and quick episode controls', async () => {
-  const media = video(); media.currentTime = 60;
-  const view = mount(Controls, { video: markRaw(media), expanded: false, title: 'Test', episodes: [{ fid: 'a', episodeTitle: '第 1 集' }, { fid: 'b', episodeTitle: '第 2 集' }], currentIndex: 0 });
-  try {
-    await tick(); const surface = document.querySelector('.player-gesture'); surface.getBoundingClientRect = () => ({ width: 300, left: 0 });
-    for (let i = 0; i < 2; i++) { touch(surface, 'pointerdown', 280); touch(surface, 'pointerup', 280); }
-    assert.equal(media.currentTime, 70);
-    for (let i = 0; i < 2; i++) { touch(surface, 'pointerdown', 10); touch(surface, 'pointerup', 10); }
-    assert.equal(media.currentTime, 60);
-    touch(surface, 'pointerdown', 10); touch(surface, 'pointerup', 100);
-    touch(surface, 'pointerdown', 10, 40, { isPrimary: false }); touch(surface, 'pointerup', 10);
-    assert.equal(media.currentTime, 60);
-    const slider = document.querySelector('input[type="range"]'); slider.value = '90'; slider.dispatchEvent(event('input'));
-    media.currentTime = 65; media.dispatchEvent(event('timeupdate')); await tick(); assert.equal(slider.value, '90');
-    slider.dispatchEvent(event('change')); assert.equal(media.currentTime, 90);
-    assert.equal(document.querySelector('[aria-label="选集与片源"]'),null,'inline episodes are in the page');
-    view.props.expanded=true;await tick();const picker=document.querySelector('[aria-label="选集与片源"]');picker.click();await tick();assert.equal(picker.getAttribute('aria-expanded'),'true');
-    const speed = document.querySelector('[aria-label="播放速度"]'); speed.value = '1.5'; speed.dispatchEvent(event('change')); assert.equal(media.playbackRate, 1.5);
-  } finally { view.app.unmount(); }
-});
-test('fullscreen controls hide during playback but remain available while paused or keyboard-focused', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  const media = video(); await media.play();
-  const view = mount(Controls, { video: markRaw(media), expanded: true, title: 'Test', episodes: [], currentIndex: 0 });
-  try {
-    await tick(); t.mock.timers.tick(3501); await tick();
-    assert.ok(document.querySelector('.player-controls').classList.contains('concealed'));
-    media.pause(); await tick();
-    assert.ok(!document.querySelector('.player-controls').classList.contains('concealed'));
-    document.querySelector('select[aria-label="播放速度"]').focus(); await media.play(); await tick();
-    t.mock.timers.tick(3501); await tick();
-    assert.ok(!document.querySelector('.player-controls').classList.contains('concealed'));
-  } finally { view.app.unmount(); }
-});
 test('container fullscreen preserves custom controls; rejected orientation is nonfatal; exit unlocks', async () => {
   const media = video(); const container = document.createElement('div'); let controls; let locks = 0; let unlocks = 0; let reject = false;
   set(window.screen, 'orientation', { lock: async () => { locks++; if (reject) throw new Error('unsupported'); }, unlock: () => unlocks++ });

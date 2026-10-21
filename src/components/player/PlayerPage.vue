@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { siteSettings } from '../../services/siteSettings';
 import DanmakuControls from './DanmakuControls.vue';
-import PlaybackControls from './PlaybackControls.vue';
+import XgPlayerControls from './XgPlayerControls.vue';
 import EpisodeSourcePanel from './EpisodeSourcePanel.vue';
 import { findPlaybackCandidates } from '../../services/playbackCandidates';
 import type { ResourceItem } from '../../types/search';
@@ -170,7 +170,6 @@ const playActionLabel = computed(() => {
     ? `播放第 ${episode.episodeNumber} 集`
     : `播放${episode.episodeTitle}`;
 });
-const sourceDetail = (source: PlaybackSource) => source.width && source.height ? `${source.width}×${source.height}` : '';
 
 const destroyPlaybackEngine = () => {
   detectedAudioTracks.value = [];
@@ -942,7 +941,7 @@ defineExpose({ retry });
       <p v-if="session?.cachedOnly" class="cached-playback-note">原分享已失效，仍可播放已缓存的视频。其他集数可在片源栏查找。</p>
       <div class="player-layout">
         <div ref="playerContainer" class="video-column" :class="{ 'player-fullscreen': fullscreen && !nativeFullscreen }">
-          <div class="video-stage" :class="{ 'has-player-controls': !nativeFullscreen && phase === 'ready' }" :style="{ '--video-ratio': videoAspectRatio }">
+          <div class="video-stage" :style="{ '--video-ratio': videoAspectRatio }">
             <video
               :key="videoInstanceKey"
               ref="videoRef"
@@ -1036,13 +1035,12 @@ defineExpose({ retry });
             </div>
           </div>
 
-          <PlaybackControls v-if="videoRef && phase === 'ready'" :native-fullscreen="nativeFullscreen"
-            :video="videoRef" :expanded="fullscreen && !nativeFullscreen" :picture-mode="pictureMode" :title="media.title" :episodes="episodes" :current-index="currentEpisodeIndex"
-            @fullscreen="toggleFullscreen" @picture-mode="pictureMode = $event" @inset="androidControlsInset = $event">
+          <XgPlayerControls v-if="videoRef" :ready="phase === 'ready'" :native-fullscreen="nativeFullscreen"
+            :video="videoRef" :expanded="fullscreen && !nativeFullscreen" :picture-mode="pictureMode" :sources="sources" :selected-source-id="selectedSourceId"
+            @fullscreen="toggleFullscreen" @quality="changeQuality" @picture-mode="pictureMode = $event" @inset="androidControlsInset = $event">
             <SubtitleControls :video="videoRef" :native-fullscreen="nativeFullscreen" :fullscreen="fullscreen" :context-key="`${currentEpisode?.fid || ''}:${selectedSourceId}`" :username="username" :notice="playback?.subtitleNotice" compact icon-only
               :loading="embeddedSubtitles.loading.value" :read-error="embeddedSubtitles.error.value" @retry-embedded="embeddedSubtitles.retry" />
             <template #episodes><div class="fullscreen-episode-panel"><button type="button" class="collect-series" :disabled="collecting || collectedAll" @click="collectSeries"><BookmarkCheck v-if="collectedAll" /><Bookmark v-else />{{ collectedAll ? '已收藏' : collecting ? '收藏中…' : '收藏整部' }}</button><div ref="fullscreenEpisodesHost"></div></div></template>
-            <template #quality="{ close }"><div class="quality-options" role="listbox" aria-label="清晰度选择"><button v-for="source in sources" :key="source.id" type="button" role="option" :aria-selected="selectedSourceId === source.id" @click="changeQuality(source); close()"><span>{{ source.resolution === 'original' ? '原画' : source.label }}<small>{{ sourceDetail(source) }}</small></span><span v-if="selectedSourceId === source.id" aria-hidden="true">✓</span></button><p>视频从网盘直连播放</p></div></template>
             <template #settings><div class="playback-settings" id="playback-settings">
             <div v-if="audioSwitchable" class="setting-group">
               <div class="setting-heading">
@@ -1065,9 +1063,6 @@ defineExpose({ retry });
             </div>
 
             <div class="setting-group automation-setting-group">
-              <div class="setting-heading">
-                <span>播放偏好</span>
-              </div>
               <div class="automation-list">
                 <div class="automation-row">
                   <span class="automation-copy">
@@ -1113,7 +1108,7 @@ defineExpose({ retry });
             </div>
             <div v-if="currentEpisode && media" class="setting-group"><div class="setting-heading"><span>弹幕</span></div><DanmakuControls :video="videoRef!" :input="{ mediaKey: media.id, title: media.title, category: media.category, episodeNumber: currentEpisode.episodeNumber, episodeTitle: currentEpisode.episodeTitle }" /></div>
             </div></template>
-          </PlaybackControls>
+          </XgPlayerControls>
         </div>
         <section v-show="!fullscreen" class="watch-details">
           <header class="watch-summary"><div><h2>{{ media.title }}</h2><p>{{ episodeStatus }}</p></div><button type="button" class="collect-series" :disabled="collecting || collectedAll || !episodes.length" @click="collectSeries"><BookmarkCheck v-if="collectedAll" /><Bookmark v-else />{{ collectedAll ? '已收藏' : collecting ? '收藏中…' : '收藏整部' }}</button></header>
@@ -1159,9 +1154,9 @@ defineExpose({ retry });
 .player-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(320px,380px); gap:24px; min-height:0; flex:1; overflow-y:auto; padding:24px; align-items:start; }
 .video-column { position:sticky; top:0; display:flex; width:100%; min-width:0; flex-direction:column; align-self:start; }
 /* Only the stage owns dark tokens. Playback pixels are never blurred or tinted. */
-.video-stage { --text-primary: #f6f8ff; --text-secondary: #d0daea; --text-tertiary: #b7c4d9; --liquid-accent: #b6ceff; --liquid-accent-strong: #91b3f7; position: relative; display: grid; width: 100%; min-height: 220px; aspect-ratio: var(--video-ratio, 16 / 9); flex: 0 0 auto; place-items: center; overflow: hidden; border: var(--glass-border); border-radius: 14px; color: var(--text-primary); background: #000; color-scheme: dark; }
+.video-stage { position: relative; display: grid; width: 100%; min-height: 220px; aspect-ratio: var(--video-ratio, 16 / 9); flex: 0 0 auto; place-items: center; overflow: clip; border: var(--glass-border); border-radius: 14px; color: var(--text-primary); background: #000; color-scheme: dark; }
 .video-element { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; object-fit: contain; background: #000; }
-.stage-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 20px; overflow-y: auto; text-align: center; background: radial-gradient(ellipse at 50% 10%, #222831, #0c1016 75%); }
+.stage-state { --text-primary:#f6f8ff; --text-secondary:#d0daea; position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 20px; overflow-y: auto; text-align: center; background: radial-gradient(ellipse at 50% 10%, #222831, #0c1016 75%); }
 .loading-state { isolation: isolate; }
 .stage-poster { position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; object-fit: cover; opacity: .12; }
 .loading-content { display: grid; justify-items: center; gap: 8px; }
@@ -1234,7 +1229,6 @@ defineExpose({ retry });
   .setting-select { font-size: 16px; border-radius: 12px; }
 }
 @media (min-width:821px) { .video-stage { max-height: calc(100dvh - 210px); } .player-fullscreen .video-stage { max-height:none; } }
-.video-stage.has-player-controls { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .video-element:fullscreen { width: 100vw; height: 100vh; background: #000; }
 .video-element:not(.native-fullscreen)::cue { font-size: clamp(14px, 1.8vw, 24px); }
 .video-element::-webkit-media-controls { color-scheme: dark; }
@@ -1245,7 +1239,7 @@ defineExpose({ retry });
 <style scoped>
 /* Real container fullscreen keeps captions, gestures and controls in the same coordinate space. */
 .video-column.player-fullscreen { position:relative; top:auto; z-index:auto; width:100%; height:100%; padding:0; overflow:hidden; background:#000; }
-.player-fullscreen .video-stage { flex: 1 1 auto; height: 100%; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; }
+.player-fullscreen .video-stage { flex: 1 1 auto; height: 100% !important; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; }
 .stage-state, .play-prompt, .playback-starting { z-index: 5; }
 </style>
 
@@ -1256,13 +1250,9 @@ defineExpose({ retry });
 .collect-series { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:40px; flex-shrink:0; padding:0 6px; border:0; color:var(--text-primary); background:transparent; font:inherit; font-size:13px; cursor:pointer; }.collect-series svg { width:20px; height:20px; }.collect-series:disabled { color:var(--text-tertiary); cursor:default; }
 .collect-error { font-size:12px; color:var(--danger); margin:8px 0; }.episode-placeholder { padding:36px 12px; color:var(--text-tertiary); font-size:13px; text-align:center; }
 .fullscreen-episode-panel { padding:4px 14px 16px; }.fullscreen-episode-panel>.collect-series { display:flex; margin-left:auto; }
-@media(max-width:820px) { .watch-details { width:100%; flex:1; padding:18px 16px calc(24px + var(--safe-area-bottom)); } .watch-summary h2 { font-size:19px; } .video-stage { border-radius:0; } .video-column :deep(.player-controls) { border-radius:0; } .player-header .title-copy h1 { font-size:15px; } .player-header .title-copy p { display:none; } }
+@media(max-width:820px) { .watch-details { width:100%; flex:1; padding:18px 16px calc(24px + var(--safe-area-bottom)); } .watch-summary h2 { font-size:19px; } .video-stage { border-radius:0; } .player-header .title-copy h1 { font-size:15px; } .player-header .title-copy p { display:none; } }
 </style>
 
 <style scoped>
 :global(html[data-theme='dark']) .player-page { --liquid-accent:#8fb8f1; --liquid-accent-strong:#a9c9f5; --liquid-accent-subtle:rgb(143 184 241 / .14); --accent-ink:#122039; }
-</style>
-
-<style scoped>
-.quality-options { padding:6px 12px 10px; }.quality-options>button { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; min-height:48px; padding:8px 10px; border:0; border-radius:7px; color:var(--text-primary); background:transparent; text-align:left; font:inherit; font-size:14px; cursor:pointer; }.quality-options>button[aria-selected=true] { color:var(--liquid-accent); background:var(--liquid-accent-subtle); }.quality-options small { display:block; margin-top:3px; color:var(--text-tertiary); font-size:11px; }.quality-options p { padding:8px 10px 0; color:var(--text-tertiary); font-size:11px; }
 </style>

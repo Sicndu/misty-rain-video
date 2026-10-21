@@ -264,20 +264,15 @@ test('quality is a dedicated menu and quick crop preserves playback independentl
   mockApi(t);localStorage.removeItem('misty_rain_picture_fit');localStorage.removeItem('misty_rain_picture_mode');
   const app=mount(Player,{isOpen:true,media,username:'fixture'});
   try{
-    await flush();const controls=document.querySelector('.video-column > .player-controls'),video=document.querySelector('video');
+    await flush();const controls=document.querySelector('.xgplayer-controls'),video=document.querySelector('video');
     assert.ok(controls);assert.equal(document.querySelector('.player-panel'),null);assert.equal(document.querySelectorAll('select[aria-label="选择影片字幕"]').length,1);
-    const menu=controls.querySelector('#player-settings-menu'),quality=controls.querySelector('[aria-label="选择画质"]');
-    quality.click();await nextTick();assert.equal(menu.getAttribute('aria-label'),'清晰度');assert.notEqual(menu.style.display,'none');
-    assert.ok(menu.querySelector('[aria-label="清晰度选择"]'));assert.doesNotMatch(menu.querySelector('.quality-options').textContent,/片头|音频|画面比例/);
-    assert.equal(menu.querySelector('.settings-body > div:nth-child(2)').style.display,'none');
-    menu.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await nextTick();
-    assert.equal(menu.style.display,'none');assert.equal(document.activeElement,quality);
+    const menu=document.querySelector('.player-business-menu');
     video.currentTime=42;const src=video.getAttribute('src');controls.querySelector('[aria-label="切换画面模式"]').click();await nextTick();
     assert.equal(video.style.objectFit,'cover');assert.equal(document.querySelector('.video-stage').style.getPropertyValue('--video-ratio'),String(16/9));assert.equal(video.currentTime,42);assert.equal(video.getAttribute('src'),src);
     assert.equal(localStorage.getItem('misty_rain_picture_mode'),'cover');
     controls.querySelector('[aria-label="切换画面模式"]').click();await nextTick();assert.equal(video.style.transform,'scale(1.25)');assert.equal(video.currentTime,42);assert.equal(video.getAttribute('src'),src);
     controls.querySelector('[aria-label="切换画面模式"]').click();await nextTick();assert.equal(video.style.transform,'none');assert.equal(video.style.objectFit,'contain');
-    controls.querySelector('button[aria-label="播放偏好"]').click();await nextTick();assert.equal(menu.getAttribute('aria-label'),'播放偏好');assert.equal(menu.querySelector('.settings-body > div:first-child').style.display,'none');
+    controls.querySelector('button[aria-label="播放偏好"]').click();await nextTick();assert.equal(menu.getAttribute('aria-label'),'播放偏好');assert.equal(menu.querySelector('.business-menu-body > div:last-child').style.display,'none');
     document.querySelector('[aria-label="跳过片头片尾"]').click();await flush();assert.equal(document.querySelector('[aria-label="片头时长（秒）"]').value,'30');
     assert.ok(document.querySelector('.watch-details .episode-source-panel'));assert.equal(document.querySelector('.rotated-player'),null);
   }finally{app.unmount();localStorage.removeItem('misty_rain_picture_fit');localStorage.removeItem('misty_rain_picture_mode')}
@@ -297,7 +292,7 @@ test('Android player keeps one caption picker, pauses in background except PiP, 
   try {
     await flush(); await video.play(); await flush();
     assert.equal(document.querySelectorAll('select[aria-label="选择影片字幕"]').length, 1);
-    assert.ok(document.querySelector('.player-controls select[aria-label="选择影片字幕"]'));
+    assert.ok(document.querySelector('.xgplayer-controls select[aria-label="选择影片字幕"]'));
     Object.defineProperty(document, 'pictureInPictureElement', { configurable: true, value: video });
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
     document.dispatchEvent(new window.Event('visibilitychange')); await flush();
@@ -492,8 +487,8 @@ test('fullscreen moves the same episode panel and restores its compact view when
     await flush();const video=document.querySelector('video');Object.defineProperty(video,'readyState',{configurable:true,value:1});
     const panel=document.querySelector('.episode-source-panel');panel.querySelector('[aria-label="紧凑列表"]').click();await flush();
     document.querySelector('[aria-label="全屏播放"]').click();await flush();
-    assert.equal(document.querySelectorAll('.episode-source-panel').length,1);assert.ok(panel.closest('.settings-menu'));
-    document.querySelector('[aria-label="选集与片源"]').click();await flush();assert.notEqual(document.querySelector('.settings-menu').style.display,'none');
+    assert.equal(document.querySelectorAll('.episode-source-panel').length,1);assert.ok(panel.closest('.player-business-menu'));
+    document.querySelector('[aria-label="选集与片源"]').click();await flush();assert.notEqual(document.querySelector('.player-business-menu').style.display,'none');
     await document.exitFullscreen();await flush();assert.equal(document.querySelector('.watch-details .episode-source-panel'),panel);assert.ok(panel.querySelector('.view-compact'));assert.equal(panel.querySelectorAll('[aria-selected="true"]').length,1);
   }finally{app.unmount();document.exitFullscreen=original;window.HTMLElement.prototype.requestFullscreen=originalRequest;localStorage.removeItem('misty_rain_episode_view');}
 });

@@ -4,24 +4,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { JSDOM } from 'jsdom';
-import { parse, compileScript } from 'vue/compiler-sfc';
 import { build } from 'esbuild';
 
 const dom = new JSDOM('<html><body></body></html>', { url: 'http://localhost/', pretendToBeVisual: true });
 for (const key of ['window', 'document', 'Element', 'HTMLElement', 'SVGElement', 'Node']) globalThis[key] = dom.window[key];
 globalThis.localStorage = dom.window.localStorage;
-const { createApp, nextTick, reactive, markRaw, h, ref } = await import('vue');
+const { createApp, markRaw, h, ref } = await import('vue');
 fs.mkdirSync('.local-runtime/tests', { recursive: true });
 const folder = fs.mkdtempSync('.local-runtime/tests/mobile-player-');
-const file = 'src/components/player/MobilePlaybackControls.vue';
-const compiled = compileScript(parse(fs.readFileSync(file, 'utf8')).descriptor, { id: 'mobile-player-test', inlineTemplate: true });
-const output = path.resolve(folder, 'controls.mjs');
-await build({ stdin: { contents: compiled.content, loader: 'ts', resolveDir: path.resolve('src/components/player') }, outfile: output, bundle: true, format: 'esm', external: ['vue'], logLevel: 'silent' });
-const Controls = (await import(pathToFileURL(output))).default;
 const fullscreenOutput = path.resolve(folder, 'fullscreen.mjs');
 await build({ entryPoints: ['src/composables/useVideoFullscreen.ts'], outfile: fullscreenOutput, bundle: true, format: 'esm', external: ['vue'], logLevel: 'silent' });
 const { useVideoFullscreen } = await import(pathToFileURL(fullscreenOutput));
-const button = label => document.querySelector(`button[aria-label="${label}"]`);
 const event = name => new dom.window.Event(name);
 
 function video() {
@@ -38,68 +31,6 @@ function video() {
   Object.defineProperty(element, 'textTracks', { value: tracks });
   return element;
 }
-function mount() {
-  document.body.innerHTML = '<div id="mount"></div>';
-  const media = video(); document.body.appendChild(media);
-  const props = reactive({ video: markRaw(media), expanded: false });
-  let toggles = 0;
-  const app = createApp({ render: () => h(Controls, { ...props, onFullscreen: () => { toggles++; props.expanded = !props.expanded; } }) });
-  app.mount('#mount');
-  return { app, props, media, get toggles() { return toggles; } };
-}
-
-test('mobile controls play, pause, seek without time updates overriding a drag, and toggle one fullscreen entry', async () => {
-  const view = mount();
-  try {
-    button('播放').click(); await nextTick(); assert.equal(view.media.paused, false);
-    button('暂停').click(); await nextTick(); assert.equal(view.media.paused, true);
-    const range = document.querySelector('input');
-    range.value = '65'; range.dispatchEvent(event('input')); await nextTick();
-    view.media.currentTime = 10; view.media.dispatchEvent(event('timeupdate')); await nextTick();
-    assert.equal(range.value, '65');
-    range.dispatchEvent(event('change')); await nextTick(); assert.equal(view.media.currentTime, 65);
-    range.value = '80'; range.dispatchEvent(event('input')); await nextTick();
-    range.dispatchEvent(event('pointercancel')); await nextTick(); assert.equal(range.value, '65');
-    button('全屏播放').click(); await nextTick(); assert.ok(button('退出全屏'));
-    button('退出全屏').click(); await nextTick(); assert.equal(view.toggles, 2);
-    assert.ok(button('全屏播放'));
-  } finally { view.app.unmount(); }
-});
-test('mute can restore zero volume without changing subtitle or metadata choices', async () => {
-  const view = mount();
-  try {
-    assert.equal(document.querySelector('select'), null, 'captions have one shared entry beside the player');
-    assert.equal(view.media.textTracks[0].mode, 'showing');
-    assert.equal(view.media.textTracks[1].mode, 'hidden');
-    view.media.volume = 0; view.media.dispatchEvent(event('volumechange')); await nextTick();
-    button('取消静音').click(); await nextTick();
-    assert.equal(view.media.volume, 1); assert.equal(view.media.muted, false);
-  } finally { view.app.unmount(); }
-});
-test('inline mobile controls remain available while playing and paused', async () => {
-  const view = mount();
-  try {
-    button('播放').click(); await nextTick();
-    assert.ok(button('暂停')); assert.equal(document.querySelector('.concealed'), null);
-    button('暂停').click(); await nextTick();
-    assert.ok(button('播放')); assert.equal(document.querySelector('.concealed'), null);
-  } finally { view.app.unmount(); }
-});
-test('play rejection is visible and replaced video no longer controls the UI', async () => {
-  const view = mount();
-  try {
-    view.media.play = async () => { throw new Error('blocked'); };
-    button('播放').click(); await nextTick(); await nextTick();
-    assert.match(document.querySelector('[role="status"]').textContent, /未能开始播放/);
-    const replacement = video(); replacement.currentTime = 20;
-    view.props.video = markRaw(replacement); await nextTick();
-    view.media.currentTime = 100; view.media.dispatchEvent(event('timeupdate')); await nextTick();
-    assert.equal(document.querySelector('input').value, '20');
-    assert.equal(document.querySelector('[role="status"]'), null);
-    button('播放').click(); await nextTick();
-    assert.equal(replacement.paused, false);
-  } finally { view.app.unmount(); }
-});
 function mountFullscreen(media) {
   document.body.innerHTML = '<div id="mount"></div>';
   let controls, current;
