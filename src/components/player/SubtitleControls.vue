@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type Hls from 'hls.js';
-import { Captions, ChevronDown, X } from '@lucide/vue';
+import { Captions, X } from '@lucide/vue';
 import { activeSubtitleTrack, selectSubtitleTrack, setSubtitleDefaults, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleLanguageKey, managedSubtitleTracks, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
 const props = defineProps<{ video: HTMLVideoElement; hls?: Hls | null; compact?: boolean; iconOnly?: boolean; notice?: string; username?: string; nativeFullscreen?: boolean; loading?: boolean; readError?: string; fullscreen?: boolean; contextKey?: string }>();
 const emit = defineEmits<{ (event: 'retry-embedded'): void }>();
@@ -157,7 +157,7 @@ onBeforeUnmount(() => { generation += 1; release(); clearStatusTimer(); document
       <option value="auto">{{ loading ? '正在读取字幕…' : options.length ? `自动 · ${automaticOption?.label || '字幕'}` : '字幕 · 暂无可用轨道' }}</option>
       <option value="off">字幕关闭</option>
       <option v-for="option in options" :key="option.id" :value="option.id">{{ option.label }}</option>
-    </select><ChevronDown aria-hidden="true" /></div>
+    </select></div>
     <div v-if="statusVisible && hasStatus && subtitlesEnabled" ref="status" class="subtitle-status" @pointerenter="clearStatusTimer" @pointerleave="scheduleStatusHide" @focusin="clearStatusTimer" @focusout="scheduleStatusHide">
       <button type="button" class="close-subtitle-status" aria-label="关闭字幕提示" @click="closeStatus"><X aria-hidden="true" /></button>
       <p v-if="notice" role="status">{{ notice }}</p>
@@ -170,7 +170,7 @@ onBeforeUnmount(() => { generation += 1; release(); clearStatusTimer(); document
 .subtitle-picker { position: relative; }
 .subtitle-picker > svg { position: absolute; right: 12px; top: 14px; width: 16px; height: 16px; pointer-events: none; color: var(--text-tertiary); }
 .subtitle-picker > .captions-icon { right: auto; left: 10px; width: 18px; height: 18px; top: 13px; }
-select { appearance: none; -webkit-appearance: none; box-sizing: border-box; display: block; width: 100%; height: 44px; padding: 0 32px 0 36px; border: 1px solid var(--divider); border-radius: 8px; color: var(--text-primary); background: var(--surface-2); font: inherit; font-size: 14px; line-height: normal; }
+select { appearance: auto; -webkit-appearance: auto; box-sizing: border-box; display: block; width: 100%; height: 44px; padding: 0 32px 0 36px; border: 1px solid var(--divider); border-radius: 8px; color: var(--text-primary); background: var(--surface-2); font: inherit; font-size: 14px; line-height: normal; }
 p { margin-top: 8px; color: var(--text-tertiary); font-size: .73rem; line-height: 1.5; }
 button { border: 0; padding: 4px; color: var(--liquid-accent); background: transparent; }
 .compact select { max-width: 220px; border-color: transparent; background: transparent; font-size: 13px; }

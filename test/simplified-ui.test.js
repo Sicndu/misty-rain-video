@@ -269,20 +269,21 @@ function mountPlayerControls(sources) {
   const app=createApp({render:()=>h(PlayerControls,props)});app.mount('#mount');
   return {app,video,props,qualityEvents};
 }
-test('settings hold long quality labels and rate/subtitle options away from the transport bar',async()=>{
+test('fixed quick controls and settings share rate/quality state without long toolbar labels',async()=>{
   const sources=[{id:'high',label:'超高清 4K 杜比视界・长名称',delivery:'direct'}, {id:'low',label:'<img src=x onerror=alert(1)>',delivery:'direct'}, {id:'relay',label:'中转',delivery:'proxy'}];
   const view=mountPlayerControls(sources);
   try {
     await flush();const transport=document.querySelector('.xgplayer-controls'),menu=document.querySelector('.player-business-menu');
-    assert.equal(transport.querySelectorAll('select').length,0);assert.equal(transport.querySelector('.xgplayer-definition'),null);assert.equal(transport.querySelector('.xgplayer-playbackrate'),null);
+    assert.equal(transport.querySelectorAll('select').length,2);assert.equal(transport.querySelector('.quick-quality-label').textContent,'画质');assert.equal(transport.querySelector('.xgplayer-definition'),null);assert.equal(transport.querySelector('.xgplayer-playbackrate'),null);
     const gear=transport.querySelector('[aria-label="播放设置"]');gear.click();await flush();assert.notEqual(menu.style.display,'none');
     assert.equal(menu.parentElement,document.querySelector('.video-column'),'menu stays inside the real fullscreen target, outside the clipped video');
     const quality=menu.querySelector('[aria-label="选择画质"]');assert.deepEqual([...quality.options].map(o=>o.text),[sources[0].label,sources[1].label]);assert.equal(menu.querySelector('img'),null);
-    const original=view.video.src;quality.value='low';quality.dispatchEvent(new window.Event('change',{bubbles:true}));await flush();assert.deepEqual(view.qualityEvents.map(item=>item.id),['low']);assert.equal(view.video.src,original);assert.equal(view.video.currentTime,42);
-    view.props.selectedSourceId='low';await flush();quality.dispatchEvent(new window.Event('change'));assert.equal(view.qualityEvents.length,1);
-    const speed=menu.querySelector('[aria-label="播放速度"]');speed.value='1.5';speed.dispatchEvent(new window.Event('change',{bubbles:true}));await flush();assert.equal(view.video.playbackRate,1.5);assert.equal(view.video.defaultPlaybackRate,1.5);
-    view.video.playbackRate=.75;view.video.dispatchEvent(new window.Event('ratechange'));await flush();assert.equal(speed.value,'0.75');
-    view.props.sources=[sources[0]];await flush();assert.equal(menu.querySelector('[aria-label="选择画质"]'),null);assert.equal(menu.querySelector('.player-setting-value').textContent,sources[0].label);
+    const quickQuality=transport.querySelector('[aria-label="快捷画质"]');assert.deepEqual([...quickQuality.options].map(o=>o.text),[sources[0].label,sources[1].label]);
+    const original=view.video.src;quickQuality.value='low';quickQuality.dispatchEvent(new window.Event('change',{bubbles:true}));await flush();assert.deepEqual(view.qualityEvents.map(item=>item.id),['low']);assert.equal(view.video.src,original);assert.equal(view.video.currentTime,42);
+    view.props.selectedSourceId='low';await flush();assert.equal(quality.value,'low');quality.dispatchEvent(new window.Event('change'));assert.equal(view.qualityEvents.length,1);
+    const speed=menu.querySelector('[aria-label="播放速度"]'),quickSpeed=transport.querySelector('[aria-label="快捷倍速"]');quickSpeed.value='1.5';quickSpeed.dispatchEvent(new window.Event('change',{bubbles:true}));await flush();assert.equal(view.video.playbackRate,1.5);assert.equal(view.video.defaultPlaybackRate,1.5);assert.equal(speed.value,'1.5');
+    view.video.playbackRate=.75;view.video.dispatchEvent(new window.Event('ratechange'));await flush();assert.equal(speed.value,'0.75');assert.equal(quickSpeed.value,'0.75');
+    view.props.sources=[sources[0]];await flush();assert.equal(menu.querySelector('[aria-label="选择画质"]'),null);assert.equal(transport.querySelector('[aria-label="快捷画质"]'),null);assert.equal(menu.querySelector('.player-setting-value').textContent,sources[0].label);
   } finally {view.app.unmount();}
 });
 test('settings close without click-through, preserve keyboard focus and close for native fullscreen',async()=>{
