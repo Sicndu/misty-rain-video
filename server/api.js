@@ -14,6 +14,7 @@ import { TvPlaybackClient } from './tvPlaybackClient.js';
 import { DiscoveryService } from './discoveryService.js';
 import { CatalogSearch } from './catalogSearch.js';
 import { CatalogBrowse } from './catalogBrowse.js';
+import { CatalogDetails } from './catalogDetails.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,6 +65,7 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
   context.discovery = new DiscoveryService({ dataDir, posterService: context.posterService });
   context.catalogSearch = new CatalogSearch({ discovery: context.discovery });
   context.catalogBrowse = new CatalogBrowse({ catalogSearch: context.catalogSearch });
+  context.catalogDetails = new CatalogDetails({ dataDir, discovery: context.discovery });
   return context;
 };
 
@@ -284,6 +286,27 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
+    const subjectContentMatch = pathname.match(/^\/api\/catalog\/subjects\/([^/]+)\/(photos|comments)$/);
+    if (subjectContentMatch && request.method === 'GET') {
+      response.setHeader('Cache-Control', 'private, no-store');
+      sendSuccess(response, await context.catalogDetails.content.get(subjectContentMatch[1], subjectContentMatch[2], url.searchParams.get('start') || '0'));
+      return true;
+    }
+    const subjectMatch = pathname.match(/^\/api\/catalog\/subjects\/([^/]+)$/);
+    if (subjectMatch && request.method === 'GET') {
+      response.setHeader('Cache-Control', 'private, no-store');
+      sendSuccess(response, await context.catalogDetails.get(subjectMatch[1]));
+      return true;
+    }
+    const detailImageMatch = pathname.match(/^\/api\/catalog\/detail-images\/([a-zA-Z0-9_-]+)$/);
+    if (detailImageMatch && ['GET', 'HEAD'].includes(request.method)) {
+      const asset = await context.catalogDetails.assets.read(detailImageMatch[1], 'catalog');
+      response.setHeader('Content-Type', asset.contentType);
+      response.setHeader('Content-Length', asset.bytes.length);
+      response.setHeader('Cache-Control', 'private, max-age=300');
+      response.end(request.method === 'HEAD' ? undefined : asset.bytes);
+      return true;
+    }
     if (pathname === '/api/catalog/browse' && request.method === 'GET') {
       sendSuccess(response, await context.catalogBrowse.get(Object.fromEntries(url.searchParams)));
       return true;
