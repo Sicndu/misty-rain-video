@@ -83,6 +83,8 @@ onBeforeUnmount(() => { release(); adapter?.destroy(); clearTimeout(timer); emit
 <template>
   <Teleport v-if="tools" :to="tools">
     <div ref="buttons" class="business-buttons">
+      <label class="quick-setting" title="倍速"><span aria-hidden="true">{{ rate }}×</span><select aria-label="快捷倍速" :value="rate" @change="changeRate"><option v-for="speed in speeds" :key="speed" :value="speed">{{ speed }}×</option></select></label>
+      <label v-if="directSources.length > 1" class="quick-setting" title="画质"><span class="quick-quality-label" aria-hidden="true">画质</span><select aria-label="快捷画质" :value="selectedSourceId" @change="changeQuality"><option v-for="source in directSources" :key="source.id" :value="source.id">{{ qualityLabel(source) }}</option></select></label>
       <button v-if="expanded" type="button" aria-label="选集与片源" :aria-expanded="menu === 'episodes'" aria-controls="player-options-panel" @click="toggleMenu('episodes', $event)"><ListVideo /></button>
       <button type="button" aria-label="播放设置" :aria-expanded="menu === 'settings'" aria-controls="player-options-panel" @click="toggleMenu('settings', $event)"><Settings2 /></button>
     </div>
@@ -124,6 +126,10 @@ onBeforeUnmount(() => { release(); adapter?.destroy(); clearTimeout(timer); emit
 .video-stage .xgplayer-time { white-space:nowrap; font-size:12px; }
 .misty-player-tools, .business-buttons { display:flex; align-items:center; color:white; }
 .business-buttons > button { display:grid; place-items:center; width:40px; height:44px; border:0; background:transparent; color:inherit; cursor:pointer; padding:8px; }
+.quick-setting { position:relative; display:grid; place-items:center; flex:0 0 44px; width:44px; height:44px; font-size:12px; line-height:1; color:#fff; }
+.quick-setting > span { max-width:100%; overflow:hidden; white-space:nowrap; pointer-events:none; }
+.quick-setting > select { position:absolute; inset:0; width:100%; height:100%; min-width:0; margin:0; padding:0; opacity:0; font-size:16px; cursor:pointer; }
+.quick-setting:focus-within { outline:2px solid white; outline-offset:-3px; border-radius:6px; }
 .business-buttons svg { width:21px; height:21px; }
 .business-buttons button:focus-visible { outline:2px solid white; outline-offset:-3px; border-radius:6px; }
 .player-menu-backdrop { position:absolute; z-index:14; inset:0; background:#0006; }
@@ -140,8 +146,7 @@ onBeforeUnmount(() => { release(); adapter?.destroy(); clearTimeout(timer); emit
 .player-setting-value { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; color:var(--text-secondary); }
 .player-subtitle-setting { min-width:0; }
 .player-subtitle-setting .subtitle-picker > .captions-icon { display:none; }
-.player-subtitle-setting .subtitle-picker > svg { right:0; }
-.player-business-menu .player-subtitle-setting select { width:100%; max-width:100%; padding:0 22px 0 8px; border:0; background:transparent; color:var(--text-secondary); text-align:right; text-align-last:right; }
+.player-business-menu .player-subtitle-setting select { width:100%; max-width:100%; padding:0 2px 0 8px; border:0; background:transparent; color:var(--text-secondary); text-align:right; text-align-last:right; }
 .picture-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:4px; min-width:0; }
 .picture-options button { min-width:0; min-height:40px; padding:0 4px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--text-secondary); font:inherit; font-size:13px; cursor:pointer; }
 .picture-options button[aria-pressed=true] { color:var(--liquid-accent-strong); border-color:var(--liquid-accent-muted); background:var(--liquid-accent-subtle); }
@@ -159,6 +164,11 @@ onBeforeUnmount(() => { release(); adapter?.destroy(); clearTimeout(timer); emit
   .player-menu-backdrop.inline-menu-backdrop { position:fixed; }
   .player-business-menu.inline-business-menu { position:fixed; left:8px; right:8px; bottom:max(8px,env(safe-area-inset-bottom)); width:auto; max-height:min(580px,72dvh); }
   .player-setting-select, .player-business-menu .player-subtitle-setting select { font-size:16px; }
+}
+@media(max-width:380px) {
+  .business-buttons > button { width:32px; padding:5px; }
+  .quick-setting { width:40px; flex-basis:40px; }
+  .video-stage .xg-left-grid, .video-stage .xg-right-grid { gap:2px; }
 }
 @media(prefers-reduced-motion:reduce) { .player-preferences-toggle svg { transition:none; } }
 </style>
