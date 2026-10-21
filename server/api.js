@@ -15,6 +15,7 @@ import { DiscoveryService } from './discoveryService.js';
 import { CatalogSearch } from './catalogSearch.js';
 import { CatalogBrowse } from './catalogBrowse.js';
 import { CatalogDetails } from './catalogDetails.js';
+import { SiteSettings } from './siteSettings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,6 +50,7 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
   const shareAvailability = new ShareAvailability({ dataDir, probe: input => quarkGateway.probeShare(input) });
   const context = {
     authService,
+    siteSettings: new SiteSettings(dataDir),
     userContext,
     credentialStore,
     posterService: new PosterService(dataDir, {
@@ -216,6 +218,11 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
+    if (pathname === '/api/site-settings' && request.method === 'GET') {
+      sendSuccess(response, context.siteSettings.public());
+      return true;
+    }
+
     if (pathname === '/api/auth/session' && request.method === 'GET') {
       const user = context.authService.authenticate(request, false);
       sendSuccess(response, {
@@ -248,6 +255,13 @@ export const handleApiRequest = async (request, response, context) => {
     const userData = context.userContext(user);
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method || '')) {
       context.authService.assertSameOrigin(request);
+    }
+
+    if (pathname === '/api/site-settings' && request.method === 'PUT') {
+      if (user.role !== 'admin') throw Object.assign(new Error('仅管理员可以修改站点信息'), { statusCode: 403 });
+      const input = await readRequestBody(request, 2500_000);
+      sendSuccess(response, context.siteSettings.update(input));
+      return true;
     }
 
     if (pathname.startsWith('/api/danmaku/')) {

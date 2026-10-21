@@ -3,6 +3,7 @@ import { onBeforeUnmount, watch, type Ref } from 'vue';
 interface MediaOptions {
   enabled: () => boolean;
   title: () => string;
+  album?: () => string;
   episode: () => string;
   nextAvailable: () => boolean;
   next: () => void;
@@ -12,7 +13,7 @@ interface MediaOptions {
 /** Own system controls and the visible-playback wake lock for this player lifetime. */
 export function useAndroidMediaSession(videoRef: Ref<HTMLVideoElement | null>, options: MediaOptions) {
   let release = () => {};
-  const stop = watch([videoRef, options.enabled, options.title, options.episode, options.nextAvailable], ([video, enabled]) => {
+  const stop = watch([videoRef, options.enabled, options.title, options.episode, options.nextAvailable, () => options.album?.() || ''], ([video, enabled]) => {
     release();
     if (!video || !enabled) return;
     const media = navigator.mediaSession;
@@ -59,7 +60,7 @@ export function useAndroidMediaSession(videoRef: Ref<HTMLVideoElement | null>, o
       nexttrack: options.nextAvailable() ? options.next : null,
     };
     if (media) {
-      if (typeof MediaMetadata !== 'undefined') media.metadata = new MediaMetadata({ title: options.title(), artist: options.episode(), album: '烟雨影视' });
+      if (typeof MediaMetadata !== 'undefined') media.metadata = new MediaMetadata({ title: options.title(), artist: options.episode(), album: options.album?.() || '' });
       for (const [action, handler] of Object.entries(handlers)) {
         try { media.setActionHandler(action as MediaSessionAction, handler); } catch { /* Unsupported action. */ }
       }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { siteSettings } from '../../services/siteSettings';
 import DanmakuControls from './DanmakuControls.vue';
 import PlaybackControls from './PlaybackControls.vue';
 import EpisodeSourcePanel from './EpisodeSourcePanel.vue';
@@ -858,7 +859,8 @@ onMounted(() => {
 
 useAndroidMediaSession(videoRef, {
   enabled: () => isAndroidPlaybackDevice && props.isOpen && phase.value === 'ready',
-  title: () => props.media?.title || '烟雨影视',
+  title: () => props.media?.title || siteSettings.value.name,
+  album: () => siteSettings.value.name,
   episode: () => currentEpisode.value?.episodeTitle || '',
   nextAvailable: () => nextEpisodeIndex() >= 0,
   next: () => { const index = nextEpisodeIndex(); if (index >= 0) void selectEpisode(index); },

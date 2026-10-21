@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { siteSettings } from '../../services/siteSettings';
 import { Compass, Clapperboard, Film, Sparkles, Tv, Settings, History } from '@lucide/vue';
 import BrandMark from '../common/BrandMark.vue';
 import type { AppUser } from '../../services/authService';
@@ -14,7 +15,7 @@ const categories = [
 </script>
 <template>
   <aside class="desktop-sidebar" aria-label="桌面导航">
-    <button class="sidebar-brand" type="button" :disabled="disabled" @click="emit('discover')"><BrandMark /><span><strong>烟雨影视</strong><small>MISTY RAIN</small></span></button>
+    <button class="sidebar-brand" type="button" :disabled="disabled" @click="emit('discover')"><BrandMark /><span><strong>{{ siteSettings.name }}</strong><small v-if="siteSettings.subtitle">{{ siteSettings.subtitle }}</small></span></button>
     <nav aria-label="主要导航与收藏分类">
       <button class="sidebar-discover" type="button" :class="{ active: activePage === 'discover' }" :aria-current="activePage === 'discover' ? 'page' : undefined" :disabled="disabled" @click="emit('discover')"><Compass aria-hidden="true" /><span>发现</span></button>
       <button type="button" :class="{ active: activePage === 'history' }" :aria-current="activePage === 'history' ? 'page' : undefined" :disabled="disabled" @click="emit('history')"><History aria-hidden="true" /><span>观看记录</span></button>
@@ -33,8 +34,9 @@ const categories = [
   button { border: 0; color: var(--text-secondary); background: transparent; text-align: left; }
   .sidebar-brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 32px; }
   .sidebar-brand > :first-child { width: 38px; height: 38px; border-radius: 12px; }
-  .sidebar-brand strong { display: block; color: var(--text-primary); font-size: 1rem; }
-  .sidebar-brand small { display: block; font-size: .58rem; letter-spacing: .15em; margin-top: 4px; color: var(--text-tertiary); }
+  .sidebar-brand > span { min-width:0; }
+  .sidebar-brand strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display: block; color: var(--text-primary); font-size: 1rem; }
+  .sidebar-brand small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display: block; font-size: .58rem; letter-spacing: .15em; margin-top: 4px; color: var(--text-tertiary); }
   nav { display: grid; gap: 6px; }
   nav button { display: flex; align-items: center; gap: 11px; min-height: 46px; padding: 0 14px; border-radius: 10px; font-size: .88rem; }
   nav button svg { width: 18px; height: 18px; }
