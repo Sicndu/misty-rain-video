@@ -147,7 +147,7 @@ dt { color:var(--text-tertiary); } dd { margin:0; color:var(--text-secondary); o
   .rating-line span { font-size:.68rem; }
   .rating-line > span { flex-basis:100%; }
   .rating-line span span { white-space:nowrap; }
-  .detail-body { grid-column:1 / -1; padding-top:24px; padding-bottom:70px; }
+  .detail-body { grid-column:1 / -1; padding-top:24px; padding-bottom:calc(90px + env(safe-area-inset-bottom)); }
   .detail-section { padding:22px 0; }
   .detail-actions { position:fixed; z-index:30; bottom:0; left:0; right:0; display:flex; padding:12px max(16px,env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); background:var(--nav-background); border-top:1px solid var(--divider); backdrop-filter:blur(20px); }
   .detail-actions .search-resources { flex:1; } .play-collection { padding:0 14px; }

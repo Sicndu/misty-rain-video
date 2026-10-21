@@ -835,6 +835,7 @@ const playResource = (media: MediaItem, resource: ResourceItem, category: Catego
 }
 @media (max-width: 640px) {
   .page-container { padding: 14px calc(var(--mobile-gutter) + var(--safe-area-right)) var(--mobile-content-bottom) calc(var(--mobile-gutter) + var(--safe-area-left)); }
+  .detail-container { padding-top: calc(12px + var(--safe-area-top)); padding-bottom: 0; }
   .library-intro { margin-bottom: 14px; }
   .library-title { display: grid; gap: 2px; }
   .library-title h1 { font-size: 1.65rem; font-weight: 700; }
