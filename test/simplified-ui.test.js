@@ -54,6 +54,7 @@ const TitleEditor = (await compile('src/components/media/MediaTitleEditor.vue', 
 const Sidebar = (await compile('src/components/layout/DesktopSidebar.vue', 'sidebar')).default;
 const Subtitles = (await compile('src/components/player/SubtitleControls.vue', 'subtitles')).default;
 const Player = (await compile('src/components/player/PlayerPage.vue', 'player')).default;
+const PlayerControls = (await compile('src/components/player/XgPlayerControls.vue', 'player-controls')).default;
 const Discovery = (await compile('src/components/media/DiscoveryPage.vue', 'discovery')).default;
 const Catalog = (await compile('src/components/media/CatalogSearchPage.vue', 'catalog')).default;
 const ResourceModal = (await compile('src/components/quark/QuarkTransferModal.vue', 'resource-modal')).default;
@@ -260,19 +261,57 @@ test('desktop library has one selected category and its library heading is not a
   } finally { app.unmount(); }
 });
 
-test('quality is a dedicated menu and quick crop preserves playback independently of preferences', async t => {
+function mountPlayerControls(sources) {
+  document.body.innerHTML='<div class="video-column"><div class="video-stage"><video></video></div></div><div id="mount"></div>';
+  const video=document.querySelector('video');video.src='https://quark.example/original.mp4';video.currentTime=42;
+  const qualityEvents=[];
+  const props=reactive({video,ready:true,expanded:false,nativeFullscreen:false,pictureMode:'contain',sources,selectedSourceId:sources[0]?.id,onQuality:source=>qualityEvents.push(source)});
+  const app=createApp({render:()=>h(PlayerControls,props)});app.mount('#mount');
+  return {app,video,props,qualityEvents};
+}
+test('settings hold long quality labels and rate/subtitle options away from the transport bar',async()=>{
+  const sources=[{id:'high',label:'超高清 4K 杜比视界・长名称',delivery:'direct'}, {id:'low',label:'<img src=x onerror=alert(1)>',delivery:'direct'}, {id:'relay',label:'中转',delivery:'proxy'}];
+  const view=mountPlayerControls(sources);
+  try {
+    await flush();const transport=document.querySelector('.xgplayer-controls'),menu=document.querySelector('.player-business-menu');
+    assert.equal(transport.querySelectorAll('select').length,0);assert.equal(transport.querySelector('.xgplayer-definition'),null);assert.equal(transport.querySelector('.xgplayer-playbackrate'),null);
+    const gear=transport.querySelector('[aria-label="播放设置"]');gear.click();await flush();assert.notEqual(menu.style.display,'none');
+    assert.equal(menu.parentElement,document.querySelector('.video-column'),'menu stays inside the real fullscreen target, outside the clipped video');
+    const quality=menu.querySelector('[aria-label="选择画质"]');assert.deepEqual([...quality.options].map(o=>o.text),[sources[0].label,sources[1].label]);assert.equal(menu.querySelector('img'),null);
+    const original=view.video.src;quality.value='low';quality.dispatchEvent(new window.Event('change',{bubbles:true}));await flush();assert.deepEqual(view.qualityEvents.map(item=>item.id),['low']);assert.equal(view.video.src,original);assert.equal(view.video.currentTime,42);
+    view.props.selectedSourceId='low';await flush();quality.dispatchEvent(new window.Event('change'));assert.equal(view.qualityEvents.length,1);
+    const speed=menu.querySelector('[aria-label="播放速度"]');speed.value='1.5';speed.dispatchEvent(new window.Event('change',{bubbles:true}));await flush();assert.equal(view.video.playbackRate,1.5);assert.equal(view.video.defaultPlaybackRate,1.5);
+    view.video.playbackRate=.75;view.video.dispatchEvent(new window.Event('ratechange'));await flush();assert.equal(speed.value,'0.75');
+    view.props.sources=[sources[0]];await flush();assert.equal(menu.querySelector('[aria-label="选择画质"]'),null);assert.equal(menu.querySelector('.player-setting-value').textContent,sources[0].label);
+  } finally {view.app.unmount();}
+});
+test('settings close without click-through, preserve keyboard focus and close for native fullscreen',async()=>{
+  const view=mountPlayerControls([{id:'high',label:'超高清',delivery:'direct'}]);
+  try {
+    await flush();const gear=document.querySelector('[aria-label="播放设置"]'),menu=document.querySelector('.player-business-menu');gear.click();await flush();
+    assert.equal(document.activeElement,document.querySelector('[aria-label="关闭播放器菜单"]'));
+    const backdrop=document.querySelector('.player-menu-backdrop');backdrop.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true}));await flush();assert.notEqual(menu.style.display,'none');
+    backdrop.click();await flush();assert.equal(menu.style.display,'none');assert.equal(view.video.paused,true);
+    gear.click();await flush();menu.querySelector('select').dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await flush();assert.equal(menu.style.display,'none');assert.equal(document.activeElement,gear);
+    gear.click();await flush();view.props.nativeFullscreen=true;await flush();assert.equal(menu.style.display,'none');assert.ok(document.querySelector('.video-stage').classList.contains('misty-controls-disabled'));
+  } finally {view.app.unmount();}
+});
+
+test('one playback settings entry keeps image changes and collapsed preferences separate', async t => {
   mockApi(t);localStorage.removeItem('misty_rain_picture_fit');localStorage.removeItem('misty_rain_picture_mode');
   const app=mount(Player,{isOpen:true,media,username:'fixture'});
   try{
     await flush();const controls=document.querySelector('.xgplayer-controls'),video=document.querySelector('video');
     assert.ok(controls);assert.equal(document.querySelector('.player-panel'),null);assert.equal(document.querySelectorAll('select[aria-label="选择影片字幕"]').length,1);
     const menu=document.querySelector('.player-business-menu');
-    video.currentTime=42;const src=video.getAttribute('src');controls.querySelector('[aria-label="切换画面模式"]').click();await nextTick();
+    controls.querySelector('[aria-label="播放设置"]').click();await nextTick();
+    const picture = label => [...document.querySelectorAll('.picture-options button')].find(b => b.textContent === label);
+    video.currentTime=42;const src=video.getAttribute('src');picture('铺满').click();await nextTick();
     assert.equal(video.style.objectFit,'cover');assert.equal(document.querySelector('.video-stage').style.getPropertyValue('--video-ratio'),String(16/9));assert.equal(video.currentTime,42);assert.equal(video.getAttribute('src'),src);
     assert.equal(localStorage.getItem('misty_rain_picture_mode'),'cover');
-    controls.querySelector('[aria-label="切换画面模式"]').click();await nextTick();assert.equal(video.style.transform,'scale(1.25)');assert.equal(video.currentTime,42);assert.equal(video.getAttribute('src'),src);
-    controls.querySelector('[aria-label="切换画面模式"]').click();await nextTick();assert.equal(video.style.transform,'none');assert.equal(video.style.objectFit,'contain');
-    controls.querySelector('button[aria-label="播放偏好"]').click();await nextTick();assert.equal(menu.getAttribute('aria-label'),'播放偏好');assert.equal(menu.querySelector('.business-menu-body > div:last-child').style.display,'none');
+    picture('裁切').click();await nextTick();assert.equal(video.style.transform,'scale(1.25)');assert.equal(video.currentTime,42);assert.equal(video.getAttribute('src'),src);
+    picture('适应').click();await nextTick();assert.equal(video.style.transform,'none');assert.equal(video.style.objectFit,'contain');
+    assert.equal(document.querySelector('.player-preferences-content').style.display,'none');document.querySelector('.player-preferences-toggle').click();await nextTick();assert.equal(menu.getAttribute('aria-label'),'播放设置');assert.equal(menu.querySelector('.business-menu-body > div:last-child').style.display,'none');
     document.querySelector('[aria-label="跳过片头片尾"]').click();await flush();assert.equal(document.querySelector('[aria-label="片头时长（秒）"]').value,'30');
     assert.ok(document.querySelector('.watch-details .episode-source-panel'));assert.equal(document.querySelector('.rotated-player'),null);
   }finally{app.unmount();localStorage.removeItem('misty_rain_picture_fit');localStorage.removeItem('misty_rain_picture_mode')}
@@ -292,7 +331,7 @@ test('Android player keeps one caption picker, pauses in background except PiP, 
   try {
     await flush(); await video.play(); await flush();
     assert.equal(document.querySelectorAll('select[aria-label="选择影片字幕"]').length, 1);
-    assert.ok(document.querySelector('.xgplayer-controls select[aria-label="选择影片字幕"]'));
+    assert.ok(document.querySelector('.player-business-menu select[aria-label="选择影片字幕"]'));
     Object.defineProperty(document, 'pictureInPictureElement', { configurable: true, value: video });
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
     document.dispatchEvent(new window.Event('visibilitychange')); await flush();
@@ -499,7 +538,7 @@ test('iOS inline zoom keeps captions in the visible viewport and hands them back
  const app=mount(Player,{isOpen:true,media,username:'ios-crop'});
  try{
   await flush();const video=document.querySelector('video');assert.equal(video.classList.contains('player-captions-active'),false);
-  document.querySelector('[aria-label="切换画面模式"]').click();await nextTick();document.querySelector('[aria-label="切换画面模式"]').click();await flush();
+  document.querySelector('[aria-label="播放设置"]').click();await nextTick();[...document.querySelectorAll('.picture-options button')].find(button => button.textContent === '裁切').click();await flush();
   assert.equal(video.style.transform,'scale(1.25)');assert.equal(video.classList.contains('player-captions-active'),true);
   video.dispatchEvent(new window.Event('webkitbeginfullscreen'));await flush();assert.equal(video.classList.contains('player-captions-active'),false);
   video.dispatchEvent(new window.Event('webkitendfullscreen'));await flush();assert.equal(video.classList.contains('player-captions-active'),true);

@@ -81,6 +81,11 @@ test('disabled makes no requests; enabled matches, loads and mounts the renderer
     assert.equal(document.querySelector('.danmaku-overlay').childElementCount, 0);
   } finally { view.app.unmount(); }
 });
+test('compact preferences expose a single accessible danmaku switch and retain loading behavior',async()=>{
+ const view=mount(defaultResponse);view.props.compact=true;
+ try {await flush();const toggle=document.querySelector('[role="switch"][aria-label="弹幕"]');assert.equal(toggle.textContent.trim(),'弹幕');assert.equal(toggle.getAttribute('aria-checked'),'false');toggle.click();await flush();await flush();assert.equal(toggle.getAttribute('aria-checked'),'true');assert.ok(view.calls.some(call=>call.url.includes('/segment')));toggle.click();await flush();assert.equal(toggle.getAttribute('aria-checked'),'false');}
+ finally{view.app.unmount();}
+});
 test('turning off cancels requests and ignores a late match response', async () => {
   let finish;
   const view = mount(() => new Promise(resolve => { finish = resolve; }));

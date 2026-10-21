@@ -5,7 +5,7 @@ import { SlidersHorizontal } from '@lucide/vue';
 import { DanmakuService, DanmakuRequestError, platformLabels, type DanmakuInput, type DanmakuPlatform, type DanmakuSource, type DanmakuWork, type DanmakuSegment } from '../../services/danmakuService';
 import { displayComments } from '../../services/danmakuDisplay';
 
-const props = defineProps<{ video: HTMLVideoElement; input: DanmakuInput }>();
+const props = defineProps<{ video: HTMLVideoElement; input: DanmakuInput; compact?: boolean }>();
 const enabled = ref(localStorage.getItem('misty_rain_danmaku_enabled') === 'true');
 const expanded = ref(false);
 const opacity = ref(Math.max(.3, Math.min(1, Number(localStorage.getItem('misty_rain_danmaku_opacity')) || .75)));
@@ -233,13 +233,14 @@ onBeforeUnmount(() => {
   <Teleport v-if="target" :to="target">
     <div ref="overlay" class="danmaku-overlay" :style="{ opacity, visibility: active ? 'visible' : 'hidden' }" aria-hidden="true" />
   </Teleport>
-  <div class="danmaku-controls">
+  <div class="danmaku-controls" :class="{ compact }">
     <div class="danmaku-row">
-      <button class="danmaku-toggle" type="button" role="switch" aria-label="弹幕" :aria-checked="enabled" @click="enabled = !enabled"><span aria-hidden="true">弹</span>弹幕{{ enabled ? '开' : '关' }}</button>
-      <p role="status">{{ status }}</p>
+      <button class="danmaku-toggle" type="button" role="switch" aria-label="弹幕" :aria-checked="enabled" @click="enabled = !enabled"><template v-if="compact"><span class="danmaku-compact-label">弹幕</span><span class="danmaku-switch-track" aria-hidden="true"><i /></span></template><template v-else><span aria-hidden="true">弹</span>弹幕{{ enabled ? '开' : '关' }}</template></button>
+      <p v-if="!compact" role="status">{{ status }}</p>
       <button v-if="enabled && recovery && !matching && !loading && !nativeFullscreen" type="button" class="danmaku-recovery" @click="recovery === 'choose' ? openChooser() : refresh()">{{ recovery === 'choose' ? '选一下片名' : '重试' }}</button>
       <button v-if="enabled" type="button" class="danmaku-settings-toggle" aria-label="弹幕设置" :aria-expanded="expanded" @click="toggleSettings"><SlidersHorizontal aria-hidden="true" /></button>
     </div>
+    <p v-if="compact && status" class="danmaku-compact-status" role="status">{{ status }}</p>
     <div v-if="enabled && choosing" class="danmaku-settings">
       <div class="danmaku-panel-heading"><strong>选一下正在看的作品</strong><button type="button" @click="choosing = false">收起</button></div>
       <p class="danmaku-help">选对一次就会记住，平台由系统选择。</p>
@@ -324,4 +325,16 @@ onBeforeUnmount(() => {
   .danmaku-overlay { inset: calc(10px + var(--safe-area-top)) calc(8px + var(--safe-area-right)) auto calc(8px + var(--safe-area-left)); }
 }
 
+</style>
+
+<style scoped>
+.compact .danmaku-row { padding-top:0; gap:8px; }
+.compact .danmaku-toggle { flex:1; justify-content:space-between; min-height:48px; padding:0; background:transparent; color:var(--text-primary); font-size:14px; }
+.compact .danmaku-toggle .danmaku-compact-label { border:0; padding:0; }
+.compact .danmaku-switch-track { position:relative; width:44px; height:24px; padding:0; border:0; border-radius:14px; background:var(--switch-track); }
+.danmaku-switch-track i { position:absolute; left:2px; top:2px; width:20px; height:20px; border-radius:50%; background:var(--switch-knob); }
+.danmaku-toggle[aria-checked=true] .danmaku-switch-track { background:var(--liquid-accent); }
+.danmaku-toggle[aria-checked=true] .danmaku-switch-track i { transform:translateX(20px); }
+.danmaku-compact-status { margin:0 0 8px; color:var(--text-tertiary); font-size:12px; line-height:1.5; }
+.compact .danmaku-settings { padding:10px 0; border-radius:0; gap:12px; }
 </style>

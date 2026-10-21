@@ -1038,30 +1038,11 @@ defineExpose({ retry });
           <XgPlayerControls v-if="videoRef" :ready="phase === 'ready'" :native-fullscreen="nativeFullscreen"
             :video="videoRef" :expanded="fullscreen && !nativeFullscreen" :picture-mode="pictureMode" :sources="sources" :selected-source-id="selectedSourceId"
             @fullscreen="toggleFullscreen" @quality="changeQuality" @picture-mode="pictureMode = $event" @inset="androidControlsInset = $event">
-            <SubtitleControls :video="videoRef" :native-fullscreen="nativeFullscreen" :fullscreen="fullscreen" :context-key="`${currentEpisode?.fid || ''}:${selectedSourceId}`" :username="username" :notice="playback?.subtitleNotice" compact icon-only
+            <SubtitleControls :video="videoRef" :native-fullscreen="nativeFullscreen" :fullscreen="fullscreen" :context-key="`${currentEpisode?.fid || ''}:${selectedSourceId}`" :username="username" :notice="playback?.subtitleNotice" 
               :loading="embeddedSubtitles.loading.value" :read-error="embeddedSubtitles.error.value" @retry-embedded="embeddedSubtitles.retry" />
             <template #episodes><div class="fullscreen-episode-panel"><button type="button" class="collect-series" :disabled="collecting || collectedAll" @click="collectSeries"><BookmarkCheck v-if="collectedAll" /><Bookmark v-else />{{ collectedAll ? '已收藏' : collecting ? '收藏中…' : '收藏整部' }}</button><div ref="fullscreenEpisodesHost"></div></div></template>
+            <template #audio><label v-if="audioSwitchable" class="player-settings-row"><span>音轨</span><select class="player-setting-select" aria-label="选择音轨" :value="selectedAudioIndex" @change="selectAudioTrack(Number(($event.target as HTMLSelectElement).value))"><option v-for="(track,index) in audioTracks" :key="track.id" :value="index">{{ track.label }}</option></select></label></template>
             <template #settings><div class="playback-settings" id="playback-settings">
-            <div v-if="audioSwitchable" class="setting-group">
-              <div class="setting-heading">
-                <span>音频</span>
-
-              </div>
-              <div class="option-scroll">
-                <button
-                  v-for="(track, index) in audioTracks"
-                  :key="track.id"
-                  type="button"
-                  class="option-chip"
-                  :class="{ active: selectedAudioIndex === index }"
-                  :disabled="!audioSwitchable"
-                  @click="selectAudioTrack(index)"
-                >
-                  {{ track.label }}{{ track.codec ? ` · ${track.codec}` : '' }}
-                </button>
-              </div>
-            </div>
-
             <div class="setting-group automation-setting-group">
               <div class="automation-list">
                 <div class="automation-row">
@@ -1106,7 +1087,7 @@ defineExpose({ retry });
                 </div>
               </div>
             </div>
-            <div v-if="currentEpisode && media" class="setting-group"><div class="setting-heading"><span>弹幕</span></div><DanmakuControls :video="videoRef!" :input="{ mediaKey: media.id, title: media.title, category: media.category, episodeNumber: currentEpisode.episodeNumber, episodeTitle: currentEpisode.episodeTitle }" /></div>
+            <div v-if="currentEpisode && media" class="setting-group"><DanmakuControls compact :video="videoRef!" :input="{ mediaKey: media.id, title: media.title, category: media.category, episodeNumber: currentEpisode.episodeNumber, episodeTitle: currentEpisode.episodeTitle }" /></div>
             </div></template>
           </XgPlayerControls>
         </div>
@@ -1185,8 +1166,8 @@ defineExpose({ retry });
 .loading-wave i:nth-child(2) { animation-delay: .12s; }
 .loading-wave i:nth-child(3) { animation-delay: .24s; }
 .loading-wave i:nth-child(4) { animation-delay: .36s; }
-.playback-settings { display: grid; gap: 0; padding: 0 16px; }
-.setting-group { min-width: 0; padding: 12px 0; border-bottom: 1px solid var(--divider); }
+.playback-settings { display: grid; gap: 0; padding: 0; }
+.setting-group { min-width: 0; padding: 4px 0; border-bottom: 1px solid var(--divider); }
 .setting-group:last-child { border-bottom: 0; }
 .setting-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; font-size: .8rem; font-weight: 600; }
 .setting-heading small { overflow: hidden; color: var(--text-tertiary); font-size: .67rem; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
