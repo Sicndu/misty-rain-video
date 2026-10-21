@@ -81,7 +81,9 @@ onBeforeUnmount(() => { release(); adapter?.destroy(); clearTimeout(timer); emit
 /* Player chrome remains legible against video; business menus inherit the app theme. */
 .video-stage.xgplayer { display:block; font-family:inherit; }
 .video-stage.xgplayer video { position:absolute; inset:0; width:100%; height:100%; }
-.misty-controls-disabled > .xgplayer-controls, .misty-controls-disabled > .xgplayer-mobile { display:none !important; }
+/* Vue owns the existing video; plugin insertion order must not put touch input behind it. */
+.video-stage.xgplayer > xg-trigger { z-index:2; }
+.misty-controls-disabled > .xgplayer-controls, .misty-controls-disabled > xg-trigger { display:none !important; }
 .video-stage .xgplayer-controls { z-index:8; bottom:0; left:0; right:0; width:100%; padding:0 8px; box-sizing:border-box; }
 .video-stage .xgplayer-controls .xgplayer-icons { height:44px; }
 .video-stage .xgplayer-controls xg-icon { margin-left:6px; margin-right:6px; }

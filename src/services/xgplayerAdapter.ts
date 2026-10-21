@@ -68,7 +68,13 @@ export function createDirectPlayer(root: HTMLElement, video: HTMLVideoElement, o
   });
   // Vue owns the media element and the sole direct-URL attachment pipeline.
   player.handleSource = false;
-  void Promise.resolve(player.start()).catch(() => options.feedback('播放器加载失败，请重新打开影片'));
+  // Playback is started by the direct-source owner, outside player.play(). Keep the
+  // library's interaction lifecycle in sync so the first tap reveals controls.
+  player.on('playing', () => { player.isPlaying = true; });
+  player.on('emptied', () => { player.isPlaying = false; });
+  void Promise.resolve(player.start()).then(() => {
+    if (player.video === video && !video.paused && video.readyState >= 2) player.isPlaying = true;
+  }).catch(() => options.feedback('播放器加载失败，请重新打开影片'));
   player.on('sourcequalityrequest', options.quality);
   const mobilePlugin = player.plugins.mobile as Mobile | undefined;
   mobilePlugin?.useHooks('videoDbClick', (_plugin, data: { e: TouchEvent | MouseEvent }) => {
