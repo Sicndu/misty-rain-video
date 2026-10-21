@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type Hls from 'hls.js';
-import { Captions, ChevronDown } from '@lucide/vue';
+import { Captions, ChevronDown, X } from '@lucide/vue';
 import { activeSubtitleTrack, selectSubtitleTrack, setSubtitleDefaults, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleLanguageKey, managedSubtitleTracks, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
-const props = defineProps<{ video: HTMLVideoElement; hls?: Hls | null; compact?: boolean; iconOnly?: boolean; notice?: string; username?: string; nativeFullscreen?: boolean; loading?: boolean; readError?: string }>();
+const props = defineProps<{ video: HTMLVideoElement; hls?: Hls | null; compact?: boolean; iconOnly?: boolean; notice?: string; username?: string; nativeFullscreen?: boolean; loading?: boolean; readError?: string; fullscreen?: boolean; contextKey?: string }>();
 const emit = defineEmits<{ (event: 'retry-embedded'): void }>();
 const options = ref<SubtitleTrackOption[]>([]);
 const selected = ref('off');
@@ -13,6 +13,43 @@ const error = ref('');
 const preferenceKey = subtitlePreferenceKey(props.username);
 let preference = 'auto';
 try { preference = localStorage.getItem(preferenceKey) || 'auto'; } catch { /* Current session remains usable. */ }
+const root = ref<HTMLElement | null>(null);
+const picker = ref<HTMLSelectElement | null>(null);
+const status = ref<HTMLElement | null>(null);
+const subtitlesEnabled = ref(preference !== 'off');
+const hasStatus = computed(() => Boolean(props.notice || error.value || props.readError));
+const statusVisible = ref(false);
+let dismissed = false;
+let statusTimer: ReturnType<typeof setTimeout> | undefined;
+const clearStatusTimer = () => { clearTimeout(statusTimer); };
+const dismissStatus = () => { dismissed = true; statusVisible.value = false; clearStatusTimer(); };
+const closeStatus = () => { dismissStatus(); picker.value?.focus({ preventScroll: true }); };
+const scheduleStatusHide = () => {
+  clearStatusTimer();
+  statusTimer = setTimeout(() => {
+    if (status.value?.contains(document.activeElement)) return;
+    dismissStatus();
+  }, 6000);
+};
+const revealStatus = (manual = false) => {
+  if (!hasStatus.value || !subtitlesEnabled.value || (!manual && (props.fullscreen || props.nativeFullscreen))) return;
+  dismissed = false; statusVisible.value = true; scheduleStatusHide();
+};
+const outsideStatus = (event: PointerEvent) => { if (statusVisible.value && !root.value?.contains(event.target as Node)) dismissStatus(); };
+const escapeStatus = (event: KeyboardEvent) => { if (statusVisible.value && event.key === 'Escape') dismissStatus(); };
+document.addEventListener('pointerdown', outsideStatus);
+document.addEventListener('keydown', escapeStatus);
+watch([hasStatus, subtitlesEnabled, () => props.loading], ([has, enabled, loading]) => {
+  if (!has || !enabled) {
+    statusVisible.value = false; clearStatusTimer();
+    // A successful read ends this incident. Clearing an error to retry it does not.
+    if (!has && !loading) dismissed = false;
+    return;
+  }
+  if (!dismissed && !statusVisible.value) revealStatus();
+}, { immediate: true });
+watch([() => props.fullscreen, () => props.nativeFullscreen], () => { if (hasStatus.value) dismissStatus(); });
+const retryEmbedded = () => { dismissStatus(); emit('retry-embedded'); };
 let release = () => {};
 let applying = false;
 let generation = 0;
@@ -30,6 +67,7 @@ const rememberNativeChoice = () => {
 const sync = () => {
   if (applying) return;
   try { preference = localStorage.getItem(preferenceKey) || 'auto'; } catch { /* Keep this session's preference. */ }
+  subtitlesEnabled.value = preference !== 'off';
   options.value = subtitleTrackOptions(props.video, props.hls);
   const automatic = automaticOption.value;
   const preferred = options.value.find(option => subtitlePreference(option) === preference)
@@ -58,6 +96,7 @@ const choose = (event: Event) => {
   const option = options.value.find(item => item.id === id);
   preference = id === 'auto' ? 'auto' : subtitlePreference(option);
   try { localStorage.setItem(preferenceKey, preference); } catch { /* Keep the active selection. */ }
+  dismissStatus();
   error.value = '';
   applying = true;
   if (id !== 'auto') selectSubtitleTrack(props.video, props.hls, id);
@@ -66,13 +105,16 @@ const choose = (event: Event) => {
   sync();
 };
 const retry = () => {
+  dismissStatus();
   const element = Array.from(props.video.querySelectorAll('track')).find(item => item.track.mode === 'showing');
   if (!element) return;
   const url = new URL(element.src, location.href); url.searchParams.set('_retry', String(Date.now()));
   error.value = ''; element.src = url.toString();
 };
-watch([() => props.video, () => props.hls] as const, async ([video, hls]) => {
+watch([() => props.video, () => props.hls, () => props.contextKey] as const, async ([video, hls]) => {
   release(); const seq = ++generation;
+  error.value = ''; dismissed = false; statusVisible.value = false; clearStatusTimer();
+  revealStatus();
   await nextTick(); if (seq !== generation) return;
   const failed = () => { error.value = '字幕加载失败，可重试或选择其他字幕；影片仍可继续播放。'; };
   const loaded = () => { error.value = ''; sync(); };
@@ -107,19 +149,20 @@ watch([() => props.video, () => props.hls] as const, async ([video, hls]) => {
     hlsEvents.forEach(event => hls?.off(event, sync));
   };
 }, { immediate: true });
-onBeforeUnmount(() => { generation += 1; release(); });
+onBeforeUnmount(() => { generation += 1; release(); clearStatusTimer(); document.removeEventListener('pointerdown', outsideStatus); document.removeEventListener('keydown', escapeStatus); });
 </script>
 <template>
-  <div class="subtitle-controls" :class="{ compact, 'icon-only':iconOnly }">
-    <div class="subtitle-picker"><Captions class="captions-icon" aria-hidden="true" /><select aria-label="选择影片字幕" :value="selected" @change="choose">
+  <div ref="root" class="subtitle-controls" :class="{ compact, 'icon-only':iconOnly }">
+    <div class="subtitle-picker"><Captions class="captions-icon" aria-hidden="true" /><select ref="picker" aria-label="选择影片字幕" :value="selected" @pointerdown="revealStatus(true)" @keydown.enter="revealStatus(true)" @keydown.space="revealStatus(true)" @change="choose">
       <option value="auto">{{ loading ? '正在读取字幕…' : options.length ? `自动 · ${automaticOption?.label || '字幕'}` : '字幕 · 暂无可用轨道' }}</option>
       <option value="off">字幕关闭</option>
       <option v-for="option in options" :key="option.id" :value="option.id">{{ option.label }}</option>
     </select><ChevronDown aria-hidden="true" /></div>
-    <div v-if="notice || error || readError" class="subtitle-status">
+    <div v-if="statusVisible && hasStatus && subtitlesEnabled" ref="status" class="subtitle-status" @pointerenter="clearStatusTimer" @pointerleave="scheduleStatusHide" @focusin="clearStatusTimer" @focusout="scheduleStatusHide">
+      <button type="button" class="close-subtitle-status" aria-label="关闭字幕提示" @click="closeStatus"><X aria-hidden="true" /></button>
       <p v-if="notice" role="status">{{ notice }}</p>
       <p v-if="error" role="alert">{{ error }} <button type="button" @click="retry">重试字幕</button></p>
-      <p v-if="readError" role="status">{{ readError }} <button type="button" @click="emit('retry-embedded')">重试</button></p>
+      <p v-if="readError" role="status">{{ readError }} <button type="button" @click="retryEmbedded">重试</button></p>
     </div>
   </div>
 </template>
@@ -132,8 +175,12 @@ p { margin-top: 8px; color: var(--text-tertiary); font-size: .73rem; line-height
 button { border: 0; padding: 4px; color: var(--liquid-accent); background: transparent; }
 .compact select { max-width: 220px; border-color: transparent; background: transparent; font-size: 13px; }
 @media (max-width: 820px) { select { font-size: 16px; } }
+.subtitle-status { position:relative; padding-right:36px; }
+.subtitle-status .close-subtitle-status { position:absolute; top:4px; right:4px; display:grid; place-items:center; width:32px; height:32px; padding:0; color:var(--text-secondary); border-radius:6px; }
+.close-subtitle-status svg { width:16px; height:16px; }
+.close-subtitle-status:hover { background:var(--glass-bg-hover); }
 </style>
 
 <style scoped>
-.icon-only { position:relative; }.icon-only .subtitle-picker { width:36px; height:40px; }.icon-only select { width:36px; max-width:36px; height:40px; padding:0; opacity:0; cursor:pointer; }.icon-only .subtitle-picker>.captions-icon { top:11px; left:8px; width:20px; height:20px; }.icon-only .subtitle-picker>svg:not(.captions-icon) { display:none; }.icon-only:focus-within { outline:2px solid white; outline-offset:-2px; border-radius:4px; }.icon-only .subtitle-status { position:absolute; left:0; bottom:100%; z-index:14; width:min(260px,65vw); padding:8px 12px; border:1px solid var(--divider); border-radius:8px; color:var(--text-primary); background:var(--surface-elevated,var(--surface-1)); }
+.icon-only { position:relative; }.icon-only .subtitle-picker { width:36px; height:40px; }.icon-only select { width:36px; max-width:36px; height:40px; padding:0; opacity:0; cursor:pointer; }.icon-only .subtitle-picker>.captions-icon { top:11px; left:8px; width:20px; height:20px; }.icon-only .subtitle-picker>svg:not(.captions-icon) { display:none; }.icon-only:focus-within { outline:2px solid white; outline-offset:-2px; border-radius:4px; }.icon-only .subtitle-status { position:absolute; left:0; bottom:100%; z-index:14; width:min(260px,65vw); padding:8px 40px 8px 12px; border:1px solid var(--divider); border-radius:8px; color:var(--text-primary); background:var(--surface-elevated,var(--surface-1)); }
 </style>
