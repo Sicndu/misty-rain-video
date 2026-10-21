@@ -2,9 +2,11 @@ import { createApp } from 'vue';
 import App from './App.vue';
 import './assets/styles/main.css';
 import './assets/styles/theme.css';
+import { initializeSiteSettings } from './services/siteSettings';
 import { initializeTheme } from './services/theme';
 import { initializeAndroidInstall } from './services/androidInstall';
 initializeTheme();
+initializeSiteSettings();
 initializeAndroidInstall();
 
 const navigatorWithStandalone = navigator as Navigator & { standalone?: boolean };

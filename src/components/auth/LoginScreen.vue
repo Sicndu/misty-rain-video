@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { siteSettings } from '../../services/siteSettings';
 import { nextTick, ref, watch } from 'vue';
 import { Download, Eye, EyeOff } from '@lucide/vue';
 import { apiUrl } from '../../services/appUrl';
@@ -43,15 +44,15 @@ const submit = () => {
             <BrandMark />
           </div>
           <div class="brand-copy">
-            <strong>烟雨影视</strong>
-            <small>PRIVATE CINEMA</small>
+            <strong>{{ siteSettings.name }}</strong>
+            <small v-if="siteSettings.subtitle">{{ siteSettings.subtitle }}</small>
           </div>
         </div>
 
         <div class="login-heading">
           <span>{{ checking ? '正在连接' : '私人影院' }}</span>
           <h1>{{ checking ? '正在加载' : '欢迎回来' }}</h1>
-          <p>{{ checking ? '正在恢复登录状态…' : '登录后继续观看你的收藏与播放记录。' }}</p>
+          <p>{{ checking ? '正在恢复登录状态…' : siteSettings.description || '登录后继续观看你的收藏与播放记录。' }}</p>
         </div>
       </header>
 
@@ -130,7 +131,7 @@ const submit = () => {
 .brand-lockup { display: flex; align-items: center; gap: 12px; }
 .brand-mark { width: 54px; height: 54px; overflow: hidden; border: 1px solid var(--divider); border-radius: 19px; box-shadow: 0 7px 18px rgb(44 81 157 / .15); }
 .brand-mark :deep(.brand-mark-image) { border-radius: inherit; }
-.brand-copy { display: grid; gap: 3px; }
+.brand-copy { min-width:0; overflow-wrap:anywhere; display: grid; gap: 3px; }
 .brand-copy strong { font-size: 1.15rem; font-weight: 740; letter-spacing: -.04em; }
 .brand-copy small { color: var(--text-tertiary); font-size: .56rem; font-weight: 650; letter-spacing: .18em; }
 .login-heading { margin: 60px 0 32px; }

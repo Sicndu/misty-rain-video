@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { siteSettings } from '../../services/siteSettings';
 import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue';
 import { Search, X } from '@lucide/vue';
 import type { MediaItem, CategoryType } from '../../types/media';
@@ -131,15 +132,15 @@ defineExpose({ focusSearch, scrollToTop });
             <BrandMark />
           </span>
           <span class="mobile-brand-copy">
-            <strong>烟雨影视</strong>
+            <strong>{{ siteSettings.name }}</strong>
           </span>
         </div>
         <div class="brand-logo-badge">
           <BrandMark class="brand-image" />
         </div>
         <div class="brand-text-group">
-          <span class="brand-title">烟雨影视</span>
-          <span class="brand-sub">MISTY RAIN</span>
+          <span class="brand-title">{{ siteSettings.name }}</span>
+          <span v-if="siteSettings.subtitle" class="brand-sub">{{ siteSettings.subtitle }}</span>
         </div>
       </button>
 
@@ -217,11 +218,11 @@ defineExpose({ focusSearch, scrollToTop });
 @media (min-width: 1024px) { .brand-unit, .trailing-unit { display: none !important; } .liquid-navbar { gap: 24px; } .search-unit { max-width: 640px; margin-right: auto; margin-left: 0; } }
 .liquid-navbar-wrapper { position: sticky; top: 0; z-index: 100; width: 100%; margin: 0 auto; padding: 0 max(40px, calc((100% - 1200px) / 2)); background: var(--nav-background); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border-bottom: 1px solid var(--divider); }
 .liquid-navbar { display: flex; align-items: center; gap: 40px; min-height: 88px; padding: 16px 0; border: 0; background: transparent; }
-.brand-unit { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 0; border: 0; color: var(--text-primary); background: transparent; text-align: left; }
+.brand-unit { min-width:0; max-width:100%; display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 0; border: 0; color: var(--text-primary); background: transparent; text-align: left; }
 .brand-logo-badge { width: 34px; height: 34px; overflow: hidden; border-radius: 11px; }
 .brand-image { width: 100%; height: 100%; }
 .brand-text-group { display: grid; gap: 1px; }
-.brand-title { font-size: 1.08rem; font-weight: 700; letter-spacing: -.02em; }
+.brand-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size: 1.08rem; font-weight: 700; letter-spacing: -.02em; }
 .brand-sub { font-size: .52rem; letter-spacing: .18em; color: var(--text-tertiary); }
 .mobile-title-group { display: none; }
 .search-unit { position: relative; flex: 1; max-width: 480px; min-width: 0; margin-left: auto; }
@@ -252,7 +253,7 @@ defineExpose({ focusSearch, scrollToTop });
   .mobile-title-group { display: flex; min-width: 0; align-items: center; gap: 10px; }
   .mobile-brand-mark { display: block; width: 34px; height: 34px; flex-shrink: 0; overflow: hidden; border: 0; border-radius: 11px; }
   .mobile-brand-copy { display: grid; min-width: 0; gap: 1px; }
-  .mobile-brand-copy strong { color: var(--text-primary); font-size: 1.15rem; font-weight: 700; letter-spacing: -.025em; }
+  .mobile-brand-copy strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color: var(--text-primary); font-size: 1.15rem; font-weight: 700; letter-spacing: -.025em; }
   .mobile-brand-copy small { color: var(--text-tertiary); font-size: .67rem; }
   .search-unit { grid-column: 1 / -1; grid-row: 2; width: 100%; max-width: none; }
   .liquid-search-input { background: var(--glass-bg); box-shadow: none; }

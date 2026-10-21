@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue';
-import { ChevronLeft, ChevronRight, Download, LogOut, Settings2 } from '@lucide/vue';
+import { ChevronLeft, ChevronRight, Download, LogOut, Settings2, Globe } from '@lucide/vue';
 import type { AppUser } from '../../services/authService';
 import { apiUrl } from '../../services/appUrl';
 import { QuarkStreamService } from '../../services/quarkStreamService';
 import { useToast } from '../../composables/useToast';
 import TvPlaybackAuth from './TvPlaybackAuth.vue';
 import ThemeSwitch from '../common/ThemeSwitch.vue';
+import SiteSettingsPanel from './SiteSettingsPanel.vue';
 import LibraryMaintenanceStatus from './LibraryMaintenanceStatus.vue';
 import { androidInstalled, installAndroidApp } from '../../services/androidInstall';
 
@@ -36,6 +37,7 @@ const tvTokenExchangeOrigin = ref('');
 const isSaving = ref(false);
 const showCredentialForm = ref(false);
 const advancedConfiguration = ref(false);
+const siteConfiguration = ref(false), siteBusy = ref(false);
 const authSection = ref<HTMLElement | null>(null);
 const refreshStatus = async () => {
   loadingStatus.value = true;
@@ -81,7 +83,7 @@ const saveCredential = async () => {
 
 const openAdvanced = async () => {
   if (props.user.role !== 'admin') return;
-  advancedConfiguration.value = true;
+  siteConfiguration.value = false; advancedConfiguration.value = true;
   await refreshStatus();
   if (props.user.role === 'admin' && !statusError.value && !libraryConnected.value) showCredentialForm.value = true;
 };
@@ -93,7 +95,9 @@ const focusAuth = async () => {
   authSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 const back = () => {
-  if (advancedConfiguration.value) { advancedConfiguration.value = false; credential.value = ''; showCredentialForm.value = false; }
+  if (siteBusy.value) return;
+  if (siteConfiguration.value) siteConfiguration.value = false;
+  else if (advancedConfiguration.value) { advancedConfiguration.value = false; credential.value = ''; showCredentialForm.value = false; }
   else emit('back');
 };
 
@@ -103,12 +107,13 @@ defineExpose({ focusAuth, refreshStatus });
 <template>
   <main class="account-page">
     <header class="page-heading">
-      <button type="button" class="back-button" :aria-label="advancedConfiguration ? '返回设置' : '返回上一页'" @click="back"><ChevronLeft aria-hidden="true" /></button>
-      <h1>{{ advancedConfiguration ? '高级配置' : '设置' }}</h1>
+      <button type="button" class="back-button" :disabled="siteBusy" :aria-label="advancedConfiguration || siteConfiguration ? '返回设置' : '返回上一页'" @click="back"><ChevronLeft aria-hidden="true" /></button>
+      <h1>{{ siteConfiguration ? '站点设置' : advancedConfiguration ? '高级配置' : '设置' }}</h1>
     </header>
-    <template v-if="!advancedConfiguration">
+    <template v-if="!advancedConfiguration && !siteConfiguration">
       <section class="settings-section general-settings" aria-label="系统配置">
         <div class="theme-row"><span>主题</span><ThemeSwitch /></div>
+        <button v-if="user.role === 'admin'" class="settings-row" type="button" @click="siteConfiguration = true"><Globe aria-hidden="true" /><span>站点设置</span><ChevronRight class="chevron" aria-hidden="true" /></button>
         <button v-if="user.role === 'admin'" class="settings-row" type="button" @click="openAdvanced"><Settings2 aria-hidden="true" /><span>高级配置</span><ChevronRight class="chevron" aria-hidden="true" /></button>
         <template v-if="isAndroid">
           <button v-if="!androidInstalled" class="settings-row" type="button" @click="installApp"><Download aria-hidden="true" /><span>安装到桌面</span><ChevronRight class="chevron" aria-hidden="true" /></button>
@@ -118,6 +123,7 @@ defineExpose({ focusAuth, refreshStatus });
       </section>
       <button type="button" class="logout-button" @click="emit('logout')"><LogOut aria-hidden="true" />退出登录</button>
     </template>
+    <SiteSettingsPanel v-else-if="siteConfiguration && user.role === 'admin'" @busy="siteBusy = $event" />
     <section v-else-if="user.role === 'admin'" ref="authSection" class="settings-section auth-section" aria-labelledby="auth-title">
       <div class="section-title-row">
         <div>
