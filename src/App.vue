@@ -13,6 +13,8 @@ import CategoryTabs from './components/media/CategoryTabs.vue';
 import MediaGrid from './components/media/MediaGrid.vue';
 import DiscoveryPage from './components/media/DiscoveryPage.vue';
 import CatalogSearchPage from './components/media/CatalogSearchPage.vue';
+import FilmDetailPage from './components/media/FilmDetailPage.vue';
+import { subjectIdFromHash } from './services/catalogDetails';
 import { savePlaybackPage, loadPlaybackPage, clearPlaybackPages } from './services/playbackNavigation';
 import { discoveryMedia, resourcePlaybackMedia, type DiscoveryItem } from './services/discoveryService';
 import DeleteMediaConfirm from './components/media/DeleteMediaConfirm.vue';
@@ -102,7 +104,12 @@ const displayHistory = computed(() => history.value.map(entry => {
   const media = allMediaList.value.find(item => sameMediaIdentity(item, entry.media));
   return media ? { ...entry, media: { ...entry.media, ...media } } : entry;
 }));
-type MobileTab = MobileDockTab | 'search' | 'catalog';
+type MobileTab = MobileDockTab | 'search' | 'catalog' | 'detail';
+const detailId = ref('');
+const detailSeed = shallowRef<DiscoveryItem | null>(null);
+const detailOrigin = ref<'discover' | 'catalog'>('discover');
+const detailHasParent = ref(false);
+const detailCollection = computed(() => allMediaList.value.find(item => item.catalogId === detailId.value));
 const catalogQuery = ref('');
 const playbackPageKey = ref('');
 const preparedPageSession = shallowRef<{ key: string; session: QuarkPlaybackSession } | null>(null);
@@ -113,7 +120,7 @@ const selectedHistoryEntry = ref<PlaybackHistoryEntry | null>(null);
 const isCheckingUpdates = ref(false);
 const isApplyingUpdates = ref(false);
 let autoCheckedUsername = '';
-type AppHistoryLayer = 'catalog' | 'history' | 'discover' | 'library' | 'search' | 'account' | 'player' | 'transfer' | 'delete' | 'category' | 'actions' | 'title';
+type AppHistoryLayer = 'detail' | 'catalog' | 'history' | 'discover' | 'library' | 'search' | 'account' | 'player' | 'transfer' | 'delete' | 'category' | 'actions' | 'title';
 let handlingPopState = false;
 
 const historyEnabled = () => typeof window !== 'undefined';
@@ -122,11 +129,12 @@ const currentHistoryLayer = () => window.history.state?.mistyRainLayer as AppHis
 const setAppHistoryLayer = (layer: AppHistoryLayer, replace = false) => {
   if (!historyEnabled() || handlingPopState) return;
   const state = { mistyRainLayer: layer, query: catalogQuery.value, category: currentCategory.value,
-    playbackKey: layer === 'player' ? playbackPageKey.value : '', scrollY: 0 };
+    playbackKey: layer === 'player' ? playbackPageKey.value : '', detailOrigin: detailOrigin.value, detailHasParent: detailHasParent.value, scrollY: 0 };
   const hash = layer === 'player' ? `#/watch/${playbackPageKey.value}`
+    : layer === 'detail' ? `#/subject/${detailId.value}`
     : layer === 'catalog' ? `#/search?q=${encodeURIComponent(catalogQuery.value)}`
     : ['discover', 'library', 'history', 'account'].includes(layer) ? `#/${layer}` : window.location.hash;
-  if (replace || (currentHistoryLayer() === layer && layer !== 'player')) window.history.replaceState(state, '', hash);
+  if (replace || (currentHistoryLayer() === layer && layer !== 'player' && layer !== 'detail')) window.history.replaceState(state, '', hash);
   else {
     window.history.replaceState({ ...window.history.state, scrollY: window.scrollY }, '');
     window.history.pushState(state, '', hash);
@@ -149,7 +157,15 @@ const restorePage = async (state = window.history.state) => {
   isEmbedPlayerOpen.value = false;
   const layer = state?.mistyRainLayer;
   const search = window.location.hash.match(/^#\/search\?(.*)$/);
-  if (search) { catalogQuery.value = (new URLSearchParams(search[1]).get('q') || '').slice(0,100); mobileTab.value = 'catalog'; }
+  const subjectId = subjectIdFromHash(window.location.hash);
+  if (subjectId) {
+    detailId.value = subjectId; mobileTab.value = 'detail';
+    detailOrigin.value = state?.detailOrigin === 'catalog' ? 'catalog' : 'discover';
+    detailHasParent.value = state?.detailHasParent === true;
+    lastContentTab.value = detailOrigin.value;
+    if (state?.mistyRainLayer !== 'detail') window.history.replaceState({ ...state, mistyRainLayer: 'detail' }, '');
+  }
+  else if (search) { catalogQuery.value = (new URLSearchParams(search[1]).get('q') || '').slice(0,100); mobileTab.value = 'catalog'; }
   else if (['discover','library','history','account','search','catalog'].includes(layer)) mobileTab.value = layer;
   else mobileTab.value = window.location.hash === '#/library' ? 'library' : window.location.hash === '#/account' ? 'account' : window.location.hash === '#/history' ? 'history' : 'discover';
   if (state?.query) catalogQuery.value = state.query;
@@ -203,6 +219,7 @@ watch(user, async () => {
   isTransferOpen.value = false;
   mobileTab.value = 'discover';
   lastContentTab.value = 'discover';
+  detailId.value = ''; detailSeed.value = null; detailHasParent.value = false;
   deletingMedia.value = null;
   categoryMedia.value = null;
   actionMedia.value = null;
@@ -508,7 +525,7 @@ const handleLogout = async () => {
 };
 
 const focusMobileSearch = () => {
-  if (currentPage.value !== 'account') lastContentTab.value = currentPage.value;
+  if (currentPage.value !== 'account') lastContentTab.value = currentPage.value === 'detail' ? detailOrigin.value : currentPage.value;
   mobileTab.value = 'search';
   setAppHistoryLayer('search');
   nextTick(() => navbarRef.value?.focusSearch());
@@ -535,7 +552,7 @@ const showDesktopLibrary = (category?: CategoryType) => {
 };
 const showMobileAccount = () => {
   if (isSavingTransfer.value) return;
-  if (currentPage.value !== 'account') lastContentTab.value = currentPage.value;
+  if (currentPage.value !== 'account') lastContentTab.value = currentPage.value === 'detail' ? detailOrigin.value : currentPage.value;
   mobileTab.value = 'account';
   setAppHistoryLayer('account', currentHistoryLayer() === 'search');
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -543,8 +560,17 @@ const showMobileAccount = () => {
 const navigateMobileTab = (tab: MobileDockTab) => tab === 'account' ? showMobileAccount() : navigateContent(tab);
 const openDiscoveryItem = (item: DiscoveryItem) => {
   if (isSavingTransfer.value) return;
-  const saved = allMediaList.value.find(media => media.catalogId === item.id);
-  if (saved) { handleSelectMedia(saved); return; }
+  detailOrigin.value = currentPage.value === 'catalog' ? 'catalog' : 'discover';
+  detailId.value = item.id; detailSeed.value = item; detailHasParent.value = true;
+  mobileTab.value = 'detail'; setAppHistoryLayer('detail');
+  window.scrollTo({ top: 0, behavior: 'instant' });
+};
+const closeFilmDetail = () => {
+  if (detailHasParent.value) requestLayerClose('detail', () => navigateContent(detailOrigin.value));
+  else navigateContent(detailOrigin.value);
+};
+const searchFilmResources = (item: DiscoveryItem) => {
+  if (isSavingTransfer.value) return;
   openTransferModal(discoveryMedia(item));
   setAppHistoryLayer('transfer');
 };
@@ -596,12 +622,12 @@ const playResource = (media: MediaItem, resource: ResourceItem, category: Catego
   <template v-else-if="user">
     <main v-if="restoringPlayer" class="restoring-player" role="status">正在恢复播放…</main>
     <div v-show="!isEmbedPlayerOpen && !restoringPlayer" class="content-pages">
-    <DesktopSidebar :active-page="currentPage === 'catalog' ? 'discover' : currentPage" :category="currentCategory"
+    <DesktopSidebar :active-page="currentPage === 'catalog' || currentPage === 'detail' ? 'discover' : currentPage" :category="currentCategory"
       :counts="categoryCounts" :user="user" :disabled="isSavingTransfer"
       @library="showDesktopLibrary" @account="showMobileAccount" @discover="showDiscovery" @history="navigateContent('history')" />
     <!-- 片库页面 -->
     <Navbar
-      v-if="mobileTab !== 'account'"
+      v-if="mobileTab !== 'account' && currentPage !== 'detail'"
       ref="navbarRef"
       :query="currentPage === 'catalog' ? catalogQuery : ''"
       class="app-navbar"
@@ -623,6 +649,9 @@ const playResource = (media: MediaItem, resource: ResourceItem, category: Catego
     </main>
     <main v-show="currentPage === 'catalog'" class="page-container">
       <CatalogSearchPage :active="currentPage === 'catalog' && !isEmbedPlayerOpen && !isTransferOpen" :query="catalogQuery" :library-catalog-ids="allMediaList.map(item => item.catalogId || '').filter(Boolean)" @select="openDiscoveryItem" @search-resources="searchResources" @back="showDiscovery" />
+    </main>
+    <main v-if="currentPage === 'detail'" class="page-container detail-container">
+      <FilmDetailPage :id="detailId" :seed="detailSeed" :collected="!!detailCollection" @back="closeFilmDetail" @search="searchFilmResources" @play-collection="detailCollection && handleSelectMedia(detailCollection)" />
     </main>
     <!-- 核心主区域 -->
     <main v-if="currentPage === 'library'" class="page-container">
@@ -691,7 +720,7 @@ const playResource = (media: MediaItem, resource: ResourceItem, category: Catego
     <AccountPage v-if="currentPage === 'account'" ref="accountPageRef" :user="user" @auth-updated="handlePlaybackAuthUpdated" @back="navigateContent(lastContentTab)" @logout="handleLogout" />
 
     <MobileTabBar
-      v-if="!isEmbedPlayerOpen && !isTransferOpen && !deletingMedia && !categoryMedia && !actionMedia && !titleMedia"
+      v-if="currentPage !== 'detail' && !isEmbedPlayerOpen && !isTransferOpen && !deletingMedia && !categoryMedia && !actionMedia && !titleMedia"
       :active-tab="currentPage === 'catalog' ? 'discover' : currentPage"
       :disabled="isSavingTransfer"
       @navigate="navigateMobileTab"
@@ -778,6 +807,7 @@ const playResource = (media: MediaItem, resource: ResourceItem, category: Catego
 <style scoped>
 .restoring-player { display: grid; min-height: 100dvh; place-items: center; color: var(--text-secondary); }
 .page-container { position: relative; z-index: 1; width: 100%; max-width: 1280px; margin: 0 auto; padding: 36px 40px 90px; }
+.detail-container { padding-top: max(16px, var(--safe-area-top)); }
 .library-intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .library-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; min-width: 0; }
 .library-title h1 { font-size: 1.85rem; font-weight: 700; letter-spacing: -.03em; line-height: 1.3; }

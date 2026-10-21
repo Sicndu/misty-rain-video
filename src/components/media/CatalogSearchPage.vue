@@ -34,7 +34,7 @@ onBeforeUnmount(() => { controller?.abort(); sequence++; });
     <p v-if="!loading && partial" class="catalog-notice" role="status">豆瓣暂时返回了部分结果<button type="button" @click="search">重试</button></p>
     <div v-if="loading" class="catalog-grid" role="status" aria-label="正在搜索影片"><div v-for="n in 6" :key="n" class="skeleton"></div></div>
     <div v-else-if="items.length" class="catalog-grid">
-      <button v-for="item in visibleItems" :key="item.id" class="catalog-card" type="button" :aria-label="`${libraryCatalogIds.includes(item.id) ? '播放' : '查找片源'}：${item.title}（${item.year || '年份未知'}）`" @click="emit('select', item)">
+      <button v-for="item in visibleItems" :key="item.id" class="catalog-card" type="button" :aria-label="`查看详情：${item.title}（${item.year || '年份未知'}）`" @click="emit('select', item)">
         <span class="poster"><MediaPoster :src="item.poster" alt="" loading="lazy" /><span v-if="libraryCatalogIds.includes(item.id)" class="saved">已收藏</span></span>
         <strong>{{ item.title }}</strong><span class="meta">{{ item.year }} · {{ categories[item.category] }}<span v-if="item.rating !== null"><Star aria-hidden="true" />{{ item.rating.toFixed(1) }}</span></span>
         <small>{{ item.subtitle || item.description }}</small>
