@@ -1,6 +1,6 @@
 services:
   misty-rain-video:
-    image: ${IMAGE_NAME:-ghcr.io/sicndu/misty-rain-video}:${IMAGE_TAG:-amd64}
+    image: ${IMAGE_NAME:-ghcr.io/holt230/misty-rain-video}:${IMAGE_TAG:-amd64}
     container_name: misty-rain-video
     restart: unless-stopped
     init: true
@@ -13,7 +13,6 @@ services:
       QUARK_CONFIG_SECRET: ${QUARK_CONFIG_SECRET:-}
       # 可替换为自建的兼容 HTTPS 令牌交换服务；不要使用 HTTP 地址。
       TV_TOKEN_EXCHANGE_URL: ${TV_TOKEN_EXCHANGE_URL:-https://api.extscreen.com/quarkdrive/token}
-      # auto 优先使用 TV 渐进式直连；proxy 可恢复全部服务器中转。
       APP_USERS_JSON: >-
         [
           {"username":"admin","password":"666666","role":"admin","folder":"admin"}
