@@ -133,8 +133,9 @@ export class SilentSearchEngine {
     } finally { clearTimeout(timer); signal?.removeEventListener('abort',cancel); }
   }
 
-  async prefetch(keyword: string, signal: AbortSignal): Promise<SearchResult> {
+  async prefetch(keyword: string, signal: AbortSignal, force=false): Promise<SearchResult> {
     const params = new URLSearchParams({ kw: keyword, background: '1' });
+    if(force)params.set('refresh','1');
     const response = await authFetch(`${apiUrl('/api/resource-search')}?${params}`, { signal, cache: 'no-store' });
     const payload = await response.json();
     if (!response.ok || payload.code !== 0 || !payload.data) throw new Error('备选片源暂不可用');

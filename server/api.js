@@ -274,10 +274,11 @@ export const handleApiRequest = async (request, response, context) => {
         ));
         return true;
       }
-      if (request.method === 'POST' && ['/api/danmaku/match', '/api/danmaku/select'].includes(pathname)) {
+      if (request.method === 'POST' && ['/api/danmaku/match', '/api/danmaku/select', '/api/danmaku/options'].includes(pathname)) {
         service.limit(user.folder, 'match');
         const input = await readRequestBody(request, 8 * 1024);
-        const result = pathname.endsWith('/match') ? await service.match(user.folder, input) : await service.select(user.folder, input);
+        const result = pathname.endsWith('/match') ? await service.match(user.folder, input)
+          : pathname.endsWith('/options') ? await service.options(input) : await service.select(user.folder, input);
         sendSuccess(response, result);
         return true;
       }
@@ -335,13 +336,17 @@ export const handleApiRequest = async (request, response, context) => {
     }
     const discoveryPosterMatch = pathname.match(/^\/api\/discovery\/posters\/([^/]+)$/);
     if (discoveryPosterMatch && ['GET', 'HEAD'].includes(request.method)) {
-      const poster = await context.discovery.poster(decodeURIComponent(discoveryPosterMatch[1]));
+      const id = decodeURIComponent(discoveryPosterMatch[1]);
+      const poster = await context.discovery.poster(id, context.catalogDetails?.cachedPosterSource?.(id));
       const asset = context.posterService.getAsset(path.basename(poster.poster));
       if (!asset) throw Object.assign(new Error('封面暂时不可用'), { statusCode: 503 });
       response.statusCode = 200;
       response.setHeader('Content-Type', asset.contentType);
       response.setHeader('Content-Length', asset.size);
-      response.setHeader('Cache-Control', 'private, max-age=86400');
+      const etag = `"${path.basename(poster.poster)}"`;
+      response.setHeader('Cache-Control', 'private, no-cache');
+      response.setHeader('ETag', etag);
+      if (request.headers['if-none-match'] === etag) { response.statusCode = 304; response.removeHeader('Content-Length'); response.end(); return true; }
       if (request.method === 'HEAD') response.end();
       else fs.createReadStream(asset.filePath).pipe(response);
       return true;
@@ -574,7 +579,9 @@ export const handleApiRequest = async (request, response, context) => {
           quarkPasscode: String(media.quarkPasscode || '').slice(0, 32),
           quarkFid: String(media.quarkFid || '').slice(0, 240),
           quarkQuality: String(media.quarkQuality || '').slice(0, 120),
-          catalogId: String(media.catalogId || '').slice(0, 80)
+          catalogId: String(media.catalogId || '').slice(0, 80),
+          year: String(media.year || '').slice(0,12),
+          danmakuKey: String(media.danmakuKey || '').slice(0,256)
         };
         if (body.playbackSessionId !== undefined) {
           if (typeof body.playbackSessionId !== 'string' || !body.playbackSessionId || body.playbackSessionId.length > 240) {

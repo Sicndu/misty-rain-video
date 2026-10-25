@@ -111,15 +111,16 @@ export class DiscoveryService {
       .filter(item => item.provider === 'douban' && catalogTitleRelevance(query, item) > 0);
   }
 
-  async poster(id) {
+  async poster(id, preferredSource) {
     if (!/^(douban|bangumi)-\d{1,13}$/.test(id)) throw error('封面不存在', 404);
     const cached = this.posters.catalogPoster(id);
-    if (cached) return cached;
+    if (preferredSource && preferredSource.id !== id) throw error('封面身份不匹配', 400);
+    if (cached && !preferredSource) return cached;
     if (this.imagePending.has(id)) return this.imagePending.get(id);
-    const item = this.catalogItems.get(id) || Object.values(this.snapshots).flatMap(snapshot => snapshot.items).find(item => item.id === id && item.imageUrl);
+    const item = preferredSource || this.catalogItems.get(id) || Object.values(this.snapshots).flatMap(snapshot => snapshot.items).find(item => item.id === id && item.imageUrl);
     if (!item) throw error('封面不存在', 404);
-    if ((this.imageRetries.get(id) || 0) > this.now()) throw error('封面暂时不可用', 503);
-    const task = this.loadImage(() => { if (this.stopped) throw error('服务正在重启', 503); return this.posters.resolveCatalogPoster(item); })
+    if (!cached && (this.imageRetries.get(id) || 0) > this.now()) throw error('封面暂时不可用', 503);
+    const task = this.loadImage(() => { if (this.stopped) throw error('服务正在重启', 503); return this.posters.resolveCatalogPoster(item, { preferSource: Boolean(preferredSource) }); })
       .catch(() => {
         for (const [key, until] of this.imageRetries) if (until <= this.now()) this.imageRetries.delete(key);
         if (this.imageRetries.size >= 1000) this.imageRetries.delete(this.imageRetries.keys().next().value);

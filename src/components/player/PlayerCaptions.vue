@@ -1,26 +1,36 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue';
-import { captionLayout } from '../../services/captionLayout';
+import { captionLayout, playerViewportSize } from '../../services/captionLayout';
 const props = defineProps<{ video: HTMLVideoElement; fit: 'contain' | 'cover'; controlsInset: number; nativeFullscreen: boolean }>();
 const lines = ref<string[]>([]);
 const style = ref({});
 const nativePresentation = ref(false);
 let release = () => {};
-watch([() => props.video, () => props.fit, () => props.controlsInset, () => props.nativeFullscreen], ([video]) => {
+let update = () => {};
+watch(() => props.video, video => {
   release();
   const tracks = new Set<TextTrack>();
+  let systemFullscreen = false;
   const sync = () => {
-    nativePresentation.value = props.nativeFullscreen || document.pictureInPictureElement === video;
+    const native = video as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean; webkitPresentationMode?: string };
+    nativePresentation.value = props.nativeFullscreen || systemFullscreen || Boolean(native.webkitDisplayingFullscreen)
+      || document.fullscreenElement === video || document.pictureInPictureElement === video
+      || native.webkitPresentationMode === 'fullscreen' || native.webkitPresentationMode === 'picture-in-picture';
     video.classList.toggle('player-captions-active', !nativePresentation.value);
-    lines.value = Array.from(video.textTracks).filter(track => track.mode === 'showing' && ['subtitles', 'captions'].includes(track.kind))
-      .flatMap(track => Array.from(track.activeCues || []).map(cue => {
+    const track = Array.from(video.textTracks).find(track => track.mode === 'showing' && ['subtitles', 'captions'].includes(track.kind));
+    lines.value = nativePresentation.value ? [] : Array.from(track?.activeCues || [])
+      // Chromium can retain the ending cue in activeCues when paused exactly
+      // at a boundary. Apply the cue's half-open interval without suppressing
+      // legitimate overlapping or bilingual captions.
+        .filter(cue => cue.startTime <= video.currentTime && video.currentTime < cue.endTime).map(cue => {
         const vtt = cue as VTTCue;
         return typeof vtt.getCueAsHTML === 'function' ? vtt.getCueAsHTML().textContent || '' : vtt.text || '';
-      })).filter(Boolean);
+      }).filter(Boolean);
   };
+  const begin = () => { systemFullscreen = true; sync(); };
+  const end = () => { systemFullscreen = false; sync(); };
   const measure = () => {
-    const viewport = video.parentElement?.getBoundingClientRect();
-    const rect = viewport?.width && viewport.height ? viewport : video.getBoundingClientRect();
+    const rect = playerViewportSize(video);
     style.value = captionLayout(rect.width, rect.height, video.videoWidth, video.videoHeight, props.fit, props.controlsInset);
   };
   const bind = () => {
@@ -29,20 +39,25 @@ watch([() => props.video, () => props.fit, () => props.controlsInset, () => prop
     sync();
   };
   const trackEvents = ['change', 'addtrack', 'removetrack'];
-  const videoEvents = ['loadedmetadata', 'seeked', 'timeupdate', 'enterpictureinpicture', 'leavepictureinpicture', 'subtitletracksupdated'];
+  const videoEvents = ['loadedmetadata', 'seeked', 'timeupdate', 'enterpictureinpicture', 'leavepictureinpicture', 'webkitpresentationmodechanged', 'subtitletracksupdated'];
   trackEvents.forEach(event => video.textTracks.addEventListener(event, bind));
   videoEvents.forEach(event => video.addEventListener(event, bind));
+  video.addEventListener('webkitbeginfullscreen', begin); video.addEventListener('webkitendfullscreen', end);
+  document.addEventListener('fullscreenchange', sync);
   video.addEventListener('resize', measure); window.addEventListener('resize', measure);
   const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
-  observer?.observe(video); bind(); measure();
+  observer?.observe(video); bind(); measure(); update = () => { sync(); measure(); };
   release = () => {
     observer?.disconnect(); video.classList.remove('player-captions-active');
     trackEvents.forEach(event => video.textTracks.removeEventListener(event, bind));
     videoEvents.forEach(event => video.removeEventListener(event, bind));
+    video.removeEventListener('webkitbeginfullscreen', begin); video.removeEventListener('webkitendfullscreen', end);
+    document.removeEventListener('fullscreenchange', sync);
     video.removeEventListener('resize', measure); window.removeEventListener('resize', measure);
     tracks.forEach(track => track.removeEventListener('cuechange', sync));
   };
 }, { immediate: true, flush: 'post' });
+watch([() => props.fit, () => props.controlsInset, () => props.nativeFullscreen], () => update(), { flush: 'sync' });
 onBeforeUnmount(() => release());
 </script>
 <template>

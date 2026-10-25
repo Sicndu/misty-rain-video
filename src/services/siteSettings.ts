@@ -2,13 +2,13 @@ import { shallowRef } from 'vue';
 import { authFetch } from './authService';
 import { apiUrl, withAppBase } from './appUrl';
 export interface SiteSettings {
-  name: string; subtitle: string; description: string; revision: string; customIcon: boolean;
+  name: string; revision: string; customIcon: boolean;
   iconUrl: string; faviconUrl: string; touchIconUrl: string;
-  defaults: { name: string; subtitle: string; description: string; iconUrl: string };
+  defaults: { name: string; iconUrl: string };
 }
-export interface SiteSettingsInput { revision: string; name: string; subtitle: string; description: string; icons?: Record<string,string> | null }
-const defaults = { name: '烟雨影视', subtitle: 'MISTY RAIN', description: '移动优先的个人云端影视片库', iconUrl: '/brand-mark.png' };
-const normalize = (value: SiteSettings): SiteSettings => ({ ...value, iconUrl: withAppBase(value.iconUrl), faviconUrl: withAppBase(value.faviconUrl), touchIconUrl: withAppBase(value.touchIconUrl), defaults: { ...value.defaults, iconUrl: withAppBase(value.defaults.iconUrl) } });
+export interface SiteSettingsInput { revision: string; name: string; icons?: Record<string,string> | null }
+const defaults = { name: '烟雨影视', iconUrl: '/brand-mark.png' };
+const normalize = (value: SiteSettings): SiteSettings => ({ name:value.name,revision:value.revision,customIcon:value.customIcon,iconUrl: withAppBase(value.iconUrl), faviconUrl: withAppBase(value.faviconUrl), touchIconUrl: withAppBase(value.touchIconUrl), defaults: { name:value.defaults.name,iconUrl: withAppBase(value.defaults.iconUrl) } });
 function bootstrap(): SiteSettings | null {
   try { const value = JSON.parse(document.getElementById('site-settings')?.textContent || 'null'); return value?.revision && typeof value.name === 'string' ? normalize(value) : null; } catch { return null; }
 }
@@ -20,7 +20,7 @@ function apply(value: SiteSettings) {
   if (typeof document === 'undefined') return;
   document.title = value.name;
   for (const [selector, attribute, content] of [
-    ['meta[name="apple-mobile-web-app-title"]', 'content', value.name], ['meta[name="description"]', 'content', value.description],
+    ['meta[name="apple-mobile-web-app-title"]', 'content', value.name],
     ['link[rel="icon"]', 'href', siteSettings.value.faviconUrl], ['link[rel="apple-touch-icon"]', 'href', siteSettings.value.touchIconUrl]
   ]) document.querySelector(selector!)?.setAttribute(attribute!, content!);
 }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadingSkeleton from '../common/LoadingSkeleton.vue';
 import { onMounted, onUnmounted, ref } from 'vue';
 import { apiUrl } from '../../services/appUrl';
 
@@ -53,6 +54,7 @@ onUnmounted(() => { clearInterval(timer); controller.abort(); });
       <span>{{ error ? '待重试' : !status ? '读取中' : !status.enabled ? '未启用' : status.running ? '维护中' : '已开启' }}</span>
     </div>
     <p v-if="error" role="status">{{ error }}</p>
+    <LoadingSkeleton v-else-if="loading && !status" variant="text" :count="3" label="正在读取维护状态" />
     <template v-else-if="status">
       <small v-if="status.enabled">每 {{ status.intervalMinutes }} 分钟检查</small>
       <small v-else>未运行</small>
@@ -77,14 +79,7 @@ onUnmounted(() => { clearInterval(timer); controller.abort(); });
 </template>
 
 <style scoped>
-.maintenance { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--surface-2); }
-.maintenance-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: .86rem; }
-.maintenance-heading span { color: var(--liquid-accent); font-size: .75rem; }
-p, small { display: block; margin-top: 7px; color: var(--text-tertiary); font-size: .75rem; line-height: 1.7; }
-details { margin-top: 12px; font-size: .78rem; color: var(--text-secondary); }
-summary { cursor: pointer; min-height: 32px; }
-ul { padding: 0; list-style: none; max-height: 320px; overflow: auto; }
-li { padding: 12px 0; border-top: 1px solid var(--surface-2); }
-li p { margin-top: 3px; }
-button { min-height: 44px; margin-top: 8px; border: 0; background: transparent; color: var(--liquid-accent); font-size: .78rem; }
+.maintenance { margin-top:40px; padding-top:28px; border-top:1px solid var(--divider); }.maintenance-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }.maintenance-heading strong { font-size:1.1rem; font-weight:650; }.maintenance-heading span { color:var(--text-secondary); font-size:.8rem; }
+p,small { display:block; margin-top:9px; color:var(--text-tertiary); font-size:.8rem; line-height:1.7; } details { margin-top:16px; color:var(--text-secondary); font-size:.84rem; } summary { display:list-item; min-height:44px; padding:12px 0; cursor:pointer; } ul { max-height:360px; padding:0; overflow:auto; list-style:none; } li { padding:18px 0; border-top:1px solid var(--divider); } li strong { color:var(--text-primary); font-size:.88rem; font-weight:550; } li p { margin-top:5px; }
+button { min-height:44px; margin-top:16px; padding:10px 18px; border:1px solid var(--divider); border-radius:4px; color:var(--text-primary); background:none; font-size:.83rem; }
 </style>

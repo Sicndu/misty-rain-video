@@ -33,7 +33,7 @@ export function useEmbeddedSubtitles(videoRef: Ref<HTMLVideoElement | null>, end
       const element = document.createElement('track');
       element.kind = 'subtitles'; element.label = item.label; element.srclang = item.language || 'und';
       element.dataset.subtitleOrigin = 'embedded';
-      const content = 'WEBVTT\n\n' + item.cues.map(cue => `${clock(cue.start)} --> ${clock(cue.end)} position:50%,center align:center size:90%\n${cueText(cue.text)}\n`).join('\n');
+      const content = 'WEBVTT\n\n' + item.cues.map(cue => `${clock(cue.start)} --> ${clock(cue.end)} align:center\n${cueText(cue.text)}\n`).join('\n');
       const blob = URL.createObjectURL(new Blob([content], { type: 'text/vtt' }));
       element.src = blob;
       const entry: ManagedTrack = { element, track: element.track, cues: new Map(), blob };
@@ -50,7 +50,7 @@ export function useEmbeddedSubtitles(videoRef: Ref<HTMLVideoElement | null>, end
           entry.track.mode = 'hidden'; // Initial load only. Never toggle while adding later windows.
         });
         if (stopped) throw new Error('stopped');
-        for (const cue of Array.from(entry.track.cues || [])) entry.cues.set(cueKey(cue), cue);
+        for (const cue of Array.from(entry.track.cues || [])) { centerSubtitleCue(cue as VTTCue); entry.cues.set(cueKey(cue), cue); }
         managedSubtitleTracks.set(entry.track, { active: true, ready: true, origin: 'embedded' });
         return entry;
       } catch (failure) {

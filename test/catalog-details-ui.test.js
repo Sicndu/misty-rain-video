@@ -7,9 +7,11 @@ import { JSDOM } from 'jsdom';
 import { build } from 'esbuild';
 import { parse, compileScript, compileTemplate } from 'vue/compiler-sfc';
 
-const dom = new JSDOM('<html><body></body></html>', { url: 'http://localhost/' });
+const dom = new JSDOM('<html><body></body></html>', { url: 'http://localhost/', pretendToBeVisual:true });
 for (const key of ['window', 'document', 'Element', 'HTMLElement', 'SVGElement', 'Node']) globalThis[key] = dom.window[key];
 window.scrollTo = () => {};
+globalThis.requestAnimationFrame=window.requestAnimationFrame.bind(window);
+globalThis.cancelAnimationFrame=window.cancelAnimationFrame.bind(window);
 const { createApp, h, nextTick } = await import('vue');
 fs.mkdirSync('.local-runtime/tests', { recursive: true });
 const folder = fs.mkdtempSync('.local-runtime/tests/catalog-details-');
@@ -30,7 +32,7 @@ const compile = async entry => {
 const Detail = (await compile('src/components/media/FilmDetailPage.vue')).default;
 const { subjectIdFromHash } = await compile('src/services/catalogDetails.ts');
 const item = (id = 'douban-123') => ({ id, provider: 'douban', title: '测试影片', category: 'tv', poster: '', year: '2026', rating: 8.1, ratingCount: 11, subtitle: '', description: '测试简介', sourceUrl: '' });
-const details = (id = 'douban-123') => ({ ...item(id), originalTitle: 'Original', genres: ['剧情'], countries: ['中国大陆'], languages: ['汉语'], premieres: ['2026-01-01'], durations: [], aliases: [], episodeCount: 24, directors: [], credits: [], photos: [], comments: [], honors: [], partial: false, stale: false });
+const details = (id = 'douban-123') => ({ ...item(id), originalTitle: 'Original', genres: ['剧情'], countries: ['中国大陆'], languages: ['汉语'], premieres: ['2026-01-01'], durations: [], aliases: [], episodeCount: 24, directors: [], credits: [], photos: [], photoCount: 0, comments: [], commentCount: 0, honors: [], partial: false, stale: false });
 const flush = async () => { for (let i = 0; i < 3; i++) { await new Promise(resolve => setImmediate(resolve)); await nextTick(); } };
 
 test('detail hash routes accept only provider identities, including refresh links', () => {
@@ -71,10 +73,15 @@ test('metadata failure retains matching seed and manual search, with a retry; no
   }
 });
 
+const reachEnd=async element=>{
+ const count=()=>element.parentElement.querySelectorAll('.photo-tile,.short-comment,.credit').length;const initial=count();
+ element.getClientRects=()=>[{width:100,height:2,left:10,right:110}];element.getBoundingClientRect=()=>({top:count()>initial?2000:10,bottom:count()>initial?2002:12,width:100,height:2,left:10,right:110});
+ window.dispatchEvent(new window.Event('resize'));await new Promise(resolve=>window.requestAnimationFrame(()=>window.requestAnimationFrame(resolve)));await flush();
+};
 const photo = n => ({ id: String(n), image: `/thumb/${n}`, fullImage: `/full/${n}`, description: '' });
 const comment = n => ({ id: String(n), author: `观众${n}`, text: `短评${n}`, rating: 4, date: '2026-10-21', votes: 10 });
-const clickText = text => [...document.querySelectorAll('button')].find(button => button.textContent === text)?.click();
-test('details have one quiet attribution link; photos and comments expand locally and pages deduplicate stable IDs', async t => {
+const clickText = text => [...document.querySelectorAll('button')].find(button => button.textContent === text || button.getAttribute('aria-label') === text)?.click();
+test('credits and photos render immediately in horizontal rails and scrolling loads deduplicated content', async t => {
   const calls = [];
   t.mock.method(globalThis, 'fetch', async url => {
     calls.push(url);
@@ -86,28 +93,54 @@ test('details have one quiet attribution link; photos and comments expand locall
   document.body.innerHTML = '<div id="mount"></div>';
   const app = createApp({ render: () => h(Detail, { id: 'douban-123' }) }); app.mount('#mount'); t.after(() => app.unmount()); await flush();
   assert.equal(document.querySelectorAll('a[href^="https://"]').length, 1); assert.match(document.body.textContent, /编剧甲/); assert.match(document.body.textContent, /tt1234567/); assert.equal(calls.length, 1);
-  document.querySelector('.photo-row').closest('section').querySelector('.section-heading button').click(); await flush();
-  assert.equal(document.querySelectorAll('.photo-row button').length, 24); assert.equal(calls.length, 2);
-  clickText('更多短评'); await flush(); assert.equal(document.querySelectorAll('.short-comment').length, 20); assert.equal(calls.length, 3);
+  assert.equal(document.querySelector('.detail-facts').open,true);
+  assert.equal(document.querySelectorAll('.credit').length,1);assert.equal(document.querySelectorAll('.photo-tile').length,2);
+  assert.equal(document.querySelector('.credits-rail [aria-expanded],.photos-rail [aria-expanded]'),null);
+  await reachEnd(document.querySelector('.photos-rail .scroll-load'));
+  assert.equal(document.querySelectorAll('.photo-tile').length, 24); assert.equal(calls.length, 2);
+  await reachEnd(document.querySelector('.short-comment').closest('section').querySelector('.scroll-load')); assert.equal(document.querySelectorAll('.short-comment').length, 20); assert.equal(calls.length, 3);
   assert.equal(document.querySelectorAll('a[href^="https://"]').length, 1); assert.ok(calls.every(url => url.startsWith('/api/catalog/subjects/')));
 });
 test('closing the photo viewer while its next page loads never reopens it; switching subjects cancels pending content', async t => {
   const { ref } = await import('vue'); const id = ref('douban-123'); const pending = [];
   t.mock.method(globalThis, 'fetch', (url, options) => {
+    if (url.includes('/photos?') && new URL(url,'http://localhost').searchParams.get('start')==='0')return Promise.resolve(Response.json({code:0,data:{items:[photo(1)],total:2,nextStart:1}}));
     if (url.includes('/photos?')) return new Promise(resolve => pending.push({ resolve, signal: options.signal }));
     return Promise.resolve(Response.json({ code: 0, data: { ...details(id.value), photos: [photo(1)], photoCount: 2 } }));
   });
   document.body.innerHTML = '<div id="mount"></div>';
   const app = createApp({ render: () => h(Detail, { id: id.value }) }); app.mount('#mount'); t.after(() => app.unmount()); await flush();
-  document.querySelector('.photo-row button').click(); await flush(); assert.ok(document.querySelector('[aria-label="剧照大图"]'));
-  document.querySelector('.photo-stage img').dispatchEvent(new window.Event('error')); await flush();
-  assert.equal(document.querySelector('.photo-stage img').getAttribute('src'), '/thumb/1');
+  document.querySelector('.photo-tile').click(); await flush(); assert.ok(document.querySelector('[aria-label="剧照大图"]'));
+  document.querySelector('.photo-stage .photo-full').dispatchEvent(new window.Event('error')); await flush();
+  assert.equal(document.querySelector('.photo-stage .photo-full').getAttribute('src'), '/thumb/1');
+  document.querySelector('[aria-label="下一张"]').click(); await flush();
   document.querySelector('[aria-label="下一张"]').click(); await flush();
   window.dispatchEvent(new window.PopStateEvent('popstate', { state: {} })); await flush(); assert.equal(document.querySelector('[aria-label="剧照大图"]'), null);
   pending[0].resolve(Response.json({ code: 0, data: { items: [photo(1), photo(2)], total: 2, nextStart: null } })); await flush(); assert.equal(document.querySelector('[aria-label="剧照大图"]'), null);
   id.value = 'douban-456'; await flush();
-  document.querySelector('.photo-row').closest('section').querySelector('.section-heading button').click(); await flush();
+  assert.equal(document.querySelectorAll('.photo-tile').length,1);
+  assert.equal(document.querySelector('.detail-facts').open,true);
+  document.querySelector('.photo-tile').click();await flush();document.querySelector('[aria-label="下一张"]').click();await flush();document.querySelector('[aria-label="下一张"]').click();await flush();
   id.value = 'douban-789'; await flush(); assert.equal(pending[1].signal.aborted, true);
   pending[1].resolve(Response.json({ code: 0, data: { items: [photo(99)], total: 1, nextStart: null } })); await flush();
-  assert.equal(document.querySelector('.photo-row img').getAttribute('src'), '/thumb/1');
+  assert.equal(document.querySelectorAll('.photo-tile').length,1);
+  assert.equal(document.querySelector('.photo-tile img').getAttribute('src'), '/thumb/1');
+});
+
+
+test('detail metadata keeps the already displayed seed poster and backdrop on the same durable image URL',async t=>{
+ for(const id of ['douban-123','bangumi-123']){
+  let finish;t.mock.method(globalThis,'fetch',()=>new Promise(resolve=>finish=resolve));
+  document.body.innerHTML='<div id="mount"></div>';
+  const seed={...item(id),poster:`/api/discovery/posters/${id}`};
+  const app=createApp({render:()=>h(Detail,{id,seed})});app.mount('#mount');
+  try{
+   const images=[...document.querySelectorAll('.detail-cover img,.detail-atmosphere img')];assert.equal(images.length,2);
+   for(const img of images){img.dispatchEvent(new window.Event('load'));assert.equal(img.getAttribute('loading'),'eager');}
+   await nextTick();const src=images.map(img=>img.getAttribute('src'));
+   finish(Response.json({code:0,data:{...details(id),poster:'/api/catalog/images/temporary-detail-handle',title:'完整详情'}}));await flush();
+   assert.equal(document.querySelector('h1').textContent,'完整详情');
+   images.forEach((img,index)=>{assert.equal(img.isConnected,true);assert.equal(img.getAttribute('src'),src[index]);assert.equal(img.classList.contains('poster-loading'),false);});
+  }finally{app.unmount();}
+ }
 });

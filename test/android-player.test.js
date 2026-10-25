@@ -12,6 +12,8 @@ for (const key of ['window', 'document', 'Element', 'HTMLElement', 'SVGElement',
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator });
 Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Android Chrome' });
 globalThis.localStorage = dom.window.localStorage;
+globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
+globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 const { createApp, nextTick, reactive, markRaw, h, ref } = await import('vue');
 fs.mkdirSync('.local-runtime/tests', { recursive: true });
 const folder = fs.mkdtempSync('.local-runtime/tests/android-player-');
@@ -59,7 +61,7 @@ function hook(setup) {
 }
 function track(text, mode = 'showing', kind = 'subtitles') {
   const item = new dom.window.EventTarget();
-  Object.assign(item, { mode, kind, activeCues: [{ text, getCueAsHTML: () => { const fragment = document.createDocumentFragment(); fragment.appendChild(document.createTextNode(text)); return fragment; } }] });
+  Object.assign(item, { mode, kind, activeCues: [{ startTime: 0, endTime: 120, text, getCueAsHTML: () => { const fragment = document.createDocumentFragment(); fragment.appendChild(document.createTextNode(text)); return fragment; } }] });
   return item;
 }
 test('caption geometry follows the picture in portrait, landscape and cropped playback', () => {
@@ -94,35 +96,69 @@ test('Android captions mirror active text without changing modes, ignore metadat
   } finally { view.app.unmount(); set(document, 'pictureInPictureElement', null); }
 });
 
-test('container fullscreen preserves custom controls; rejected orientation is nonfatal; exit unlocks', async () => {
+test('paused caption boundaries discard the ended cue while preserving legitimately overlapping text', async () => {
+  const media = video(); media.currentTime = 100;
+  const captions = track('');
+  captions.activeCues = [
+    { startTime: 90, endTime: 100, text: '已经结束' },
+    { startTime: 100, endTime: 110, text: '当前字幕' },
+    { startTime: 95, endTime: 105, text: '同步双语字幕' },
+    { startTime: 101, endTime: 110, text: '尚未开始' }
+  ];
+  media.textTracks.push(captions);
+  const view = mount(Captions, { video: markRaw(media), fit: 'contain', controlsInset: 0, nativeFullscreen: false });
+  try {
+    await tick();
+    assert.deepEqual([...document.querySelectorAll('.player-captions span')].map(line => line.textContent), ['当前字幕', '同步双语字幕']);
+    media.currentTime = 110; media.dispatchEvent(event('seeked')); await tick();
+    assert.equal(document.querySelector('.player-captions'), null, 'a stale activeCues list cannot leave ended captions on screen');
+    assert.equal(captions.mode, 'showing');
+  } finally { view.app.unmount(); }
+});
+
+test('native events release web cue suppression immediately and duplicate tracks never double render', async () => {
+  const media = video(); media.textTracks.push(track('selected'), track('duplicate'));
+  const view = mount(Captions, { video: markRaw(media), fit: 'contain', controlsInset: 0, nativeFullscreen: false });
+  try {
+    await tick(); assert.equal(document.querySelector('.player-captions').textContent, 'selected');
+    media.dispatchEvent(event('webkitbeginfullscreen'));
+    assert.equal(media.classList.contains('player-captions-active'), false, 'native handoff cannot wait for a Vue prop update');
+    media.dispatchEvent(event('timeupdate')); await tick(); assert.equal(document.querySelector('.player-captions'), null);
+    media.dispatchEvent(event('webkitendfullscreen')); await tick(); assert.equal(document.querySelector('.player-captions').textContent, 'selected');
+    set(media, 'webkitPresentationMode', 'picture-in-picture'); media.dispatchEvent(event('webkitpresentationmodechanged')); await tick();
+    assert.equal(document.querySelector('.player-captions'), null); assert.equal(media.classList.contains('player-captions-active'), false);
+    set(media, 'webkitPresentationMode', 'inline'); media.dispatchEvent(event('webkitpresentationmodechanged')); await tick(); assert.ok(document.querySelector('.player-captions'));
+  } finally { view.app.unmount(); }
+});
+
+test('container fullscreen preserves custom controls and never forces device orientation', async () => {
   const media = video(); const container = document.createElement('div'); let controls; let locks = 0; let unlocks = 0; let reject = false;
   set(window.screen, 'orientation', { lock: async () => { locks++; if (reject) throw new Error('unsupported'); }, unlock: () => unlocks++ });
   container.requestFullscreen = async () => { set(document, 'fullscreenElement', container); document.dispatchEvent(event('fullscreenchange')); };
   document.exitFullscreen = async () => { set(document, 'fullscreenElement', null); document.dispatchEvent(event('fullscreenchange')); };
   const app = hook(() => { controls = useVideoFullscreen(ref(media), ref(container)); });
   try {
-    await controls.toggle(); await tick(); assert.equal(controls.fullscreen.value, true); assert.equal(controls.nativeFullscreen.value, false); assert.equal(media.controls, false); assert.equal(locks, 1);
-    await controls.exit(); assert.equal(unlocks, 1); assert.equal(controls.fullscreen.value, false);
+    await controls.toggle(); await tick(); assert.equal(controls.fullscreen.value, true); assert.equal(controls.nativeFullscreen.value, false); assert.equal(media.controls, false); assert.equal(locks, 0);
+    await controls.exit(); assert.equal(unlocks, 0); assert.equal(controls.fullscreen.value, false);
     reject = true; await controls.toggle(); await tick(); assert.equal(controls.error.value, ''); assert.equal(controls.fullscreen.value, true);
   } finally { app.unmount(); await tick(); }
   assert.equal(document.fullscreenElement, null);
 });
-test('late orientation lock cannot survive fullscreen exit', async () => {
-  const media = video(); const container = document.createElement('div'); let controls; let resolve; let unlocks = 0;
-  set(window.screen, 'orientation', { lock: () => new Promise(done => { resolve = done; }), unlock: () => unlocks++ });
-  container.requestFullscreen = async () => { set(document, 'fullscreenElement', container); document.dispatchEvent(event('fullscreenchange')); };
-  const app = hook(() => { controls = useVideoFullscreen(ref(media), ref(container)); });
-  try { await controls.toggle(); await controls.exit(); resolve(); await tick(); assert.equal(unlocks, 1); }
-  finally { app.unmount(); }
+test('fullscreen exit works when the orientation API is absent', async () => {
+ const media=video(),container=document.createElement('div');let controls;
+ set(window.screen,'orientation',undefined);
+ container.requestFullscreen=async()=>{set(document,'fullscreenElement',container);document.dispatchEvent(event('fullscreenchange'));};
+ document.exitFullscreen=async()=>{set(document,'fullscreenElement',null);document.dispatchEvent(event('fullscreenchange'));};
+ const app=hook(()=>{controls=useVideoFullscreen(ref(media),ref(container));});
+ try{await controls.toggle();assert.equal(controls.fullscreen.value,true);await controls.exit();assert.equal(controls.fullscreen.value,false);assert.equal(controls.error.value,'');}finally{app.unmount();}
 });
-test('unmount releases a late orientation lock even while the browser is still exiting fullscreen', async () => {
-  const media = video(); const container = document.createElement('div'); let controls; let resolveLock; let finishExit; let unlocks = 0;
-  set(window.screen, 'orientation', { lock: () => new Promise(done => { resolveLock = done; }), unlock: () => unlocks++ });
-  container.requestFullscreen = async () => { set(document, 'fullscreenElement', container); document.dispatchEvent(event('fullscreenchange')); };
-  document.exitFullscreen = () => new Promise(done => { finishExit = () => { set(document, 'fullscreenElement', null); done(); }; });
-  const app = hook(() => { controls = useVideoFullscreen(ref(media), ref(container)); });
-  await controls.toggle(); app.unmount(); resolveLock(); await tick();
-  assert.equal(unlocks, 1); finishExit(); await tick();
+test('unmount requests fullscreen exit without changing orientation while browser exit is pending', async () => {
+ const media=video(),container=document.createElement('div');let controls,finishExit,locks=0;
+ set(window.screen,'orientation',{lock:async()=>{locks++;},unlock:()=>{locks++;}});
+ container.requestFullscreen=async()=>{set(document,'fullscreenElement',container);document.dispatchEvent(event('fullscreenchange'));};
+ document.exitFullscreen=()=>new Promise(done=>{finishExit=()=>{set(document,'fullscreenElement',null);done();};});
+ const app=hook(()=>{controls=useVideoFullscreen(ref(media),ref(container));});
+ await controls.toggle();app.unmount();await tick();assert.equal(typeof finishExit,'function');assert.equal(locks,0);finishExit();await tick();assert.equal(document.fullscreenElement,null);
 });
 
 test('media session controls and wake lock are tied to enabled player, visibility and video lifetime', async () => {

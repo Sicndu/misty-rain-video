@@ -11,6 +11,7 @@ export const usePlaybackHistory = (enabled: Ref<boolean>) => {
   const deletingHistoryId = ref('');
   const toast = useToast();
   let mounted = false;
+  let lifecycle=0;
   let historyRevision = 0;
   let refreshTask: Promise<void> | null = null;
   let removedMedia: Array<Pick<MediaItem, 'id' | 'quarkFid' | 'catalogId'>> = [];
@@ -68,7 +69,24 @@ export const usePlaybackHistory = (enabled: Ref<boolean>) => {
     }
   };
 
+  const removeHistoryBatch = async (ids:string[]) => {
+    const targets=[...new Set(ids)].filter(id=>history.value.some(entry=>entry.id===id));
+    if(!enabled.value||deletingHistoryId.value||!targets.length)return {deleted:[],failed:targets};
+    const scope=lifecycle,deleted:string[]=[],failed:string[]=[];
+    deletingHistoryId.value='batch';historyRevision++;
+    let cursor=0;
+    const worker=async()=>{while(cursor<targets.length&&scope===lifecycle&&enabled.value){const id=targets[cursor++]!;
+      try{await PlaybackHistoryService.remove(id);deleted.push(id);if(scope===lifecycle){historyRevision++;history.value=history.value.filter(entry=>entry.id!==id);}}
+      catch{failed.push(id);}
+    }};
+    try{await Promise.all(Array.from({length:Math.min(3,targets.length)},worker));
+      if(scope===lifecycle)toast.show(failed.length?`已删除 ${deleted.length} 条，${failed.length} 条未完成`:`已删除 ${deleted.length} 条记录`,failed.length?'!':'✓');
+      return {deleted,failed};
+    }finally{if(scope===lifecycle)deletingHistoryId.value='';}
+  };
+
   const sync = () => {
+    lifecycle++;deletingHistoryId.value='';
     if (!enabled.value) {
       historyRevision += 1; refreshTask = null;
       removedMedia = [];
@@ -90,9 +108,9 @@ export const usePlaybackHistory = (enabled: Ref<boolean>) => {
   watch(enabled, () => mounted && sync());
 
   onUnmounted(() => {
-    mounted = false;
+    mounted = false;lifecycle++;
     window.removeEventListener('focus', onFocus);
   });
 
-  return { history, continueWatching, historyError, deletingHistoryId, loadingHistory, refreshHistory, updateLocalHistory, removeHistory, removeLocalMediaHistory };
+  return { history, continueWatching, historyError, deletingHistoryId, loadingHistory, refreshHistory, updateLocalHistory, removeHistory, removeHistoryBatch, removeLocalMediaHistory };
 };

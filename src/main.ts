@@ -5,6 +5,7 @@ import './assets/styles/theme.css';
 import { initializeSiteSettings } from './services/siteSettings';
 import { initializeTheme } from './services/theme';
 import { initializeAndroidInstall } from './services/androidInstall';
+import { isAppleTouchDevice } from './services/device';
 initializeTheme();
 initializeSiteSettings();
 initializeAndroidInstall();
@@ -14,8 +15,7 @@ const isWebClipLaunch = new URLSearchParams(window.location.search).get('webclip
 const isStandalone = isWebClipLaunch
   || navigatorWithStandalone.standalone === true
   || window.matchMedia('(display-mode: standalone)').matches;
-const isIosDevice = /iPhone|iPad|iPod/i.test(navigator.userAgent)
-  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isIosDevice = isAppleTouchDevice(navigator);
 
 document.documentElement.classList.toggle('ios-standalone', isStandalone && isIosDevice);
 

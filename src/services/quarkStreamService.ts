@@ -1,6 +1,7 @@
 import { authFetch } from './authService';
 
 export interface QuarkEpisode {
+  episodePart?: string;
   thumbnail?: string;
   fid: string;
   fileName: string;

@@ -1,17 +1,23 @@
 <script setup lang="ts">
-import { nextTick, ref } from 'vue';
+import {clipboardDetection,setClipboardDetection} from '../../services/clipboardSettings';
+import LoadingSkeleton from '../common/LoadingSkeleton.vue';
+import { defineAsyncComponent, nextTick, ref } from 'vue';
 import { ChevronLeft, ChevronRight, Download, LogOut, Settings2, Globe } from '@lucide/vue';
 import type { AppUser } from '../../services/authService';
 import { apiUrl } from '../../services/appUrl';
 import { QuarkStreamService } from '../../services/quarkStreamService';
 import { useToast } from '../../composables/useToast';
-import TvPlaybackAuth from './TvPlaybackAuth.vue';
 import ThemeSwitch from '../common/ThemeSwitch.vue';
-import SiteSettingsPanel from './SiteSettingsPanel.vue';
-import LibraryMaintenanceStatus from './LibraryMaintenanceStatus.vue';
+import PageLoadState from '../common/PageLoadState.vue';
+import { isAppleTouchDevice } from '../../services/device';
 import { androidInstalled, installAndroidApp } from '../../services/androidInstall';
 
-const props = defineProps<{ user: AppUser }>();
+// Administrative forms are opened explicitly and are not needed for discovery.
+const TvPlaybackAuth = defineAsyncComponent({ loader: () => import('./TvPlaybackAuth.vue'), loadingComponent: PageLoadState, errorComponent: PageLoadState, delay: 0 });
+const SiteSettingsPanel = defineAsyncComponent({ loader: () => import('./SiteSettingsPanel.vue'), loadingComponent: PageLoadState, errorComponent: PageLoadState, delay: 0 });
+const LibraryMaintenanceStatus = defineAsyncComponent({ loader: () => import('./LibraryMaintenanceStatus.vue'), loadingComponent: PageLoadState, errorComponent: PageLoadState, delay: 0 });
+
+const props = defineProps<{ user: AppUser; loggingOut?:boolean }>();
 const emit = defineEmits<{
   (e: 'logout'): void;
   (e: 'auth-updated'): void;
@@ -21,6 +27,7 @@ const emit = defineEmits<{
 const toast = useToast();
 const installUrl = apiUrl('/install/ios.mobileconfig');
 const isAndroid = /Android/i.test(navigator.userAgent);
+const isAppleMobile = isAppleTouchDevice(navigator);
 const installHint = ref('');
 const installApp = async () => {
   installHint.value = '';
@@ -106,7 +113,7 @@ defineExpose({ focusAuth, refreshStatus });
 
 <template>
   <main class="account-page">
-    <header class="page-heading">
+    <header v-if="advancedConfiguration || siteConfiguration" class="page-heading">
       <button type="button" class="back-button" :disabled="siteBusy" :aria-label="advancedConfiguration || siteConfiguration ? '返回设置' : '返回上一页'" @click="back"><ChevronLeft aria-hidden="true" /></button>
       <h1>{{ siteConfiguration ? '站点设置' : advancedConfiguration ? '高级配置' : '设置' }}</h1>
     </header>
@@ -119,9 +126,10 @@ defineExpose({ focusAuth, refreshStatus });
           <button v-if="!androidInstalled" class="settings-row" type="button" @click="installApp"><Download aria-hidden="true" /><span>安装到桌面</span><ChevronRight class="chevron" aria-hidden="true" /></button>
           <p v-if="installHint && !androidInstalled" class="install-hint" role="status">{{ installHint }}</p>
         </template>
-        <a v-else class="settings-row ios-install-link" :href="installUrl"><Download aria-hidden="true" /><span>安装到桌面</span><ChevronRight class="chevron" aria-hidden="true" /></a>
+        <a v-else-if="isAppleMobile" class="settings-row ios-install-link" :href="installUrl"><Download aria-hidden="true" /><span>安装到桌面</span><ChevronRight class="chevron" aria-hidden="true" /></a>
       </section>
-      <button type="button" class="logout-button" @click="emit('logout')"><LogOut aria-hidden="true" />退出登录</button>
+      <section class="settings-section clipboard-settings" aria-labelledby="clipboard-title"><h2 id="clipboard-title">便捷功能</h2><div class="settings-row clipboard-row"><span>剪贴板识别</span><button data-clipboard-setting type="button" role="switch" aria-label="剪贴板识别" :aria-checked="clipboardDetection" class="clipboard-switch" @click="setClipboardDetection(!clipboardDetection)"><i></i></button></div></section>
+      <section class="settings-section account-actions" aria-labelledby="account-title"><h2 id="account-title">账号</h2><button type="button" class="logout-button" :disabled="loggingOut" aria-label="退出登录" @click="emit('logout')"><LoadingSkeleton v-if="loggingOut" variant="inline" :count="1" label="正在退出登录" /><LogOut v-else aria-hidden="true" />{{ loggingOut ? '退出中…' : '退出登录' }}</button></section>
     </template>
     <SiteSettingsPanel v-else-if="siteConfiguration && user.role === 'admin'" @busy="siteBusy = $event" />
     <section v-else-if="user.role === 'admin'" ref="authSection" class="settings-section auth-section" aria-labelledby="auth-title">
@@ -137,10 +145,7 @@ defineExpose({ focusAuth, refreshStatus });
 
       <div v-if="statusError" class="inline-feedback" role="alert"><p>{{ statusError }}</p><button type="button" :disabled="loadingStatus" @click="refreshStatus">重新检查</button></div>
       <template v-if="user.role === 'admin'">
-        <div v-if="loadingStatus" class="credential-loading" role="status">
-          <span class="status-spinner" aria-hidden="true"></span>
-          正在加载认证设置
-        </div>
+        <LoadingSkeleton v-if="loadingStatus" variant="form" :count="3" label="正在加载认证设置" />
 
         <button
           v-else-if="libraryConnected && !showCredentialForm"
@@ -195,51 +200,21 @@ defineExpose({ focusAuth, refreshStatus });
 </template>
 
 <style scoped>
-.account-page { position: relative; z-index: 1; width: min(780px, 100%); height: var(--app-viewport-height); overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scrollbar-gutter: stable; margin: 0 auto; padding: calc(32px + var(--safe-area-top)) 24px 70px; }
-.account-page::-webkit-scrollbar { width: 8px; }
-.account-page::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 8px; background: var(--text-tertiary); background-clip: padding-box; }
-.page-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
-.page-heading h1 { font-size: 1.45rem; font-weight: 700; letter-spacing: -.02em; }
-.back-button { display: grid; width: 44px; height: 44px; padding: 0; place-items: center; border: 0; border-radius: 50%; color: var(--text-secondary); background: transparent; transition: background .15s, color .15s; }
-.back-button:hover, .back-button:active { color: var(--text-primary); background: var(--glass-bg); }
-.back-button svg { width: 22px; height: 22px; }
-.settings-section { padding: 18px 20px; margin: 0 0 20px; border: 1px solid var(--divider); border-radius: 16px; background: var(--surface-1); }
-.theme-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 16px; font-size: .88rem; font-weight: 500; }
-.theme-row .theme-switch { min-width: 230px; }
-.settings-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 0 2px; border: 0; border-top: 1px solid var(--divider); color: var(--text-primary); background: transparent; text-decoration: none; font-size: .9rem; text-align: left; transition: opacity .15s; }
-.settings-row:active { opacity: .7; }
-.settings-row > svg { width: 19px; height: 19px; color: var(--text-tertiary); }
-.settings-row > span { flex: 1; font-weight: 500; }
-.section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-.section-title-row h2 { font-size: .98rem; font-weight: 650; letter-spacing: -.01em; }
-.chevron { width: 17px; height: 17px; flex-shrink: 0; color: var(--text-tertiary); }
-.status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 9999px; background: var(--glass-bg); color: var(--text-tertiary); font-size: .75rem; font-weight: 600; }
-.status-pill.ready { color: var(--success); background: var(--success-subtle); }
-.status-dot { display: block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.reconfigure-button, .save-credential, .cancel-edit { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; gap: 8px; padding: 0 16px; border: 1px solid var(--divider); border-radius: 12px; font-size: .84rem; font-weight: 600; transition: transform .15s; }
-.reconfigure-button:active, .save-credential:active, .cancel-edit:active { transform: scale(.98); }
-.reconfigure-button { justify-content: space-between; width: 100%; color: var(--text-primary); background: var(--surface-2); }
-.reconfigure-button svg { width: 16px; height: 16px; }
-.credential-form { display: grid; gap: 10px; }
-.credential-form label { color: var(--text-secondary); font-size: .8rem; font-weight: 500; }
-.credential-form textarea { width: 100%; min-height: 120px; padding: 12px 14px; border: 1px solid var(--divider); border-radius: 12px; color: var(--text-primary); background: var(--surface-2); font-size: 16px; resize: vertical; }
-.credential-hint, .managed-hint, .credential-loading { color: var(--text-tertiary); font-size: .74rem; line-height: 1.5; }
-.form-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.save-credential { color: var(--accent-ink); background: var(--liquid-accent); border-color: transparent; }
-.cancel-edit { color: var(--text-secondary); background: transparent; }
-.logout-button { display: flex; width: 100%; min-height: 50px; align-items: center; justify-content: center; gap: 8px; padding: 0 16px; border: 1px solid var(--divider); border-radius: 16px; color: var(--danger); background: var(--surface-1); font-size: .92rem; font-weight: 600; transition: background .15s, transform .15s; }
-.logout-button:active { background: var(--danger-surface); transform: scale(.99); }
-.logout-button svg { width: 18px; height: 18px; }
-:global(html.ios-standalone .ios-install-link) { display: none; }
-@media (min-width: 1024px) { .account-page { width: calc(100% - 240px); margin-left: 240px; padding: 40px max(32px, calc((100vw - 240px - 720px) / 2)); } }
-@media (max-width: 640px) {
-  .account-page { padding: calc(14px + var(--safe-area-top)) calc(var(--mobile-gutter) + var(--safe-area-right)) var(--mobile-content-bottom) calc(var(--mobile-gutter) + var(--safe-area-left)); }
-  .settings-section { padding: 16px; border-radius: 16px; margin-bottom: 16px; }
-  .theme-row { gap: 12px; }
-  .theme-row .theme-switch { min-width: 0; flex: 1; max-width: 260px; }
-}
-</style>
-
-<style scoped>
-.install-hint { padding: 0 16px 14px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.clipboard-settings h2,.account-actions h2{margin:0 0 16px;font-size:1rem;font-weight:600}.clipboard-settings{padding:22px 0 28px}.clipboard-row{display:flex;justify-content:space-between}.settings-row.clipboard-row:hover{background:none}.clipboard-switch{position:relative;display:flex;align-items:center;width:48px;height:44px;padding:0 4px;border:0;border-radius:6px;background:none}.clipboard-switch::before{content:"";position:absolute;left:4px;top:10px;width:40px;height:24px;border-radius:20px;background:var(--surface-3)}.clipboard-switch i{position:relative;display:block;width:18px;height:18px;margin-left:3px;border-radius:50%;background:var(--text-primary);transition:transform .18s}.clipboard-switch[aria-checked=true]::before{background:var(--text-primary)}.clipboard-switch[aria-checked=true] i{transform:translateX(16px);background:var(--surface-1)}.account-actions .logout-button{margin-top:0}@media(prefers-reduced-motion:reduce){.clipboard-switch i{transition:none}}
+.account-page { position:relative; z-index:1; width:100%; max-width:1040px; min-height:calc(var(--app-viewport-height) - var(--app-header-height)); margin:0 auto; padding:24px var(--content-gutter) 80px; color:var(--text-primary); }
+.page-heading { display:flex; align-items:center; gap:14px; margin-bottom:44px; }.page-heading h1 { font-size:2.25rem; line-height:1.2; font-weight:700; letter-spacing:-.035em; }
+.back-button { display:grid; flex:0 0 44px; place-items:center; width:44px; height:44px; padding:0; border:0; border-radius:4px; color:var(--text-secondary); background:none; }.back-button svg { width:22px; height:22px; }
+.settings-section { padding:0; margin-bottom:36px; border:0; background:none; }
+.theme-row { display:grid; grid-template-columns:140px minmax(0,1fr); align-items:center; gap:24px; min-height:100px; padding:20px 0 28px; font-size:1rem; font-weight:550; }.theme-row .theme-switch { width:100%; max-width:360px; }
+.settings-row { display:flex; align-items:center; gap:16px; width:100%; min-height:76px; padding:12px 16px; border:0; border-radius:8px; transition:background .18s; color:var(--text-primary); background:none; text-decoration:none; text-align:left; font-size:1rem; }.settings-row > svg { flex-shrink:0; width:21px; height:21px; color:var(--text-secondary); }.settings-row > span { flex:1; }.settings-row .chevron { width:17px; height:17px; color:var(--text-tertiary); }
+.section-title-row { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:24px; }.section-title-row h2 { font-size:1.15rem; font-weight:650; }
+.status-pill { display:inline-flex; align-items:center; gap:7px; padding:0; color:var(--text-tertiary); background:none; font-size:.8rem; }.status-pill.ready { color:var(--success); background:none; }.status-dot { width:5px; height:5px; border-radius:50%; background:currentColor; }
+.reconfigure-button,.save-credential,.cancel-edit { display:inline-flex; align-items:center; justify-content:center; gap:12px; min-height:44px; padding:10px 20px; border:1px solid var(--divider); border-radius:4px; color:var(--text-primary); background:none; font-size:.86rem; font-weight:600; }.reconfigure-button svg { width:17px; height:17px; }.save-credential { color:var(--accent-ink); background:var(--liquid-accent); border-color:var(--liquid-accent); }
+.credential-form { display:grid; gap:12px; }.credential-form label { color:var(--text-secondary); font-size:.85rem; }.credential-form textarea { display:block; width:100%; min-height:148px; padding:14px 16px; resize:vertical; border:1px solid var(--divider); border-radius:4px; color:var(--text-primary); background:var(--surface-1); font-size:16px; }
+.credential-hint,.credential-loading { color:var(--text-tertiary); font-size:.8rem; line-height:1.6; }.form-actions { display:flex; justify-content:flex-end; gap:12px; margin-top:6px; }
+.logout-button { display:inline-flex; align-items:center; justify-content:center; gap:10px; min-height:46px; padding:10px 22px; border:1px solid var(--divider); border-radius:4px; color:var(--text-primary); background:none; font-size:.9rem; font-weight:550; }.logout-button svg { width:18px; height:18px; }.logout-button:hover { color:var(--danger); border-color:var(--danger); }
+.install-hint { margin-top:-8px; padding:0 0 18px; color:var(--text-secondary); font-size:.82rem; line-height:1.6; }
+:global(html.ios-standalone .ios-install-link) { display:none; }
+@media(hover:hover) and (pointer:fine) { .settings-row:hover,.back-button:hover { color:var(--text-primary); background:var(--glass-bg); } }
+@media(max-width:640px) { .account-page { padding:16px calc(var(--mobile-gutter) + var(--safe-area-right)) var(--mobile-content-bottom) calc(var(--mobile-gutter) + var(--safe-area-left)); }.page-heading { margin-bottom:28px; gap:8px; }.page-heading h1 { font-size:1.8rem; }.theme-row { grid-template-columns:1fr; gap:16px; padding:8px 0 28px; }.theme-row .theme-switch { max-width:none; }.settings-row { min-height:68px; }.section-title-row h2 { font-size:1.05rem; } }
 </style>

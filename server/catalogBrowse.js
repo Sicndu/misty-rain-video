@@ -1,3 +1,4 @@
+import { isDiscoveryImageUrl } from './discoverySources.js';
 import { normalizeCatalogSearch } from './catalogSearch.js';
 import { CATALOG_GENRES, CATALOG_COUNTRIES, catalogYears } from './catalogFacets.js';
 const PAGE_SIZE = 24;
@@ -58,7 +59,7 @@ export class CatalogBrowse {
     const data = await this.search.fetchJson(`https://m.douban.com/rexxar/api/v2/${type}/recommend?${query}`, 'https://movie.douban.com/explore');
     if (!Array.isArray(data?.items) || data.banned || !Number.isSafeInteger(data.total) || data.total < 0) throw unavailable();
     const items = normalizeCatalogSearch({ subjects: { items: data.items.map(item => ({ target_type: item?.type,
-      target: { ...item, cover_url: item?.pic?.normal || item?.cover_url } })) } });
+      target: { ...item, cover_url: (isDiscoveryImageUrl(item?.pic?.large, 'douban') ? item.pic.large : '') || item?.pic?.normal || item?.cover_url } })) } });
     // Movie recommendations include animated features. Preserve that format;
     // TV recommendations retain the genres supplied by Douban.
     if (type === 'movie') for (const item of items) item.category = 'movie';

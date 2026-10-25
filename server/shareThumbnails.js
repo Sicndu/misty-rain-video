@@ -27,8 +27,15 @@ export class ShareThumbnails {
     if (item.owner !== owner) throw error('无权读取此缩略图',403);
     if (item.asset) return item.asset;
     if (item.pending) return item.pending;
+    if (item.retryAt > this.now()) throw item.failure;
     if (this.queue.length >= 32) throw error('缩略图加载繁忙',503);
     item.pending = new Promise((resolve,reject) => { this.queue.push({ item, resolve, reject }); this.drain(); })
+      .then(asset => { item.failure = null; item.retryAt = 0; return asset; })
+      .catch(failure => {
+        // Switching list views remounts images. Do not repeatedly fetch the same
+        // expired/failed CDN URL; a short cooldown still permits recovery.
+        item.failure = failure; item.retryAt = this.now() + 30_000; throw failure;
+      })
       .finally(() => { item.pending = null; });
     return item.pending;
   }

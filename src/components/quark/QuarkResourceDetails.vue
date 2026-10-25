@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import LoadingSkeleton from '../common/LoadingSkeleton.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { ChevronRight, FolderOpen, Play, RefreshCw } from '@lucide/vue';
+import ScrollLoad from '../common/ScrollLoad.vue';
 import ResourceThumbnail from './ResourceThumbnail.vue';
 import { discardFailedSource } from '../../../server/shareFailurePolicy.js';
 import type { ResourceItem } from '../../types/search';
@@ -11,6 +13,8 @@ const props = defineProps<{ resource: ResourceItem; initialDetails?: QuarkShareD
 const emit = defineEmits<{ (e: 'back'): void; (e: 'loaded', details: QuarkShareDetails): void; (e: 'unavailable', resource: ResourceItem): void; (e: 'save', selectedFids?: string[]): void; (e: 'play', fid: string): void; (e: 'open-auth-settings'): void }>();
 const details = ref<QuarkShareDetails | null>(null), isLoading = ref(false), loadError = ref('');
 const currentFolder = ref('0'), selected = ref(new Set<string>()), sort = ref('name');
+const renderLimit=ref(60);
+watch([currentFolder,sort,()=>props.resource.url],()=>{renderLimit.value=60;});
 let sequence = 0;
 const collator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
 const entries = computed(() => details.value?.entries || []);
@@ -57,12 +61,12 @@ onBeforeUnmount(() => { sequence++; });
     <nav class="breadcrumbs" aria-label="资源目录"><button type="button" :disabled="isSaving" @click="currentFolder = '0'">全部文件</button><template v-for="folder in breadcrumbs" :key="folder.fid"><ChevronRight aria-hidden="true" /><button type="button" :disabled="isSaving" :title="folder.name" @click="currentFolder = folder.fid">{{ folder.name }}</button></template></nav>
     <div v-if="details" class="file-toolbar"><label><input type="checkbox" aria-label="全选当前目录" :checked="allSelected" :disabled="isSaving || !visibleEntries.some(selectable)" @change="toggleAll" />全选</label><span>{{ visibleEntries.length }} 项</span><select v-model="sort" aria-label="文件排序"><option value="name">名称</option><option value="size">大小</option><option value="date">修改时间</option></select><button type="button" class="icon-button" aria-label="刷新文件列表" :disabled="isSaving" @click="load(true)"><RefreshCw /></button></div>
     <div class="detail-content">
-      <div v-if="isLoading" class="detail-state" role="status"><RefreshCw class="spinning" />正在读取文件…</div>
+      <LoadingSkeleton v-if="isLoading" variant="rows" :count="6" label="正在读取文件" />
       <div v-else-if="loadError" class="detail-state" role="alert"><p>{{ loadError }}</p><button type="button" :disabled="isSaving" @click="load(true)">重试</button></div>
       <template v-else-if="details">
         <div v-if="visibleEntries.length" class="file-columns" aria-hidden="true"><span>文件名</span><span>大小</span><span>修改时间</span></div>
         <ul class="file-list" aria-label="资源文件列表">
-          <li v-for="entry in visibleEntries" :key="entry.fid" class="file-row" @click="enter(entry)" :class="{ selected: selected.has(entry.fid) }">
+          <li v-for="entry in visibleEntries.slice(0,renderLimit)" :key="entry.fid" class="file-row" @click="enter(entry)" :class="{ selected: selected.has(entry.fid) }">
             <label class="file-selection" @click.stop><input type="checkbox" :checked="Boolean(selectable(entry) && selected.has(entry.fid))" :indeterminate="partial(entry)" :aria-label="`选择${entry.isDirectory ? '文件夹' : '文件'} ${entry.name}`" :disabled="isSaving || !selectable(entry)" @click.stop @change="toggle(entry)" /></label>
             <button type="button" class="file-open" :aria-label="`${entry.isDirectory ? '打开文件夹' : entry.isVideo ? '播放' : '文件'} ${entry.name}`" :disabled="isSaving || (!entry.isDirectory && (!entry.isVideo || replacingSource))" @click.stop="enter(entry)">
               <ResourceThumbnail :src="entry.thumbnail" :directory="entry.isDirectory" :video="entry.isVideo" />
@@ -72,6 +76,7 @@ onBeforeUnmount(() => { sequence++; });
             <ChevronRight v-if="entry.isDirectory" class="row-kind" aria-hidden="true" /><Play v-else-if="entry.isVideo && !replacingSource" class="row-kind" aria-hidden="true" />
           </li>
         </ul>
+        <ScrollLoad :pending="isSaving || isLoading" :more="renderLimit < visibleEntries.length" :progress="`${resource.url}:${currentFolder}:${sort}:${renderLimit}:${visibleEntries.length}`" @load="renderLimit += 60" />
         <div v-if="!visibleEntries.length" class="detail-state" role="status"><FolderOpen /><p>{{ details.videoCount ? '此文件夹为空' : '没有可播放的视频' }}</p><button type="button" @click="emit('back')">其他资源</button></div>
       </template>
       <div v-if="saveError" class="inline-feedback" role="alert"><strong>{{ saveError.title }}</strong><p>{{ saveError.message }}</p><button v-if="saveError.needsAuth" type="button" @click="emit('open-auth-settings')">前往设置</button></div>
@@ -81,27 +86,27 @@ onBeforeUnmount(() => { sequence++; });
 </template>
 <style scoped>
 .resource-details { display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; }
-button,select { min-height: 40px; border: 0; color: var(--text-secondary); background: transparent; font: inherit; font-size: .8rem; }
+button,select { min-height:44px; border: 0; color: var(--text-secondary); background: transparent; font: inherit; font-size: .8rem; }
 button:disabled,input:disabled { opacity: .45; cursor: default; }
 .file-open:disabled { opacity: 1; }
 .breadcrumbs { display: flex; align-items: center; flex-shrink: 0; gap: 3px; overflow-x: auto; padding: 0 2px 8px; white-space: nowrap; }
 .breadcrumbs button { max-width: 220px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 5px; }
 .breadcrumbs button:last-child { color: var(--text-primary); }
 .breadcrumbs svg { width: 14px; height: 14px; flex-shrink: 0; color: var(--text-tertiary); }
-.file-toolbar { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 8px; border-bottom: 1px solid var(--divider); font-size: .75rem; color: var(--text-tertiary); }
-.file-toolbar label { display: flex; align-items: center; gap: 10px; color: var(--text-secondary); }
+.file-toolbar { display: flex; align-items: center; gap:8px; min-height:52px; padding:0 4px; border-bottom: 1px solid var(--divider); font-size: .75rem; color: var(--text-tertiary); }
+.file-toolbar label { display: flex; align-items: center; gap:8px; min-height:44px; padding:0 4px; color:var(--text-secondary); cursor:pointer; }
 input { width: 19px; height: 19px; flex-shrink: 0; accent-color: var(--liquid-accent); }
 .file-toolbar select { margin-left: auto; max-width: 120px; }
-.icon-button { display: grid; width: 40px; place-items: center; }
+.icon-button { display: grid; width:44px; flex:0 0 44px; border-radius:10px; place-items: center; }
 .icon-button svg { width: 16px; height: 16px; }
 .detail-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-top: 4px; }
-.file-columns { display: grid; grid-template-columns: 1fr 95px 130px; gap: 12px; padding: 8px 42px 8px 38px; color: var(--text-tertiary); font-size: .72rem; }
+.file-columns { display: grid; grid-template-columns: 1fr 95px 130px; gap: 12px; padding:10px 38px 10px 56px; color: var(--text-tertiary); font-size: .72rem; }
 .file-list { list-style: none; padding: 0; margin: 0; }
-.file-row { display: flex; align-items: center; gap: 12px; min-height: 76px; padding: 8px; border-bottom: 1px solid var(--divider); border-radius: 8px; }
-.file-selection { display: grid; width: 28px; min-height: 48px; place-items: center; flex-shrink: 0; }
-.file-row.selected { background: var(--liquid-accent-subtle); }
+.file-row { display: flex; align-items: center; gap:10px; min-height:76px; padding:8px 4px; border:1px solid transparent; border-radius:12px; }
+.file-selection { display: grid; width:44px; min-height:48px; cursor:pointer; place-items: center; flex-shrink: 0; }
+.file-row.selected { background:var(--surface-2); border-color:var(--divider); }
 .file-open { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; padding: 0; color: var(--text-primary); text-align: left; }
-.file-copy { min-width: 0; }
+.file-copy { min-width:0; flex:1; }
 .file-copy strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: .84rem; font-weight: 500; overflow-wrap: anywhere; }
 .file-copy small { display: none; color: var(--text-tertiary); font-size: .7rem; margin-top: 4px; }
 .file-size { flex: 0 0 95px; font-size: .75rem; color: var(--text-tertiary); }
@@ -111,12 +116,30 @@ input { width: 19px; height: 19px; flex-shrink: 0; accent-color: var(--liquid-ac
 .detail-state > svg { width: 28px; height: 28px; }
 .detail-state button { color: var(--liquid-accent); }
 .spinning { animation: spin 1s linear infinite; }
-.detail-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; flex-shrink: 0; padding: 14px 4px 0; border-top: 1px solid var(--divider); color: var(--text-tertiary); font-size: .77rem; }
+.detail-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; flex-shrink: 0; padding:12px 0 0; border-top: 1px solid var(--divider); color: var(--text-tertiary); font-size: .77rem; }
 .clear-selection { color: var(--liquid-accent); }
 .detail-save-actions { display: flex; gap: 8px; margin-left: auto; }
-.detail-save-actions button { min-height: 44px; padding: 0 18px; border-radius: 10px; }
+.detail-save-actions button { min-height: 44px; padding: 0 18px; border-radius:10px; }
 .save-all { background: var(--surface-2); }
 .save-selected { color: var(--accent-ink); background: var(--liquid-accent); font-weight: 600; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media(max-width:640px) { .file-size,.file-date,.file-columns { display: none; } .file-copy small { display: block; } .file-row { gap: 9px; } .file-open { gap: 10px; } .file-toolbar select { font-size: 16px; } .detail-save-actions { width: 100%; } .detail-save-actions button { flex: 1; } }
+button:focus-visible,select:focus-visible,input:focus-visible { outline:2px solid var(--text-primary); outline-offset:-2px; }
+.inline-feedback { margin:12px 0; padding:14px; border:1px solid var(--divider); border-radius:12px; color:var(--text-secondary); background:var(--surface-2); }
+.inline-feedback strong { color:var(--text-primary); font-size:14px; }
+.inline-feedback p { margin-top:6px; font-size:13px; line-height:1.6; }
+@media(hover:hover) and (pointer:fine) { .file-row:hover { background:var(--surface-2); } }
+@media(max-width:640px) {
+  .file-size,.file-date,.file-columns { display:none; }
+  .file-copy small { display:block; }
+  .file-row { gap:4px; }
+  .file-open { gap:8px; }
+  .file-open :deep(.resource-thumbnail) { width:44px; height:44px; flex-basis:44px; }
+  .file-toolbar { gap:4px; }
+  .file-toolbar select { width:76px; font-size:16px; }
+  .file-toolbar>span { font-size:11px; white-space:nowrap; }
+  .detail-save-actions { width:100%; }
+  .detail-save-actions button { flex:1; padding:0 12px; }
+  .detail-footer { gap:4px 12px; }
+}
+@media(prefers-reduced-motion:reduce) { .spinning { animation:none; } }
 </style>

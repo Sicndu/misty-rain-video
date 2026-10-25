@@ -18,12 +18,13 @@ test('当前豆瓣榜单兼容两种海报字段，去重且不把未评分或�
   const feed = DISCOVERY_FEEDS.find(item => item.id === 'movie');
   const items = normalizeDoubanFeed({ subject_collection_items: [
     { id: '123', title: '电影', type: 'movie', year: '2026', cover: { url: record().imageUrl }, rating: { value: 0, count: 0 }, has_linewatch: true },
-    { id: '124', title: '电影二', type: 'movie', pic: { normal: record().imageUrl }, rating: { value: 8.1, count: 20 } },
-    { id: '124', title: '电影二', type: 'movie', pic: { normal: record().imageUrl }, rating: { value: 8.1, count: 20 } },
+    { id: '124', title: '电影二', type: 'movie', pic: { normal: record().imageUrl,large:'https://img2.doubanio.com/view/photo/l/public/p124.jpg' }, rating: { value: 8.1, count: 20 } },
+    { id: '124', title: '电影二', type: 'movie', pic: { normal: record().imageUrl,large:'https://img2.doubanio.com/view/photo/l/public/p124.jpg' }, rating: { value: 8.1, count: 20 } },
     { id: '125', title: '非电影', type: 'tv' }, { id: '../bad', title: '非法', type: 'movie' }
   ] }, feed);
   assert.equal(items.length, 2); assert.equal(items[0].rating, null); assert.equal(items[1].rating, 8.1);
   assert.equal(items[0].ratingCount, 0); assert.equal(items[1].ratingCount, 20);
+  assert.equal(items[1].imageUrl,'https://img2.doubanio.com/view/photo/l/public/p124.jpg');
   assert.ok(items.every(item => item.imageUrl)); assert.equal(items[0].year, '2026');
   assert.equal('playable' in items[0], false); assert.equal('has_linewatch' in items[0], false);
 });
@@ -178,4 +179,25 @@ test('catalog matching includes registered titles and aliases, not only current 
  assert.deepEqual(service.matchingCatalogItems('酒店').map(item=>item.id),['douban-124']);
  assert.deepEqual(service.matchingCatalogItems('Hotel Haunted').map(item=>item.id),['douban-124']);
  assert.equal(service.matchingCatalogItems('无关电影').length,0);
+});
+
+test('same-subject detail artwork upgrades a small cached cover once; failed upgrades keep the usable cover and back off', async t => {
+  const posters=new PosterService(temp(t));let calls=0,fail=false;
+  t.mock.method(globalThis,'fetch',async()=>{calls++;return fail?new Response('down',{status:503}):new Response(Buffer.from('image-fixture'),{headers:{'Content-Type':'image/jpeg'}});});
+  const small=record(),large={...small,imageUrl:'https://img2.doubanio.com/view/photo/l/public/p123.jpg'};
+  const original=await posters.resolveCatalogPoster(small);assert.equal(calls,1);
+  const [upgraded,duplicate]=await Promise.all([posters.resolveCatalogPoster(large,{preferSource:true}),posters.resolveCatalogPoster(large,{preferSource:true})]);
+  assert.equal(calls,2);assert.notEqual(upgraded.poster,original.poster);assert.equal(duplicate.poster,upgraded.poster);
+  await posters.resolveCatalogPoster(large,{preferSource:true});assert.equal(calls,2);
+  assert.equal((await posters.resolveCatalogPoster(small)).poster,upgraded.poster,'a feed thumbnail never downgrades cached detail artwork');
+  fail=true;const unavailable={...large,imageUrl:'https://img2.doubanio.com/view/photo/l/public/p456.jpg'};
+  assert.equal((await posters.resolveCatalogPoster(unavailable,{preferSource:true})).poster,upgraded.poster);
+  assert.equal((await posters.resolveCatalogPoster(unavailable,{preferSource:true})).poster,upgraded.poster);assert.equal(calls,3);
+  const restored=new PosterService(path.dirname(posters.cachePath));assert.equal((await restored.resolveCatalogPoster(large,{preferSource:true})).poster,upgraded.poster);assert.equal(calls,3);
+});
+
+test('preferred artwork cannot cross a catalog identity boundary',async t=>{
+ const service=new DiscoveryService({dataDir:temp(t),posterService:{catalogPoster:()=>({poster:'cached'}),resolveCatalogPoster:async()=>({poster:'cached'})}});t.after(()=>service.stop());
+ await assert.rejects(service.poster('douban-123',record('douban-124')),{statusCode:400});
+ service.imageRetries.set('douban-123',Date.now()+60_000);assert.equal((await service.poster('douban-123',record())).poster,'cached','an earlier cold miss cannot hide a now-available cover');
 });

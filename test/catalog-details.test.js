@@ -103,3 +103,12 @@ test('security pages, different IDs and redirects from other modules are never f
     await assert.rejects(service.get('douban-123')); assert.equal(calls, 1);
   }
 });
+
+test('poster source reads only cached exact-subject metadata and never starts a metadata request',t=>{
+ let calls=0;const service=new CatalogDetails({dataDir:temp(t),now:()=>1000,fetcher:async()=>{calls++;throw new Error('no network');}});
+ assert.equal(service.cachedPosterSource('douban-123'),undefined);
+ service.cache.set('douban-123',{at:1000,detail:{id:'douban-123',provider:'douban',title:'测试',imageUrl:'https://img2.doubanio.com/view/photo/l/public/p123.jpg'}});
+ assert.equal(service.cachedPosterSource('douban-123').imageUrl,'https://img2.doubanio.com/view/photo/l/public/p123.jpg');
+ assert.equal(service.cachedPosterSource('douban-124'),undefined);
+ service.cache.get('douban-123').detail.imageUrl='http://127.0.0.1/secret';assert.equal(service.cachedPosterSource('douban-123'),undefined);assert.equal(calls,0);
+});

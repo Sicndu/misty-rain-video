@@ -13,7 +13,7 @@ const crc32 = bytes => { let crc=0xffffffff; for(const byte of bytes){crc^=byte;
 const chunk = (type,data) => { const bytes=Buffer.alloc(data.length+12); bytes.writeUInt32BE(data.length,0);bytes.write(type,4);data.copy(bytes,8);bytes.writeUInt32BE(crc32(bytes.subarray(4,-4)),bytes.length-4);return bytes; };
 const png = size => { const head=Buffer.alloc(13);head.writeUInt32BE(size,0);head.writeUInt32BE(size,4);head[8]=8;head[9]=6;return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',head),chunk('IDAT',deflateSync(Buffer.alloc((size*4+1)*size))),chunk('IEND',Buffer.alloc(0))]); };
 const icons = () => Object.fromEntries([180,192,512].map(size => [size,'data:image/png;base64,'+png(size).toString('base64')]));
-const input = store => ({ revision:store.revision,name:'家庭影院',subtitle:'HOME CINEMA',description:'一家人的私人影院' });
+const input = store => ({ revision:store.revision,name:'家庭影院' });
 const response = () => ({ statusCode:0,headers:{},body:'',setHeader(key,value){this.headers[key]=value;},end(value){this.body=value||'';} });
 
 test('admin settings and validated icons persist atomically; text-only save retains icon and reset restores default assets', t => {
@@ -30,7 +30,7 @@ test('invalid images, malformed PNG, wrong dimensions, oversized text and missin
   for(const value of ['data:image/svg+xml;base64,PHN2Zz4=', 'data:image/png;base64,AAAA', 'https://example.com/icon.png']) assert.throws(()=>validateSiteIcon(value,180));
   assert.throws(()=>validateSiteIcon('data:image/png;base64,'+png(192).toString('base64'),180));
   const broken=png(180);broken[32]^=1;assert.throws(()=>validateSiteIcon('data:image/png;base64,'+broken.toString('base64'),180));
-  for(const patch of [{name:''},{name:'a'.repeat(33)},{subtitle:'line\nbreak'},{description:'x'.repeat(161)},{icons:{180:'no'}}]) assert.throws(()=>store.update({...input(store),...patch}));
+  for(const patch of [{name:''},{name:'a'.repeat(33)},{name:'line\nbreak'},{icons:{180:'no'}}]) assert.throws(()=>store.update({...input(store),...patch}));
   assert.deepEqual(store.public(),before);
 });
 test('HTML bootstrap safely escapes settings and manifest retains stable PWA identity/base-relative assets', t => {
@@ -38,9 +38,9 @@ test('HTML bootstrap safely escapes settings and manifest retains stable PWA ide
   const html=store.html(fs.readFileSync('index.html','utf8').replaceAll('%BASE_URL%','/video/'),'/video');
   assert.match(html,/<title>影院&lt;\/script&gt;&lt;x&gt;<\/title>/);assert.doesNotMatch(html,/<img onerror=bad>/);
   assert.match(html,/href="\/video\/api\/site\/icon\/180.png\?v=/);
-  const data=JSON.parse(html.match(/id="site-settings">([^<]*)<\/script>/)[1]);assert.equal(data.name,'影院</script><x>');assert.equal('icons' in data,false);
+  const data=JSON.parse(html.match(/id="site-settings">([^<]*)<\/script>/)[1]);assert.equal(data.name,'影院</script><x>');assert.equal('icons' in data,false);assert.equal('subtitle' in data,false);assert.equal('description' in data,false);assert.doesNotMatch(html,/<meta name="description"/);
   const template=JSON.parse(fs.readFileSync('public/manifest.webmanifest','utf8'));const manifest=store.manifest(template);
-  assert.equal(manifest.id,template.id);assert.equal(manifest.start_url,template.start_url);assert.equal(manifest.scope,template.scope);assert.equal(manifest.name,data.name);
+  assert.equal(manifest.id,template.id);assert.equal(manifest.start_url,template.start_url);assert.equal(manifest.scope,template.scope);assert.equal(manifest.name,data.name);assert.equal('description' in manifest,false);
   assert.deepEqual(manifest.icons.map(i=>i.sizes),['192x192','512x512']);assert.ok(manifest.icons.every(i=>!i.src.startsWith('/')));
 });
 test('iOS Web Clip uses the configured label and icon with XML escaping', t => {
@@ -55,4 +55,10 @@ test('public reads expose no uploaded bytes, and only same-origin admin writes a
   const write=async()=>{const req=Object.assign(Readable.from([Buffer.from(JSON.stringify(input(store)))]),{method:'PUT',url:'/api/site-settings',headers:{host:'localhost'}});const res=response();await handleApiRequest(req,res,context);return res;};
   assert.equal((await write()).statusCode,401);authenticated=true;assert.equal((await write()).statusCode,403);
   role='admin';origin=false;assert.equal((await write()).statusCode,403);origin=true;assert.equal((await write()).statusCode,200);assert.equal(store.public().name,'家庭影院');
+});
+
+test('legacy subtitle and description do not enter the settings contract; name and icon survive loading and saving',t=>{
+ const dir=temp(t);fs.writeFileSync(path.join(dir,'site-settings.json'),JSON.stringify({version:1,settings:{name:'已有影院',subtitle:'旧副标题',description:'旧简介',icons:icons()}}));
+ const store=new SiteSettings(dir);assert.equal(store.public().name,'已有影院');assert.equal(store.public().customIcon,true);assert.equal('subtitle' in store.public(),false);assert.equal('description' in store.public().defaults,false);
+ const saved=store.update({revision:store.revision,name:'新影院'});assert.equal(saved.customIcon,true);const disk=JSON.parse(fs.readFileSync(path.join(dir,'site-settings.json'),'utf8'));assert.equal(disk.settings.subtitle,'');assert.equal(disk.settings.description,'');assert.equal(new SiteSettings(dir).public().name,'新影院');
 });

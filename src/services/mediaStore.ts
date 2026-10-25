@@ -12,8 +12,8 @@ const hydrateMedia = (items: MediaItem[]): MediaItem[] => items.map(item => ({
 
 export class MediaStore {
   /** 从当前账户的服务端片库拉取数据（同一账户跨终端同步）。 */
-  static async getAllMedia(): Promise<MediaItem[]> {
-    const resp = await authFetch(API_URL);
+  static async getAllMedia(signal?: AbortSignal): Promise<MediaItem[]> {
+    const resp = await authFetch(API_URL, { signal });
     const json = await resp.json().catch(() => ({}));
     if (!resp.ok || json.code !== 0 || !Array.isArray(json.data)) {
       throw new Error(json.message || '读取片库失败');

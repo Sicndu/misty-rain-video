@@ -89,4 +89,27 @@ test('destroy and recreate leave one control tree and no stale event handler',as
  let requested=0;const next=createDirectPlayer(view.root,view.video,{fullscreen:()=>requested++,feedback:()=>{}});
  try{await tick();assert.equal(view.root.querySelectorAll('.xgplayer-controls').length,1);assert.equal(view.root.querySelectorAll('video').length,1);assert.equal(old.isConnected,false);view.root.querySelector('[aria-label="全屏播放"]').click();assert.equal(requested,1);assert.equal(view.full,0);}finally{next.destroy();}
 });
+test('iPad desktop mode keeps touch gestures while a real Mac keeps keyboard controls',async()=>{
+ const original={userAgent:navigator.userAgent,platform:navigator.platform,maxTouchPoints:navigator.maxTouchPoints};
+ try {
+  Object.defineProperty(navigator,'userAgent',{configurable:true,value:'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 Safari/605.1.15'});
+  Object.defineProperty(navigator,'platform',{configurable:true,value:'MacIntel'});
+  for(const points of [5,0]) {
+   Object.defineProperty(navigator,'maxTouchPoints',{configurable:true,value:points});
+   const view=setup();
+   try { await tick(); assert.equal(Boolean(view.adapter.player.plugins.mobile),points>1); assert.equal(Boolean(view.adapter.player.plugins.keyboard),points===0); }
+   finally { view.adapter.destroy(); }
+  }
+ } finally { for(const [key,value] of Object.entries(original))Object.defineProperty(navigator,key,{configurable:true,value}); }
+});
 test.after(()=>{dom.window.close();fs.rmSync(folder,{recursive:true,force:true});});
+
+
+test('rotated seeking uses the visual vertical axis and the screen lock blocks click and seek gestures',async()=>{
+ const v=setup();try{await tick();await v.video.play();v.adapter.setRotation(90);v.root.getBoundingClientRect=()=>({left:0,top:0,width:450,height:800});
+ const progress=v.adapter.player.plugins.progress;progress.root.getBoundingClientRect=()=>({left:0,top:20,width:2,height:760});assert.equal(progress.computeTime({},210).percent,.25);
+ v.adapter.player.plugins.mobile.onDbClick(new MouseEvent('dblclick',{clientX:100,clientY:760}));await tick();assert.equal(v.video.currentTime,52);
+ v.adapter.setLocked(true);v.adapter.player.plugins.mobile.onDbClick(new MouseEvent('dblclick',{clientX:100,clientY:760}));v.adapter.player.plugins.mobile.onClick(new MouseEvent('click'));await tick();assert.equal(v.video.currentTime,52);assert.equal(v.video.paused,false);assert.equal(v.root.querySelector('.xgplayer-controls').inert,true);
+ v.adapter.setLocked(false);assert.equal(v.root.querySelector('.xgplayer-controls').inert,false);v.adapter.setRotation(0);assert.equal(v.adapter.player.rotateDeg,0);
+ }finally{v.adapter.destroy();}
+});

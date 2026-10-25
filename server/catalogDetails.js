@@ -77,6 +77,12 @@ export class CatalogDetails {
       }
     } catch { /* Cache is optional and rebuilt from public metadata. */ }
   }
+  cachedPosterSource(id) {
+    const entry = this.cache.get(id), detail = entry?.detail;
+    // Reuse metadata already read for this exact subject; poster requests never search titles.
+    if (!detail || detail.id !== id || this.now() - entry.at >= MAX_AGE || !isDiscoveryImageUrl(detail.imageUrl, detail.provider)) return undefined;
+    return { id, provider: detail.provider, title: detail.title, imageUrl: detail.imageUrl };
+  }
   async json(url, signal, allowSubjectRedirect = true) {
     const bangumi = url.startsWith('https://api.bgm.tv/');
     const response = await this.fetcher(url, { signal, redirect: 'manual', headers: { Accept: 'application/json',

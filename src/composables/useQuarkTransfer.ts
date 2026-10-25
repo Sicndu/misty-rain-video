@@ -193,6 +193,16 @@ export function useQuarkTransfer() {
     searchKeyword.value = '';
   };
 
+  const openResourceSearch = (media:MediaItem) => {
+    closeTransferModal();candidates.clear();rejected.clear();activeProgress=null;validationRunning=false;
+    currentMedia.value=media;quarkResources.value=[];isOpen.value=true;
+  };
+
+  const openShare = (media:MediaItem,resource:ResourceItem) => {
+    closeTransferModal();candidates.clear();rejected.clear();activeProgress=null;validationRunning=false;
+    currentMedia.value=media;quarkResources.value=[resource];searchKeyword.value='';isOpen.value=true;
+  };
+
   const retrySearch = () => {
     if (currentMedia.value && !isAnalyzing.value) {
       void searchResources(searchKeyword.value || currentMedia.value.title, true);
@@ -211,6 +221,8 @@ export function useQuarkTransfer() {
     searchPending,
     searchKeyword,
     openTransferModal,
+    openResourceSearch,
+    openShare,
     refreshResources,
     closeTransferModal,
     retrySearch,

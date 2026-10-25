@@ -28,18 +28,33 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
 
   let revision = 0;
   let refreshTask: Promise<void> | null = null;
+  let refreshController: AbortController | null = null;
+  const canRefresh = () => mounted && isEnabled() && !isPaused() && isDocumentVisible();
+  const cancelRefresh = () => {
+    revision++;
+    refreshController?.abort();
+    refreshController = null;
+    refreshTask = null;
+    isLoading.value = false;
+  };
   /** Coalesce focus/poll reads and never let a pre-mutation snapshot replace new data. */
   const refreshList = (silent = false): Promise<void> => {
+    if (!canRefresh()) return Promise.resolve();
     if (refreshTask) return refreshTask;
     const current = revision;
+    const controller = refreshController = new AbortController();
     if (!silent) isLoading.value = true;
     const task: Promise<void> = Promise.resolve().then(async () => {
       try {
-        const data = await MediaStore.getAllMedia();
-        if (current !== revision || !isEnabled()) return;
+        if (controller.signal.aborted) return;
+        const data = await MediaStore.getAllMedia(controller.signal);
+        if (current !== revision || !canRefresh() || controller.signal.aborted) return;
         allMediaList.value = data; loadError.value = '';
-      } catch (err) { if (current === revision) loadError.value = '收藏读取失败，请稍后重试'; }
-      finally { if (refreshTask === task) { refreshTask = null; isLoading.value = false; } }
+      } catch (err) {
+        if (current === revision && canRefresh() && !controller.signal.aborted) loadError.value = '收藏读取失败，请稍后重试';
+      } finally {
+        if (refreshTask === task) { refreshTask = null; refreshController = null; isLoading.value = false; }
+      }
     });
     refreshTask = task;
     return task;
@@ -150,13 +165,13 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
   const syncEnabledState = () => {
     stopPolling();
     if (!isEnabled()) {
-      revision++; refreshTask = null;
+      cancelRefresh();
       allMediaList.value = [];
       loadError.value = '';
       libraryUpdates.value = {};
       return;
     }
-    if (isPaused() || !isDocumentVisible()) return;
+    if (isPaused() || !isDocumentVisible()) { cancelRefresh(); return; }
     void refreshList();
     startPolling();
   };
@@ -164,6 +179,7 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
   const onVisibilityChange = () => {
     if (!isDocumentVisible()) {
       stopPolling();
+      cancelRefresh();
       return;
     }
     if (isEnabled() && !isPaused()) {
@@ -186,10 +202,11 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
 
   onUnmounted(() => {
     mounted = false;
+    cancelRefresh();
+    stopPolling();
     if (typeof window !== 'undefined') {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      stopPolling();
     }
   });
 

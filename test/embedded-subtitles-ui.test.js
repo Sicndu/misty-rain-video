@@ -30,7 +30,7 @@ test('late embedded text becomes a centered real TextTrack, seeks load a new win
  const requests=[];t.mock.method(globalThis,'fetch',async input=>{const time=Number(new URL(String(input),'http://localhost').searchParams.get('time'));requests.push(time);return result(time)});
  const view=mount();try{
  await flush();assert.equal(view.tracks.length,1);const cue=view.tracks[0].cues[0];
- assert.deepEqual([cue.position,cue.align,cue.line,cue.size,cue.positionAlign],[50,'center','auto',90,'center']);assert.match(cue.text,/&lt;b&gt;/);
+ assert.deepEqual([cue.position,cue.align,cue.line,cue.size,cue.positionAlign],['auto','center','auto',100,'auto']);assert.match(cue.text,/&lt;b&gt;/);
  view.video.currentTime=50;view.video.dispatchEvent(new Event('timeupdate'));await flush();assert.deepEqual(requests,[0]);
  view.tracks[0].mode='showing';view.tracks[0].changes.length=0;
  view.video.currentTime=400;view.video.dispatchEvent(new Event('seeked'));await flush();assert.deepEqual(requests,[0,360]);
@@ -41,6 +41,21 @@ test('late embedded text becomes a centered real TextTrack, seeks load a new win
 test('seek while an old window is pending follows the current playhead, not the old request',async t=>{
  let resolve;const requests=[];t.mock.method(globalThis,'fetch',input=>{const time=Number(new URL(String(input),'http://localhost').searchParams.get('time'));requests.push(time);return time===0?new Promise(r=>resolve=r):Promise.resolve(result(time))});
  const view=mount();try{await flush();view.video.currentTime=230;view.video.dispatchEvent(new Event('seeked'));resolve(result(0));await flush();assert.deepEqual(requests,[0,180]);assert.ok(view.tracks[0].cues.some(c=>c.startTime===181));}finally{view.app.unmount()}
+});
+test('prefetching, backward seeks and revisiting evicted windows keep cues current without reopening disabled captions',async t=>{
+ const requests=[];t.mock.method(globalThis,'fetch',async input=>{const time=Number(new URL(String(input),'http://localhost').searchParams.get('time'));requests.push(time);return result(time)});
+ const view=mount();try{
+  await flush();const track=view.tracks[0];track.mode='disabled';track.changes.length=0;
+  view.video.currentTime=78;view.video.dispatchEvent(new Event('timeupdate'));await flush();
+  assert.deepEqual(requests,[0,90]);
+  view.video.currentTime=95;view.video.dispatchEvent(new Event('timeupdate'));await flush();
+  assert.deepEqual(requests,[0,90],'entering a prefetched window does not reread it');
+  view.video.currentTime=410;view.video.dispatchEvent(new Event('seeked'));await flush();
+  assert.deepEqual(track.cues.map(cue=>cue.startTime),[361]);
+  view.video.currentTime=3;view.video.dispatchEvent(new Event('seeked'));await flush();
+  assert.deepEqual(requests,[0,90,360,0]);assert.deepEqual(track.cues.map(cue=>cue.startTime),[1]);
+  assert.equal(track.mode,'disabled');assert.deepEqual(track.changes,[]);
+ }finally{view.app.unmount()}
 });
 test('switching episodes ignores late responses and clears retired tracks',async t=>{
  let resolve;t.mock.method(globalThis,'fetch',()=>new Promise(r=>resolve=r));const view=mount();await flush();view.endpoint.value='';await flush();resolve(result(0));await flush();assert.equal(view.tracks.length,0);view.app.unmount();

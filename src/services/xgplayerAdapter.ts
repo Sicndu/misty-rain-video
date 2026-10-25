@@ -11,6 +11,7 @@ import PC from 'xgplayer/es/plugins/pc';
 import Keyboard from 'xgplayer/es/plugins/keyboard';
 import I18N from 'xgplayer/es/lang/i18n';
 import zh from 'xgplayer/es/lang/zh-cn';
+import { isAppleTouchDevice } from './device';
 
 I18N.use(zh);
 class BusinessTools extends Plugin {
@@ -23,7 +24,7 @@ export function createDirectPlayer(root: HTMLElement, video: HTMLVideoElement, o
   fullscreen: () => void;
   feedback: (message: string) => void;
 }) {
-  const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const mobile = /Android/i.test(navigator.userAgent) || isAppleTouchDevice(navigator);
   const player = new Player({
     el: root, mediaEl: video, width: '100%', height: 'auto', lang: 'zh-cn',
     videoInit: false, autoplay: false, seekedStatus: 'auto', volume: video.volume, defaultPlaybackRate: video.playbackRate,
@@ -46,10 +47,16 @@ export function createDirectPlayer(root: HTMLElement, video: HTMLVideoElement, o
     if (player.video === video && !video.paused && video.readyState >= 2) player.isPlaying = true;
   }).catch(() => options.feedback('播放器加载失败，请重新打开影片'));
   const mobilePlugin = player.plugins.mobile as Mobile | undefined;
+  let locked=false;
+  const gestureDisabled=mobilePlugin?.config.disableGesture;
+  const keyboard=player.plugins.keyboard as Keyboard|undefined;
+  const keyboardDisabled=keyboard?.config.disable;
+  mobilePlugin?.useHooks('videoClick',()=>!locked);
   mobilePlugin?.useHooks('videoDbClick', (_plugin, data: { e: TouchEvent | MouseEvent }) => {
+    if(locked)return false;
     const point = 'changedTouches' in data.e ? data.e.changedTouches[0] : data.e;
     const rect = root.getBoundingClientRect();
-    const position = rect.width && point ? (point.clientX - rect.left) / rect.width : .5;
+    const position = point ? player.rotateDeg === 90 ? (point.clientY-rect.top)/rect.height : (point.clientX-rect.left)/rect.width : .5;
     if (position >= .4 && position <= .6) return true;
     if (Number.isFinite(video.duration) && video.duration > 0) {
       const delta = position < .4 ? -10 : 10;
@@ -76,6 +83,14 @@ export function createDirectPlayer(root: HTMLElement, video: HTMLVideoElement, o
     tools: player.plugins.businesstools.root as HTMLElement,
     canPip: Boolean((player.plugins.pip as Pip).isPIPAvailable()),
     togglePip() { (player.plugins.pip as Pip).switchPIP(new Event('click')); },
+    setRotation(degrees:0|90) { player.rotateDeg=degrees; },
+    setLocked(value:boolean) {
+      locked=value;root.classList.toggle('player-locked',value);
+      if(mobilePlugin)mobilePlugin.config.disableGesture=value||gestureDisabled;
+      if(keyboard)keyboard.config.disable=value||keyboardDisabled;
+      for(const element of root.querySelectorAll<HTMLElement>('xg-trigger,.xgplayer-controls'))element.inert=value;
+      if(value)player.blur();
+    },
     setFullscreen(active: boolean) {
       (player.plugins.fullscreen as Fullscreen).animate(active);
       player.plugins.fullscreen.root?.setAttribute('aria-label', active ? '退出全屏' : '全屏播放');

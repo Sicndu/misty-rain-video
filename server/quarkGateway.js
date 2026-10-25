@@ -1439,16 +1439,18 @@ export class QuarkGateway {
     let currentUrl = this.#assertRemoteUrl(upstreamUrl);
     for (let redirect = 0; redirect < 4; redirect += 1) {
       const parsed = new URL(currentUrl);
+      // The drive API's private thumbnail endpoint needs the web session;
+      // signed CDN images reject it. Re-evaluate the origin after every redirect.
+      const profile = requestProfile === 'thumbnail' && parsed.origin === new URL(API_HOST).origin ? 'web' : requestProfile;
       const headers = {
         'Accept': requestProfile === 'thumbnail' ? 'image/*' : '*/*',
-        // Signed thumbnail CDN URLs reject the playback Referer/profile.
-        ...(requestProfile === 'thumbnail' ? {} : { 'User-Agent': requestProfile === 'tv'
+        ...(profile === 'thumbnail' ? {} : { 'User-Agent': profile === 'tv'
           ? 'Mozilla/5.0 (Linux; U; Android 13; zh-cn; M2004J7AC Build/UKQ1.231108.001) AppleWebKit/533.1 (KHTML, like Gecko) Mobile Safari/533.1'
           : QUARK_DESKTOP_USER_AGENT }),
-        ...(requestProfile === 'web' ? { Referer: 'https://pan.quark.cn/' } : {})
+        ...(profile === 'web' ? { Referer: 'https://pan.quark.cn/' } : {})
       };
       if (rangeHeader) headers.Range = rangeHeader;
-      if (requestProfile === 'web' && /(^|\.)quark\.cn$/i.test(parsed.hostname)) {
+      if (profile === 'web' && /(^|\.)quark\.cn$/i.test(parsed.hostname)) {
         headers.Cookie = requestCookie || this.#requireCookie();
       }
 

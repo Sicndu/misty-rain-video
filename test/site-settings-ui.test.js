@@ -15,8 +15,9 @@ const { createApp, h, nextTick } = await import('vue');
 fs.mkdirSync('.local-runtime/tests', { recursive: true });
 const folder = fs.mkdtempSync('.local-runtime/tests/site-settings-');
 const compile = async entry => {
-  const outfile = path.resolve(folder, path.basename(entry) + '.mjs');
-  await build({ entryPoints: [entry], outfile, bundle: true, format: 'esm', platform: 'browser', external: ['vue'],
+  const outfile = path.resolve(folder, path.basename(entry, '.vue') + '.mjs');
+  // Preserve real module namespaces for Vue's asynchronously loaded components.
+  await build({ entryPoints: [entry], outdir: path.resolve(folder), splitting: true, outExtension: { '.js': '.mjs' }, bundle: true, format: 'esm', platform: 'browser', external: ['vue'],
     define: { 'import.meta.env.BASE_URL': '"/"', 'process.env.NODE_ENV': '"test"' }, logLevel: 'silent',
     plugins: [{ name: 'vue', setup(builder) { builder.onLoad({ filter: /\.vue$/ }, args => {
       const { descriptor } = parse(fs.readFileSync(args.path, 'utf8'));
@@ -36,12 +37,12 @@ const button = name => [...document.querySelectorAll('button')].find(el=>el.text
 test('site settings are absent for ordinary users and open as an admin-only page',async t=>{
  let calls=0;t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({code:0,data:state()});});
  let app=mount('user');await flush();assert.equal(button('站点设置'),undefined);assert.equal(calls,0);app.unmount();
- app=mount('admin');t.after(()=>app.unmount());button('站点设置').click();await flush();assert.equal(document.querySelector('h1').textContent,'站点设置');assert.equal(document.querySelector('[name="site-name"]').value,'烟雨影视');assert.equal(calls,1);
+ app=mount('admin');t.after(()=>app.unmount());button('站点设置').click();await flush();assert.equal(document.querySelector('h1').textContent,'站点设置');assert.equal(document.querySelector('[name="site-name"]').value,'烟雨影视');assert.equal(calls,1);assert.equal(document.querySelector('[name="site-subtitle"]'),null);assert.equal(document.querySelector('[name="site-description"]'),null);
 });
 test('saving applies branding immediately; optimistic conflict preserves the draft instead of overwriting another admin',async t=>{
  let current=state(),fail=false;
  t.mock.method(globalThis,'fetch',async(_url,options={})=>{
-  if(options.method==='PUT'){if(fail)return Response.json({code:'CONFLICT',message:'站点信息已被更新，请重新加载后再保存'},{status:409});const body=JSON.parse(options.body);assert.equal(body.revision,'one');current={...current,...body,revision:'two'};}
+  if(options.method==='PUT'){if(fail)return Response.json({code:'CONFLICT',message:'站点信息已被更新，请重新加载后再保存'},{status:409});const body=JSON.parse(options.body);assert.equal(body.revision,'one');assert.equal('subtitle' in body,false);assert.equal('description' in body,false);current={...current,...body,revision:'two'};}
   return Response.json({code:0,data:current});
  });
  const app=mount('admin');t.after(()=>app.unmount());button('站点设置').click();await flush();

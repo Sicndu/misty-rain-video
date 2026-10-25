@@ -27,8 +27,8 @@ useDialog(dialogRef, () => props.open, () => { if (!props.saving) emit('cancel')
 </template>
 
 <style scoped>
-.title-backdrop { position: fixed; inset: 0; z-index: 1750; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgb(0 0 0 / .45); }
-.title-sheet { width: min(420px, 100%); max-height: calc(100dvh - 24px); overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 24px; border: 1px solid var(--divider); border-radius: 20px; background: var(--surface-1); box-shadow: var(--glass-shadow-lg); }
+.title-backdrop { position: fixed; inset: 0; z-index: 1750; display: flex; align-items: center; justify-content: center; padding: 20px; background:var(--dialog-backdrop,rgb(0 0 0 / .6)); }
+.title-sheet { width: min(420px, 100%); max-height: calc(100dvh - 24px); overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 24px; border: 1px solid var(--divider); border-radius: 20px; background:var(--surface-elevated,var(--surface-1)); box-shadow:0 24px 80px #0005; animation:title-enter .18s ease; }
 header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 16px; }
 h2 { margin: 0; font-size: 1.08rem; font-weight: 700; letter-spacing: -.02em; }
 header button { display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--text-secondary); background: transparent; }
@@ -43,7 +43,9 @@ footer .save-title { color: var(--accent-ink); background: var(--liquid-accent);
 button:disabled { opacity: .5; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 @media (max-width: 640px) {
-  .title-backdrop { align-items: flex-end; padding: 0; }
-  .title-sheet { padding: 20px 20px calc(24px + var(--safe-area-bottom)); border-radius: 28px 28px 0 0; }
+  .title-backdrop { align-items:flex-end; padding:max(8px,var(--safe-area-top)) max(8px,var(--safe-area-right)) max(8px,var(--safe-area-bottom)) max(8px,var(--safe-area-left)); }
+  .title-sheet { padding:20px; border-radius:20px; }
 }
+@keyframes title-enter { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+@media(prefers-reduced-motion:reduce) { .title-sheet { animation:none; } input,footer button { transition:none; } }
 </style>

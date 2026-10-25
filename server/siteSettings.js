@@ -48,7 +48,7 @@ const field = (value, name, max, required = false) => {
 export class SiteSettings {
   constructor(dataDir) {
     this.file = path.resolve(dataDir, 'site-settings.json');
-    this.defaults = { name: String(process.env.APP_DISPLAY_NAME || '烟雨影视').trim().slice(0,32) || '烟雨影视', subtitle: 'MISTY RAIN', description: '移动优先的个人云端影视片库' };
+    this.defaults = { name: String(process.env.APP_DISPLAY_NAME || '烟雨影视').trim().slice(0,32) || '烟雨影视' };
     this.value = { ...this.defaults, icons: null };
     try {
       const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
@@ -56,15 +56,15 @@ export class SiteSettings {
     } catch { /* Use built-in branding if absent or corrupt; never block login. */ }
   }
   validate(input) {
-    const result = { name: field(input.name, '站点名称', 32, true), subtitle: field(input.subtitle, '副标题', 48), description: field(input.description, '简介', 160), icons: null };
+    const result = { name: field(input.name, '站点名称', 32, true), icons: null };
     if (input.icons) result.icons = Object.fromEntries(sizes.map(size => [size, validateSiteIcon(input.icons[size], size)]));
     return result;
   }
   get revision() { return crypto.createHash('sha256').update(JSON.stringify(this.value)).digest('hex').slice(0,24); }
   public() {
-    const { name, subtitle, description, icons } = this.value, revision = this.revision;
+    const { name, icons } = this.value, revision = this.revision;
     const icon = size => `/api/site/icon/${size}.png?v=${revision}`;
-    return { name, subtitle, description, revision, customIcon: Boolean(icons),
+    return { name, revision, customIcon: Boolean(icons),
       iconUrl: icons ? icon(512) : '/brand-mark.png', faviconUrl: icons ? icon(180) : '/apple-touch-icon.png',
       touchIconUrl: icons ? icon(180) : '/apple-touch-icon.png', defaults: { ...this.defaults, iconUrl: '/brand-mark.png' } };
   }
@@ -76,7 +76,8 @@ export class SiteSettings {
     const temporary = `${this.file}.${crypto.randomBytes(6).toString('hex')}.tmp`;
     try {
       // Store one atomic document so a failed icon upload can never leave metadata half saved.
-      const saved = { ...next, icons: next.icons && Object.fromEntries(sizes.map(size => [size, `data:image/png;base64,${next.icons[size]}`])) };
+      // Empty legacy keys keep an older deployed reader usable during rollback.
+      const saved = { ...next, subtitle: '', description: '', icons: next.icons && Object.fromEntries(sizes.map(size => [size, `data:image/png;base64,${next.icons[size]}`])) };
       fs.writeFileSync(temporary, JSON.stringify({ version: 1, settings: saved }), { mode: 0o600 });
       fs.renameSync(temporary, this.file);
     } catch { try { fs.unlinkSync(temporary); } catch {} throw error('保存失败，请稍后重试', 503); }
@@ -89,7 +90,8 @@ export class SiteSettings {
     try { return fs.readFileSync(file); } catch { return null; }
   }
   manifest(template) {
-    const result = { ...template, name: this.value.name, short_name: [...this.value.name].slice(0,12).join(''), description: this.value.description };
+    const result = { ...template, name: this.value.name, short_name: [...this.value.name].slice(0,12).join('') };
+    delete result.description;
     if (this.value.icons) result.icons = [192,512].map(size => ({ src: `api/site/icon/${size}.png?v=${this.revision}`, sizes: `${size}x${size}`, type: 'image/png', purpose: 'any' }));
     return result;
   }
@@ -101,6 +103,6 @@ export class SiteSettings {
       .replace(/(<link rel="apple-touch-icon"[^>]*href=")[^"]*(")/, (_, a, b) => a + url(data.touchIconUrl) + b)
       .replace(/(<img class="app-boot__mark" src=")[^"]*(")/, (_, a, b) => a + url(data.iconUrl) + b)
       .replace(/(<p class="app-boot__title">)[^<]*(<\/p>)/, (_, a, b) => a + escapeHtml(data.name) + b)
-      .replace('</head>', `<meta name="description" content="${escapeHtml(data.description)}" /><script type="application/json" id="site-settings">${safeJson(data)}</script></head>`);
+      .replace('</head>', `<script type="application/json" id="site-settings">${safeJson(data)}</script></head>`);
   }
 }

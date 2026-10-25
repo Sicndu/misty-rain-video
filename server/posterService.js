@@ -117,6 +117,7 @@ export class PosterService {
       this.cache = { version: CACHE_VERSION, entries: {} };
     }
     this.inFlight = new Map();
+    this.posterUpgradeRetries = new Map();
     this.resolveThumbnail = resolveThumbnail;
     this.fetchThumbnail = fetchThumbnail;
     ensureDirectory(this.posterDirectory);
@@ -168,7 +169,7 @@ export class PosterService {
         const candidate = await this.resolveThumbnail(item, user);
         if (!candidate) { this.#rememberMiss(thumbnailKey); return null; }
         const asset = await this.#downloadPoster({ ...candidate, provider: 'video' }, thumbnailKey, true);
-        const entry = { status: 'ready', fileName: asset.fileName, provider: 'video', matchedTitle: item.title, updatedAt: new Date().toISOString() };
+        const entry = { status: 'ready', fileName: asset.fileName, provider: 'video', matchedTitle: item.title, sourceUrl: item.imageUrl, updatedAt: new Date().toISOString() };
         this.cache.entries[thumbnailKey] = entry;
         this.#persistCache();
         return this.#serializePoster(entry);
@@ -200,20 +201,27 @@ export class PosterService {
     return this.#cachedPoster(crypto.createHash('sha256').update(`catalog\0${id}`).digest('hex').slice(0, 24));
   }
 
-  async resolveCatalogPoster(item) {
+  async resolveCatalogPoster(item, { preferSource = false } = {}) {
     if (!/^(douban|bangumi)-\d{1,13}$/.test(item.id) || !isDiscoveryImageUrl(item.imageUrl, item.provider)) throw new Error('INVALID_CATALOG_POSTER');
     const cached = this.catalogPoster(item.id);
-    if (cached) return cached;
     const key = crypto.createHash('sha256').update(`catalog\0${item.id}`).digest('hex').slice(0, 24);
+    if (cached && (!preferSource || this.cache.entries[key]?.sourceUrl === item.imageUrl || (this.posterUpgradeRetries.get(key) || 0) > Date.now())) return cached;
     if (this.inFlight.has(key)) return this.inFlight.get(key);
     const task = (async () => {
       const asset = await this.#downloadPoster({ ...item, referer: item.provider === 'douban' ? 'https://movie.douban.com/' : 'https://bgm.tv/',
         validateUrl: url => isDiscoveryImageUrl(url, item.provider) }, key);
       const entry = { status: 'ready', fileName: asset.fileName, provider: item.provider, providerId: item.id,
-        matchedTitle: item.title, updatedAt: new Date().toISOString() };
+        matchedTitle: item.title, sourceUrl: item.imageUrl, updatedAt: new Date().toISOString() };
       this.cache.entries[key] = entry; this.#persistCache();
       return this.#serializePoster(entry);
-    })().finally(() => this.inFlight.delete(key));
+    })().catch(error => {
+      if (!cached) throw error;
+      // An unavailable larger image must never remove an existing usable cover.
+      for (const [id, until] of this.posterUpgradeRetries) if (until <= Date.now()) this.posterUpgradeRetries.delete(id);
+      if (this.posterUpgradeRetries.size >= 1000) this.posterUpgradeRetries.delete(this.posterUpgradeRetries.keys().next().value);
+      this.posterUpgradeRetries.set(key, Date.now() + 60_000);
+      return cached;
+    }).finally(() => this.inFlight.delete(key));
     this.inFlight.set(key, task);
     return task;
   }
